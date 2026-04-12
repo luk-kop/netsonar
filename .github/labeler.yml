@@ -1,0 +1,47 @@
+CI:
+  - changed-files:
+      - any-glob-to-any-file:
+          - .github/workflows/**
+
+Documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/*.md'
+          - docs/**
+
+Go:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/*.go'
+          - go.mod
+          - go.sum
+
+Terraform:
+  - changed-files:
+      - any-glob-to-any-file:
+          - terraform/**
+
+Docker:
+  - changed-files:
+      - any-glob-to-any-file:
+          - Dockerfile
+          - lab/Dockerfile.*
+          - lab/docker-compose.yml
+
+Lambda Router:
+  - changed-files:
+      - any-glob-to-any-file:
+          - lambda-router/**
+
+Test:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/*_test.go'
+          - cmd/mgmt-mock/**
+          - cmd/alb-mock/**
+
+Lab:
+  - changed-files:
+      - any-glob-to-any-file:
+          - lab/**
+          - scripts/**

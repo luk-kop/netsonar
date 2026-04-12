@@ -1,0 +1,39 @@
+[Unit]
+Description=NetSonar - Prometheus network monitoring exporter
+Documentation=https://github.com/luk-kop/netsonar
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=netsonar
+Group=netsonar
+
+ExecStart=/usr/local/bin/netsonar --config /etc/netsonar/config.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+
+Restart=on-failure
+RestartSec=5s
+
+# Grant CAP_NET_RAW for ICMP and MTU probes.
+AmbientCapabilities=CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_RAW
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths=/etc/netsonar
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+MemoryDenyWriteExecute=true
+LockPersonality=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
