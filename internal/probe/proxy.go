@@ -129,6 +129,7 @@ func (p *ProxyProber) Probe(ctx context.Context, target config.TargetConfig) Pro
 
 	result.Duration = time.Since(start)
 	phases["proxy_connect"] = time.Since(connectStart)
+	result.Phases = phases
 
 	if resp.StatusCode != http.StatusOK {
 		result.Error = fmt.Sprintf("proxy CONNECT returned status %d", resp.StatusCode)
@@ -136,7 +137,6 @@ func (p *ProxyProber) Probe(ctx context.Context, target config.TargetConfig) Pro
 	}
 
 	result.Success = true
-	result.Phases = phases
 
 	return result
 }

@@ -2264,7 +2264,7 @@
             "showPoints": "auto",
             "spanNulls": false
           },
-          "unit": "decbytes",
+          "unit": "none",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -3812,6 +3812,250 @@
           "expr": "probe_duration_seconds{job=~\"$job\", probe_type=\"proxy\"}",
           "legendFormat": "{{target_name}}",
           "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true,
+            "inspect": false
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "1": {
+                        "color": "green",
+                        "text": "OK"
+                      },
+                      "0": {
+                        "color": "red",
+                        "text": "FAIL"
+                      }
+                    },
+                    "type": "value"
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "green",
+                      "value": 1
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Duration (s)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 3
+              },
+              {
+                "id": "custom.width",
+                "value": 120
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Service"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 150
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Target"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 300
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 146
+      },
+      "id": 89,
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": false,
+            "displayName": "Status"
+          }
+        ],
+        "footer": {
+          "show": false
+        }
+      },
+      "title": "Proxy CONNECT Status per Target",
+      "type": "table",
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "target_name",
+            "mode": "outer"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Time 1": true,
+              "Time 2": true,
+              "__name__": true,
+              "__name__ 1": true,
+              "__name__ 2": true,
+              "job": true,
+              "job 1": true,
+              "job 2": true,
+              "instance": true,
+              "instance 1": true,
+              "instance 2": true,
+              "url": true,
+              "url 1": true,
+              "url 2": true,
+              "host": true,
+              "host 1": true,
+              "host 2": true,
+              "monitor": true,
+              "monitor 1": true,
+              "monitor 2": true,
+              "port": true,
+              "port 1": true,
+              "port 2": true,
+              "visibility": true,
+              "visibility 1": true,
+              "visibility 2": true,
+              "provider": true,
+              "provider 1": true,
+              "provider 2": true,
+              "probe_type": true,
+              "probe_type 1": true,
+              "probe_type 2": true,
+              "proxied": true,
+              "proxied 1": true,
+              "proxied 2": true,
+              "criticality 2": true,
+              "target_partition 2": true,
+              "target_region 2": true,
+              "target_account 2": true,
+              "scope 2": true,
+              "service 2": true,
+              "target 2": true,
+              "target_name 1": true,
+              "target_name 2": true
+            },
+            "indexByName": {
+              "Value #A": 0,
+              "target_name": 1,
+              "service 1": 2,
+              "target 1": 3,
+              "scope 1": 4,
+              "target_region 1": 5,
+              "Value #B": 6
+            },
+            "renameByName": {
+              "target_name": "Name",
+              "service 1": "Service",
+              "target 1": "Target",
+              "scope 1": "Scope",
+              "target_region 1": "Region",
+              "criticality 1": "Criticality",
+              "target_partition 1": "Partition",
+              "target_account 1": "Account",
+              "Value #A": "Status",
+              "Value #B": "Duration (s)"
+            }
+          }
+        }
+      ],
+      "targets": [
+        {
+          "expr": "probe_success{job=~\"$job\", probe_type=\"proxy\"}",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "probe_duration_seconds{job=~\"$job\", probe_type=\"proxy\"}",
+          "legendFormat": "",
+          "refId": "B",
+          "instant": true,
+          "format": "table"
         }
       ]
     },

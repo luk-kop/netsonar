@@ -85,13 +85,15 @@ This is the recommended approach for testing proxy connectivity because:
 
 This probe type exists for specific use cases where CONNECT tunnel capability itself needs to be verified, not general proxy connectivity.
 
-Successful proxy probes expose their own phase timings:
+Proxy probes expose their own phase timings regardless of whether the CONNECT succeeded or failed. This is useful for diagnosing where time is spent when a proxy rejects the tunnel:
 
 | Phase | What It Measures |
 |---|---|
 | `proxy_dial` | TCP dial to the proxy |
 | `proxy_tls` | TLS handshake with the proxy, only for `https://` proxy URLs |
 | `proxy_connect` | CONNECT request write and proxy response read |
+
+When the proxy rejects the CONNECT (e.g. 403), `proxy_dial` and `proxy_connect` are still recorded. Only phases that were not reached (e.g. `proxy_tls` when the dial itself failed) are absent.
 
 ### When to Use Which
 
