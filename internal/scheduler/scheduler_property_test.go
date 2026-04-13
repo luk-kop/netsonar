@@ -256,7 +256,7 @@ func TestPropertySchedulerGoroutineCountMatchesTargetCount(t *testing.T) {
 
 	properties.Property("scheduler goroutine count matches target count after Start", prop.ForAll(
 		func(targets []config.TargetConfig) bool {
-			me := metrics.NewMetricsExporter([]string{"service", "scope", "provider", "target_region", "target_partition", "visibility", "port", "criticality"})
+			me := metrics.NewMetricsExporter([]string{"service", "scope", "provider", "target_region", "target_partition", "visibility", "port", "impact"})
 
 			// noopProber blocks until context is cancelled, simulating a
 			// long-running probe so goroutines stay alive for counting.
@@ -347,7 +347,7 @@ func TestPropertySchedulerStopLeavesZeroGoroutines(t *testing.T) {
 
 	properties.Property("scheduler stop leaves zero goroutines", prop.ForAll(
 		func(targets []config.TargetConfig) bool {
-			me := metrics.NewMetricsExporter([]string{"service", "scope", "provider", "target_region", "target_partition", "visibility", "port", "criticality"})
+			me := metrics.NewMetricsExporter([]string{"service", "scope", "provider", "target_region", "target_partition", "visibility", "port", "impact"})
 
 			// blockingProber blocks until context is cancelled so goroutines
 			// stay alive until Stop() cancels them.

@@ -16,10 +16,21 @@ agent:
   # only use keys from this list. When absent or empty, tag keys are collected
   # dynamically from all targets (max 30 unique keys).
   # Changing this list requires an agent restart (SIGHUP is not sufficient).
+  #
+  # These keys map to Prometheus labels and Grafana dashboard columns:
+  #   service          → Service
+  #   scope            → Scope          (same-region, cross-region, aws-regional)
+  #   impact           → Impact         (critical, high, medium, low)
+  #   target_region    → Region
+  #   target_partition → Partition
+  #   target_account   → Account
   allowed_tag_keys:
     - service
     - scope
-    - criticality
+    - impact
+    - target_region
+    - target_partition
+    - target_account
 
 # ---------------------------------------------------------------------------
 # Targets
@@ -32,9 +43,12 @@ targets:
     probe_type: tcp
     timeout: 3s
     tags:
-      scope: same-region
       service: api-pub
-      criticality: critical
+      scope: same-region
+      impact: critical
+      target_region: eu-central-1
+      target_partition: global
+      target_account: ep-devops-eu1
 
   # TCP — cross-region example
   - name: api-int-cross
@@ -42,9 +56,12 @@ targets:
     probe_type: tcp
     timeout: 3s
     tags:
-      scope: cross-region
       service: api-int
-      criticality: critical
+      scope: cross-region
+      impact: critical
+      target_region: us-east-1
+      target_partition: global
+      target_account: ep-devops-us1
 
   # HTTP — reachability + optional status code check
   # (AWS endpoints return 403 without SigV4 — leave expected_status_codes empty
@@ -54,12 +71,15 @@ targets:
     probe_type: http
     timeout: 5s
     probe_opts:
-      method: GET  # GET, HEAD, POST
+      method: GET
       follow_redirects: false
       expected_status_codes: []
     tags:
-      scope: aws-regional
       service: vpce
+      scope: aws-regional
+      target_region: eu-central-1
+      target_partition: global
+      target_account: ep-devops-eu1
 
   # HTTP — via proxy
   - name: ssm-http-via-proxy
@@ -67,14 +87,17 @@ targets:
     probe_type: http
     timeout: 5s
     probe_opts:
-      method: GET  # GET, HEAD, POST
+      method: GET
       follow_redirects: false
       expected_status_codes: []
       # For authenticated proxies, use: http://user:pass@proxy:port
       proxy_url: "http://infra-proxy.example.internal:8888"
     tags:
-      scope: aws-regional
       service: vpce
+      scope: aws-regional
+      target_region: eu-central-1
+      target_partition: global
+      target_account: ep-devops-eu1
 
   # HTTP — response body validation
   - name: api-pub-health
@@ -82,12 +105,15 @@ targets:
     probe_type: http_body
     timeout: 5s
     probe_opts:
-      method: GET  # GET, HEAD, POST
+      method: GET
       body_match_string: "ok"
     tags:
-      scope: same-region
       service: api-pub
-      criticality: critical
+      scope: same-region
+      impact: critical
+      target_region: eu-central-1
+      target_partition: global
+      target_account: ep-devops-eu1
 
   # ICMP — latency and packet loss (IPv4-only)
   - name: api-pub-icmp
@@ -98,8 +124,11 @@ targets:
       ping_count: 5
       ping_interval: 1.0
     tags:
-      scope: same-region
       service: api-pub
+      scope: same-region
+      target_region: eu-central-1
+      target_partition: global
+      target_account: ep-devops-eu1
 
   # MTU / PMTUD detection (IPv4-only)
   # Path MTU = largest successful payload + 28 (20 IP + 8 ICMP headers)
@@ -116,8 +145,11 @@ targets:
       mtu_retries: 3
       mtu_per_attempt_timeout: 2s
     tags:
-      scope: cross-region
       service: api-gw-int
+      scope: cross-region
+      target_region: cn-north-1
+      target_partition: china
+      target_account: ep-devops-cn1
 
   # DNS resolution
   - name: rds-dns
@@ -128,9 +160,12 @@ targets:
       dns_query_name: "db-postgres.abcdefghijklmn.eu-central-1.rds.amazonaws.com"
       dns_query_type: A
     tags:
-      scope: same-region
       service: rds-postgres
-      criticality: critical
+      scope: same-region
+      impact: critical
+      target_region: eu-central-1
+      target_partition: global
+      target_account: ep-devops-eu1
 
   # TLS certificate expiry
   - name: api-pub-tls
@@ -139,9 +174,12 @@ targets:
     interval: 300s
     timeout: 5s
     tags:
-      scope: same-region
       service: api-pub
-      criticality: critical
+      scope: same-region
+      impact: critical
+      target_region: eu-central-1
+      target_partition: global
+      target_account: ep-devops-eu1
 
   # Proxy connectivity
   - name: fwd-proxy
@@ -152,6 +190,9 @@ targets:
       # For authenticated proxies, use: http://user:pass@proxy:port
       proxy_url: "http://fwd-proxy.example.internal:8888"
     tags:
-      scope: same-region
       service: proxy
-      criticality: high
+      scope: same-region
+      impact: high
+      target_region: eu-central-1
+      target_partition: global
+      target_account: ep-devops-eu1

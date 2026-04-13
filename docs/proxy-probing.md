@@ -180,7 +180,7 @@ This separation prevents proxied probes (with inherently higher latency due to t
   tags:
     scope: same-region
     service: egress-proxy
-    criticality: high
+    impact: high
 ```
 
 Success means: proxy accepted the connection, established a CONNECT tunnel to the target, TLS handshake completed, and the target returned HTTP 200.
@@ -200,7 +200,7 @@ Success means: proxy accepted the connection, established a CONNECT tunnel to th
   tags:
     scope: same-region
     service: egress-proxy
-    criticality: high
+    impact: high
 ```
 
 If the proxy blocks `example.com`, the probe fails (`probe_success=0`) because the proxy rejects the CONNECT or returns an error. This is the expected behaviour for a negative test.
@@ -217,7 +217,7 @@ If the proxy blocks `example.com`, the probe fails (`probe_success=0`) because t
   tags:
     scope: same-region
     service: egress-proxy
-    criticality: high
+    impact: high
 ```
 
 This sends only an HTTP CONNECT request. Success means the proxy allowed the tunnel. No TLS handshake or HTTP request is performed through the tunnel.

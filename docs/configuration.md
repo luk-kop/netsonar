@@ -2,6 +2,23 @@
 
 See `config.example.yaml` for a complete working example.
 
+## Example Config and Dashboard Sync
+
+The `config.example.yaml` and `grafana/dashboards/netsonar.json` are designed to work together out of the box. The example config uses a specific set of tag keys, and the dashboard expects those same keys as Prometheus labels to populate its columns:
+
+| Tag Key in Config    | Dashboard Column | Description                                      |
+|----------------------|------------------|--------------------------------------------------|
+| `service`            | Service          | Logical service name (e.g. `api-pub`, `rds`)     |
+| `scope`              | Scope            | Network scope (`same-region`, `cross-region`, `aws-regional`) |
+| `impact`             | Impact           | Business impact level (`critical`, `high`, `medium`, `low`) |
+| `target_region`      | Region           | Target's cloud region (e.g. `eu-central-1`)      |
+| `target_partition`   | Partition        | Network partition (e.g. `global`, `china`)        |
+| `target_account`     | Account          | Account or environment identifier                |
+
+If you add, remove, or rename tag keys in your config, update the dashboard transformations accordingly — otherwise columns will appear empty or extra labels will be hidden.
+
+The dashboard also references the `impact` label directly in the "Critical Failures" stat panel (`impact="critical"`). If you use different values for impact levels, update that PromQL query to match.
+
 ## Agent Settings
 
 ```yaml
@@ -16,12 +33,10 @@ agent:
   allowed_tag_keys:             # Optional: restrict tag keys to this allowlist
     - service
     - scope
-    - provider
+    - impact
     - target_region
     - target_partition
-    - visibility
-    - port
-    - criticality
+    - target_account
 ```
 
 When `allowed_tag_keys` contains entries, targets may only use tag keys from this list. When absent or empty, the agent collects tag keys dynamically from all targets (limited to 30 unique keys).
@@ -36,14 +51,12 @@ targets:
     interval: 30s                                                       # Override agent default_interval
     timeout: 3s                                                         # Override agent default_timeout (must be ≤ interval)
     tags:                                                               # Prometheus labels (dynamic, max 20)
-      scope: same-region
       service: api-gw-pub
-      provider: aws
+      scope: same-region
+      impact: critical
       target_region: eu-central-1
       target_partition: global
-      visibility: public
-      port: "443"
-      criticality: critical
+      target_account: ep-devops-eu1
     probe_opts:                                                         # Probe-type-specific options
       # (see Probe Types section)
 ```

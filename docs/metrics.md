@@ -28,12 +28,12 @@ When `allowed_tag_keys` is absent or empty, the agent falls back to dynamic mode
 ```yaml
 targets:
   - name: api-gw
-    tags: { service: api-gw, scope: same-region, criticality: critical }
+    tags: { service: api-gw, scope: same-region, impact: critical }
   - name: bastion-cn
     tags: { service: bastion, scope: cross-region }
 ```
 
-The agent registers three dynamic labels: `service`, `scope`, `criticality`. The `bastion-cn` target gets `criticality=""` because it does not define that key.
+The agent registers three dynamic labels: `service`, `scope`, `impact`. The `bastion-cn` target gets `impact=""` because it does not define that key.
 
 ## Probe Metrics
 

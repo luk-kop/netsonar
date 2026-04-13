@@ -66,7 +66,7 @@ func genTargetWithTags() gopter.Gen {
 		genTagValue(),      // target_partition
 		genTagValue(),      // visibility
 		genTagValue(),      // port
-		genTagValue(),      // criticality
+		genTagValue(),      // impact
 	).Map(func(vals []interface{}) targetWithTags {
 		address := vals[0].(string) + ".example.com:443"
 		pt := vals[1].(config.ProbeType)
@@ -78,7 +78,7 @@ func genTargetWithTags() gopter.Gen {
 
 		tagKeyNames := []string{
 			"service", "scope", "provider", "target_region",
-			"target_partition", "visibility", "port", "criticality",
+			"target_partition", "visibility", "port", "impact",
 		}
 
 		// Build the Tags map, only including non-empty values (to simulate

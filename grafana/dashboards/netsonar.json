@@ -293,7 +293,7 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "count(probe_success{job=~\"$job\", criticality=\"critical\"} == 0) OR on() vector(0)",
+          "expr": "count(probe_success{job=~\"$job\", impact=\"critical\"} == 0) OR on() vector(0)",
           "legendFormat": "Critical Failures",
           "refId": "A",
           "instant": true
@@ -534,7 +534,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Criticality"
+              "options": "Impact"
             },
             "properties": [
               {
@@ -709,7 +709,7 @@
               "target_partition 2": true,
               "target_account 2": true,
               "scope 2": true,
-              "criticality 2": true,
+              "impact 2": true,
               "service 2": true,
               "provider": true,
               "provider 1": true,
@@ -739,8 +739,8 @@
               "target_region 1": 8,
               "target_partition": 9,
               "target_partition 1": 9,
-              "criticality": 10,
-              "criticality 1": 10,
+              "impact": 10,
+              "impact 1": 10,
               "target_account": 11,
               "target_account 1": 11,
               "Value #B": 12,
@@ -757,8 +757,8 @@
               "target_region 1": "Region",
               "target_partition": "Partition",
               "target_partition 1": "Partition",
-              "criticality": "Criticality",
-              "criticality 1": "Criticality",
+              "impact": "Impact",
+              "impact 1": "Impact",
               "probe_type": "Probe",
               "probe_type 1": "Probe",
               "proxied": "Proxied",
@@ -2183,9 +2183,9 @@
               "provider": true,
               "provider 1": true,
               "provider 2": true,
-              "criticality": true,
-              "criticality 1": true,
-              "criticality 2": true,
+              "impact": true,
+              "impact 1": true,
+              "impact 2": true,
               "target_partition": true,
               "target_partition 1": true,
               "target_partition 2": true,
@@ -2752,7 +2752,7 @@
               "target_name": "Name",
               "target": "Target",
               "service": "Service",
-              "criticality": "Criticality",
+              "impact": "Impact",
               "target_region": "Region",
               "Value": "Days Until Expiry"
             }
@@ -4021,7 +4021,7 @@
               "proxied": true,
               "proxied 1": true,
               "proxied 2": true,
-              "criticality 2": true,
+              "impact 2": true,
               "target_partition 2": true,
               "target_region 2": true,
               "target_account 2": true,
@@ -4046,7 +4046,7 @@
               "target 1": "Target",
               "scope 1": "Scope",
               "target_region 1": "Region",
-              "criticality 1": "Criticality",
+              "impact 1": "Impact",
               "target_partition 1": "Partition",
               "target_account 1": "Account",
               "Value #A": "Status",

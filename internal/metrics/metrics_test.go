@@ -18,7 +18,7 @@ import (
 // testTagKeys is the standard set of tag keys used across most tests.
 // It mirrors the typical production configuration.
 var testTagKeys = []string{
-	"criticality", "port", "provider", "scope", "service",
+	"impact", "port", "provider", "scope", "service",
 	"target_partition", "target_region", "visibility",
 }
 
@@ -281,7 +281,7 @@ func TestRecord_CommonLabelsApplied(t *testing.T) {
 		"target_partition": "global",
 		"visibility":       "public",
 		"port":             "443",
-		"criticality":      "critical",
+		"impact":      "critical",
 	}
 	target := makeTarget("label-test", "10.0.0.1:443", config.ProbeTypeTCP, tags)
 	m.Record(target, probe.ProbeResult{Success: true, Duration: 10 * time.Millisecond})
@@ -333,7 +333,7 @@ func TestRecord_MissingTagsDefaultToEmpty(t *testing.T) {
 	}
 
 	// Other tag-derived labels should be empty strings.
-	for _, key := range []string{"scope", "provider", "target_region", "target_partition", "visibility", "port", "criticality"} {
+	for _, key := range []string{"scope", "provider", "target_region", "target_partition", "visibility", "port", "impact"} {
 		if got := labelValue(metric, key); got != "" {
 			t.Errorf("label %q should be empty for missing tag, got %q", key, got)
 		}
@@ -914,7 +914,7 @@ func TestBuildLabels_AllTagsPresent(t *testing.T) {
 		"target_partition": "global",
 		"visibility":       "internal",
 		"port":             "8080",
-		"criticality":      "high",
+		"impact":      "high",
 	}
 	target := makeTarget("bl-test", "host:8080", config.ProbeTypeHTTP, tags)
 	labels := m.buildLabels(target)

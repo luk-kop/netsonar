@@ -72,7 +72,7 @@ func TestIntegration_MetricsEndpoint(t *testing.T) {
 					"target_partition": "test",
 					"visibility":       "internal",
 					"port":             tcpPort,
-					"criticality":      "low",
+					"impact":      "low",
 				},
 			},
 		},
@@ -190,7 +190,7 @@ func TestIntegration_MetricsEndpoint(t *testing.T) {
 		"target_partition",
 		"visibility",
 		"port",
-		"criticality",
+		"impact",
 	}
 
 	probeMetrics := []string{"probe_success", "probe_duration_seconds"}
@@ -332,7 +332,7 @@ func TestIntegration_ConfigReloadSIGHUP(t *testing.T) {
 			"target_partition": "test",
 			"visibility":       "internal",
 			"port":             portA,
-			"criticality":      "low",
+			"impact":      "low",
 		},
 	}
 
@@ -350,7 +350,7 @@ func TestIntegration_ConfigReloadSIGHUP(t *testing.T) {
 			"target_partition": "test",
 			"visibility":       "internal",
 			"port":             portB,
-			"criticality":      "high",
+			"impact":      "high",
 		},
 	}
 
@@ -582,7 +582,7 @@ func TestIntegration_GracefulShutdown(t *testing.T) {
 					"target_partition": "test",
 					"visibility":       "internal",
 					"port":             tcpPort,
-					"criticality":      "low",
+					"impact":      "low",
 				},
 			},
 			{
@@ -599,7 +599,7 @@ func TestIntegration_GracefulShutdown(t *testing.T) {
 					"target_partition": "test",
 					"visibility":       "internal",
 					"port":             tcpPort,
-					"criticality":      "low",
+					"impact":      "low",
 				},
 			},
 		},
@@ -776,7 +776,7 @@ func TestIntegration_ConfigReloadLogLevel(t *testing.T) {
 						"target_partition": "test",
 						"visibility":       "internal",
 						"port":             port,
-						"criticality":      "low",
+						"impact":      "low",
 					},
 				},
 			},
