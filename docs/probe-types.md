@@ -152,7 +152,7 @@ For a detailed explanation of PMTUD, ICMP Destination Unreachable codes, PMTUD b
 
 ## DNS
 
-DNS resolution with optional expected result validation.
+DNS resolution with optional expected result validation. Measures resolution time and optionally verifies that the returned records match a configured set of expected values.
 
 ```yaml
 - name: "rds-dns"
@@ -162,8 +162,71 @@ DNS resolution with optional expected result validation.
   probe_opts:
     dns_query_name: "rds-endpoint.eu-central-1.rds.amazonaws.com"
     dns_query_type: A               # A, AAAA, or CNAME
-    dns_server: ""                  # Custom resolver (optional)
+    dns_server: ""                  # Custom resolver (optional, default: system resolver)
     dns_expected: []                # Expected IPs or CNAMEs (optional)
+```
+
+If `dns_query_name` is omitted, the target's `address` is used as the query name.
+
+### dns_expected (Result Match)
+
+When `dns_expected` is set, the prober compares the actual DNS response against the expected values. The comparison is order-independent, case-insensitive, and strips trailing dots from CNAMEs.
+
+| Configuration | Behaviour |
+|---|---|
+| `dns_expected: []` (or omitted) | Probe succeeds if DNS returns at least one record. No result validation. `probe_dns_result_match` metric is not emitted. |
+| `dns_expected: ["10.0.1.5"]` | Probe succeeds only if DNS returns exactly `10.0.1.5` and nothing else. |
+| `dns_expected: ["10.0.1.5", "10.0.1.6"]` | Probe succeeds only if DNS returns exactly these two IPs (in any order) and nothing else. |
+
+When validation is active, two metrics work together:
+
+- `probe_success` — 0 if the result doesn't match (drives alerting)
+- `probe_dns_result_match` — 1 if match, 0 if mismatch (shown on the "DNS Result Match" dashboard panel)
+
+On mismatch, the agent logs the actual vs expected values: `dns expected result mismatch: got [10.0.1.7], want [10.0.1.5]`.
+
+### Use Cases
+
+- **Detect DNS hijacking or poisoning** — set `dns_expected` to the known-good IPs and alert when they change unexpectedly.
+- **Verify failover** — monitor that a DNS record switches to the DR IP after failover.
+- **Validate CNAME chains** — ensure a CNAME points to the expected target (e.g. after a migration).
+- **Monitor round-robin changes** — detect when IPs are added or removed from a round-robin A record.
+
+### Examples
+
+```yaml
+# Simple resolution monitoring (no expected result validation)
+- name: "api-dns"
+  address: "api.example.com"
+  probe_type: dns
+  timeout: 3s
+
+# Validate that the RDS endpoint resolves to the expected IP
+- name: "rds-dns-match"
+  address: "rds-endpoint.eu-central-1.rds.amazonaws.com"
+  probe_type: dns
+  timeout: 5s
+  probe_opts:
+    dns_query_type: A
+    dns_expected: ["10.0.1.5"]
+
+# Use a specific DNS server instead of the system resolver
+- name: "api-dns-custom-resolver"
+  address: "api.example.com"
+  probe_type: dns
+  timeout: 3s
+  probe_opts:
+    dns_server: "8.8.8.8:53"
+    dns_query_type: A
+
+# Validate CNAME target
+- name: "cdn-cname"
+  address: "cdn.example.com"
+  probe_type: dns
+  timeout: 3s
+  probe_opts:
+    dns_query_type: CNAME
+    dns_expected: ["d1234.cloudfront.net"]
 ```
 
 ## TLS Certificate Expiry
@@ -211,7 +274,7 @@ Establishes a raw HTTP CONNECT tunnel through a configured proxy and measures tu
 
 If the proxy URL contains credentials, the CONNECT request includes `Proxy-Authorization: Basic ...`.
 
-Successful proxy probes expose phase timings:
+Proxy probes expose phase timings regardless of whether the CONNECT succeeded or failed, which helps diagnose where time is spent when a proxy rejects the tunnel:
 
 | Phase | What It Measures |
 |---|---|
