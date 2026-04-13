@@ -92,14 +92,18 @@ func (p *ProxyProber) Probe(ctx context.Context, target config.TargetConfig) Pro
 		proxyConn = tlsConn
 	}
 
-	// Send HTTP CONNECT request through the proxy.
-	connectReq, err := http.NewRequestWithContext(ctx, http.MethodConnect, tunnelDest, nil)
-	if err != nil {
-		result.Duration = time.Since(start)
-		result.Error = fmt.Sprintf("creating CONNECT request: %s", err.Error())
-		return result
+	// Send HTTP CONNECT request through the proxy. For CONNECT the
+	// request-target must be "host:port" (RFC 7231 §4.3.6). Go's
+	// http.NewRequest parses a bare "host:port" as scheme:opaque, which
+	// produces a malformed request line ("CONNECT 443 HTTP/1.1").
+	// Build the URL explicitly so req.Write emits the correct form.
+	connectReq := &http.Request{
+		Method: http.MethodConnect,
+		URL:    &url.URL{Opaque: tunnelDest},
+		Host:   tunnelDest,
+		Header: make(http.Header),
 	}
-	connectReq.Host = tunnelDest
+	connectReq = connectReq.WithContext(ctx)
 	setProxyAuthorization(connectReq, proxyURL)
 
 	connectStart := time.Now()

@@ -135,6 +135,10 @@ func (p *HTTPBodyProber) Probe(ctx context.Context, target config.TargetConfig) 
 	result.BodyMatch = matchBody(string(body), target.ProbeOpts, p.compiledBodyMatchRegex)
 	result.Success = result.BodyMatch
 
+	if !result.Success {
+		result.Error = fmt.Sprintf("body match failed (status %d, body length %d)", resp.StatusCode, len(body))
+	}
+
 	return result
 }
 

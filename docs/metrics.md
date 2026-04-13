@@ -101,3 +101,37 @@ The `probe_phase_duration_seconds` metric uses a `phase` label with these values
 | `proxy_dial`    | Proxy      | TCP dial to the proxy                |
 | `proxy_tls`     | Proxy      | TLS handshake with the proxy         |
 | `proxy_connect` | Proxy      | CONNECT request and response         |
+
+## Dashboard Interpretation
+
+### MTU Diagnostic Events (rate)
+
+The MTU diagnostic counters (`probe_mtu_frag_needed_total`, `probe_mtu_timeouts_total`, `probe_mtu_retries_total`, `probe_mtu_local_errors_total`) are incremented in bursts during each MTU probe cycle. A single cycle tests multiple packet sizes from largest to smallest, generating several events in quick succession, then goes silent until the next interval.
+
+On the dashboard this produces a characteristic spike pattern: the `rate()` jumps (e.g. to ~0.3 ops/s) for roughly one scrape interval, then drops back to zero. The spikes appear simultaneously across all MTU targets because the scheduler starts them together and they share the same interval.
+
+This is normal, healthy behavior. What to watch for:
+
+- **Sustained non-zero rate** — probes are overlapping or continuously retrying, check if the interval is too short relative to the probe duration.
+- **Increasing `Local Errors` rate** — kernel-level send failures (EMSGSIZE, permission errors), usually indicates a host configuration issue.
+- **`Frag Needed` without a successful MTU result** — the path is signaling fragmentation but no size passes, possibly a black-hole or misconfigured middlebox.
+
+### Probes Exceeding Interval (skipped cycles)
+
+This panel tracks how often a probe was still running when the next scheduled tick fired. The scheduler enforces at-most-one-in-flight per target, so it drops the stale tick and increments `probe_skipped_overlap_total`.
+
+An empty panel means all probes complete within their configured interval — this is the expected state. If values appear, consider:
+
+- Increasing the target's `interval` so the probe has more time between cycles.
+- Reducing the target's `timeout` to cap how long a slow probe can block.
+- Checking network conditions — high latency or packet loss can push probe durations beyond the interval.
+
+### ICMP Panels
+
+The ICMP section shows packet loss ratio, average RTT, and hop count (TTL). All three metrics are only meaningful when the ICMP probe successfully receives at least one echo reply. When all pings time out, packet loss is 1.0 and RTT/hop count remain at zero.
+
+Common causes of 100% packet loss with a working `ping` command:
+
+- **Unprivileged ICMP not enabled** — the kernel requires `net.ipv4.ping_group_range` to include the process GID. Without it, the socket open fails immediately with "permission denied".
+- **Firewall or security group rules** — ICMP may be allowed for the user's shell but blocked for the agent's network namespace or source port range.
+- **Cross-region/cross-partition paths** — WireGuard, MPLS, or cloud interconnects sometimes drop ICMP while passing TCP/UDP.

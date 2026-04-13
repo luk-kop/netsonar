@@ -207,8 +207,18 @@ func (p *ICMPProber) sendEcho(
 			continue
 		}
 
-		// Verify the peer matches our destination.
-		if peer.String() != dst.String() {
+		// Verify the peer matches our destination. With udp4 sockets,
+		// ReadFrom returns a *net.UDPAddr ("ip:port") while dst is a
+		// *net.IPAddr ("ip"). Compare only the IP portion so the check
+		// works regardless of the net.Addr concrete type.
+		var peerIP net.IP
+		switch a := peer.(type) {
+		case *net.UDPAddr:
+			peerIP = a.IP
+		case *net.IPAddr:
+			peerIP = a.IP
+		}
+		if peerIP == nil || !peerIP.Equal(dst.IP) {
 			continue
 		}
 
