@@ -1,0 +1,141 @@
+agent:
+  listen_addr: ":9275"
+  metrics_path: "/metrics"
+  default_interval: 2s
+  default_timeout: 1s
+  log_level: info
+  allowed_tag_keys:
+    - service
+    - suite
+
+targets:
+  - name: tcp-open
+    address: "fake-targets:9000"
+    probe_type: tcp
+    tags:
+      service: fake-tcp
+      suite: e2e
+
+  - name: tcp-closed
+    address: "fake-targets:9001"
+    probe_type: tcp
+    tags:
+      service: fake-tcp
+      suite: e2e
+
+  - name: http-ok
+    address: "http://fake-targets:8080/ok"
+    probe_type: http
+    probe_opts:
+      method: GET
+      expected_status_codes: [200]
+    tags:
+      service: fake-http
+      suite: e2e
+
+  - name: http-500-expected-200
+    address: "http://fake-targets:8080/error"
+    probe_type: http
+    probe_opts:
+      method: GET
+      expected_status_codes: [200]
+    tags:
+      service: fake-http
+      suite: e2e
+
+  - name: http-500-any-status
+    address: "http://fake-targets:8080/error"
+    probe_type: http
+    probe_opts:
+      method: GET
+      expected_status_codes: []
+    tags:
+      service: fake-http
+      suite: e2e
+
+  - name: http-body-ok
+    address: "http://fake-targets:8080/ok"
+    probe_type: http_body
+    probe_opts:
+      method: GET
+      body_match_string: "healthy"
+      expected_status_codes: [200]
+    tags:
+      service: fake-http
+      suite: e2e
+
+  - name: http-body-mismatch
+    address: "http://fake-targets:8080/unhealthy"
+    probe_type: http_body
+    probe_opts:
+      method: GET
+      body_match_string: "healthy"
+      expected_status_codes: [200]
+    tags:
+      service: fake-http
+      suite: e2e
+
+  - name: http-body-bad-status
+    address: "http://fake-targets:8080/error-with-healthy-body"
+    probe_type: http_body
+    probe_opts:
+      method: GET
+      body_match_string: "healthy"
+      expected_status_codes: [200]
+    tags:
+      service: fake-http
+      suite: e2e
+
+  - name: proxy-connect-ok
+    address: "fake-targets:9000"
+    probe_type: proxy
+    probe_opts:
+      proxy_url: "http://fake-targets:8888"
+    tags:
+      service: fake-proxy
+      suite: e2e
+
+  - name: proxy-connect-denied
+    address: "fake-targets:9001"
+    probe_type: proxy
+    probe_opts:
+      proxy_url: "http://fake-targets:8888"
+    tags:
+      service: fake-proxy
+      suite: e2e
+
+  - name: dns-fake-targets
+    address: "fake-targets"
+    probe_type: dns
+    probe_opts:
+      dns_query_name: "fake-targets"
+      dns_query_type: A
+    tags:
+      service: fake-dns
+      suite: e2e
+
+  - name: icmp-fake-targets
+    address: "fake-targets"
+    probe_type: icmp
+    interval: 10s
+    timeout: 3s
+    probe_opts:
+      ping_count: 3
+      ping_interval: 0.1
+    tags:
+      service: fake-icmp
+      suite: e2e
+
+  - name: mtu-fake-targets
+    address: "fake-targets"
+    probe_type: mtu
+    interval: 15s
+    timeout: 8s
+    probe_opts:
+      icmp_payload_sizes: [1472, 1392, 1372, 1272, 1172]
+      expected_min_mtu: 1172
+      mtu_retries: 1
+      mtu_per_attempt_timeout: 500ms
+    tags:
+      service: fake-mtu
+      suite: e2e

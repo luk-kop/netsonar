@@ -9,6 +9,7 @@
 - [Docker](#docker)
   - [Without MTU probes](#without-mtu-probes)
   - [With MTU probes](#with-mtu-probes)
+  - [Non-root with file capabilities](#non-root-with-file-capabilities)
 - [Kubernetes](#kubernetes)
   - [Without MTU probes](#without-mtu-probes-1)
   - [With MTU probes](#with-mtu-probes-1)
@@ -23,6 +24,13 @@
 ## Overview
 
 NetSonar is distributed as a single static binary and runs well in containers. The main consideration is Linux capabilities: which probe types need `CAP_NET_RAW` and which do not.
+
+> **TL;DR — if your configuration does not include `probe_type: mtu`, you do not
+> need `CAP_NET_RAW` at all.** Drop all capabilities, run as non-root, and use a
+> read-only root filesystem. ICMP probes use unprivileged kernel sockets and work
+> without any capabilities (only `net.ipv4.ping_group_range` must include the
+> process GID, which is the default on most distributions). The `CAP_NET_RAW`
+> sections below apply only to MTU/PMTUD probing.
 
 | Probe type | Requires CAP_NET_RAW |
 |---|---|
@@ -39,7 +47,9 @@ NetSonar is distributed as a single static binary and runs well in containers. T
 
 ### When is CAP_NET_RAW required?
 
-Only `probe_type: mtu` requires `CAP_NET_RAW`. The MTU prober needs:
+Only `probe_type: mtu` requires `CAP_NET_RAW`. The capability must be
+effective for the NetSonar process, not just present in the container spec.
+The MTU prober needs:
 
 - A raw ICMP socket (`SOCK_RAW`) to set the `IP_PMTUDISC_PROBE` socket option via `setsockopt`
 - Access to raw ICMP Destination Unreachable packets (code 4: fragmentation needed) to detect path MTU limits
@@ -64,13 +74,42 @@ docker run --rm \
   --cap-drop=ALL \
   --read-only \
   -v /path/to/config.yaml:/etc/netsonar/config.yaml:ro \
-  -p 9116:9116 \
+  -p 9275:9275 \
   netsonar:latest
 ```
 
 ### With MTU probes
 
-Add `CAP_NET_RAW`:
+Add `CAP_NET_RAW`. The simplest runtime model is to run the container process
+as root while dropping every capability except `NET_RAW`:
+
+```bash
+docker run --rm \
+  --cap-drop=ALL \
+  --cap-add=NET_RAW \
+  --user 0:0 \
+  --read-only \
+  -v /path/to/config.yaml:/etc/netsonar/config.yaml:ro \
+  -p 9275:9275 \
+  netsonar:latest
+```
+
+### Non-root with file capabilities
+
+For a hardened non-root image, grant `CAP_NET_RAW` to the NetSonar binary at
+image build time:
+
+```dockerfile
+RUN apk add --no-cache libcap \
+    && setcap cap_net_raw+ep /usr/local/bin/netsonar
+USER netsonar
+```
+
+Then run the container as the non-root user. The binary file capability gives
+the process the raw-socket permission it needs for MTU probes.
+
+If you also drop all runtime capabilities, keep `NET_RAW` in the container
+bounding set so the file capability can be applied:
 
 ```bash
 docker run --rm \
@@ -78,9 +117,14 @@ docker run --rm \
   --cap-add=NET_RAW \
   --read-only \
   -v /path/to/config.yaml:/etc/netsonar/config.yaml:ro \
-  -p 9116:9116 \
+  -p 9275:9275 \
   netsonar:latest
 ```
+
+Important: file capabilities are affected by `no_new_privs`. If your runtime
+sets `no-new-privileges`, the process may not acquire `cap_net_raw` from the
+binary at exec time. In that case MTU probes fail with `operation not
+permitted` even though the container spec mentions `NET_RAW`.
 
 ## Kubernetes
 
@@ -100,7 +144,7 @@ spec:
         - name: netsonar
           image: netsonar:latest
           ports:
-            - containerPort: 9116
+            - containerPort: 9275
               name: metrics
           securityContext:
             runAsNonRoot: true
@@ -112,17 +156,47 @@ spec:
 
 ### With MTU probes
 
-Add `NET_RAW` capability:
+Add `NET_RAW` capability. For the most direct setup, run as root while dropping
+all other capabilities:
 
 ```yaml
           securityContext:
-            runAsNonRoot: true
+            runAsUser: 0
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
             capabilities:
               drop: [ALL]
               add: [NET_RAW]
 ```
+
+For a non-root Kubernetes deployment, prefer an image where the binary has
+`cap_net_raw+ep` set as described in
+[Non-root with file capabilities](#non-root-with-file-capabilities). Verify the
+runtime actually preserves that file capability for the process. Do not assume
+that `runAsNonRoot: true` plus `capabilities.add: [NET_RAW]` is sufficient on
+every runtime.
+
+If you rely on file capabilities, `allowPrivilegeEscalation: false` can block
+the capability gain because Kubernetes sets `no_new_privs`. Test MTU probing in
+the target cluster before enabling that hardening setting for MTU-enabled
+deployments.
+
+Concrete non-root example for an image with `cap_net_raw+ep` on the binary:
+
+```yaml
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: true
+            capabilities:
+              drop: [ALL]
+              add: [NET_RAW]
+```
+
+Here `add: [NET_RAW]` keeps `NET_RAW` in the bounding set, and
+`allowPrivilegeEscalation: true` avoids `no_new_privs` blocking the binary's
+file capability at exec time.
 
 ### Setting ping_group_range per pod
 
@@ -153,13 +227,24 @@ Unprivileged ICMP works in rootless Podman as long as the host has `ping_group_r
 podman run --rm \
   --read-only \
   -v /path/to/config.yaml:/etc/netsonar/config.yaml:ro \
-  -p 9116:9116 \
+  -p 9275:9275 \
   netsonar:latest
 ```
 
 MTU probing does not work in rootless Podman — there is no way to grant `CAP_NET_RAW` without root. Use rootful Podman or Docker with `--cap-add=NET_RAW` for MTU probes.
 
 ## Troubleshooting
+
+Before starting a container or pod with a production config, you can run
+environment diagnostics:
+
+```bash
+netsonar --doctor --config /etc/netsonar/config.yaml
+```
+
+The doctor command is config-aware: it only fails checks required by the probe
+types present in the config. For example, missing effective `CAP_NET_RAW` fails
+when MTU targets are configured, but is skipped for configs without MTU targets.
 
 ### ICMP probes fail with "permission denied"
 
@@ -185,11 +270,24 @@ Add the sysctl to the pod spec as shown in [Setting ping_group_range per pod](#s
 
 ### MTU probes fail with "CAP_NET_RAW required"
 
-The MTU prober requires a raw ICMP socket. Grant `CAP_NET_RAW` to the container:
+The MTU prober requires a raw ICMP socket. Ensure `CAP_NET_RAW` is effective for
+the NetSonar process:
 
-- Docker: `--cap-add=NET_RAW`
-- Kubernetes: `capabilities: { add: [NET_RAW] }` in the container security context
+- Docker lab/simple deployment: `--cap-add=NET_RAW --user 0:0`
+- Docker hardened non-root deployment: set `cap_net_raw+ep` on the binary
+- Kubernetes simple deployment: run as root, add `NET_RAW`, and verify the
+  process has it
+- Kubernetes hardened non-root deployment: use a file capability and avoid
+  blocking it with `no_new_privs`
 - Rootless Podman: not supported — use rootful Podman or Docker
+
+To inspect process capabilities from inside the container:
+
+```bash
+grep Cap /proc/self/status
+```
+
+For `CAP_NET_RAW`, bit 13 must be present in the effective capability set.
 
 ### Checking ping_group_range
 

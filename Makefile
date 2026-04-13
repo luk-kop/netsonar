@@ -12,7 +12,7 @@ DATE     ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 LDFLAGS  := -s -w \
 	-X 'main.version=$(VERSION)'
 
-.PHONY: all build test test-short test-race test-pbt lint fmt vet clean
+.PHONY: all build test test-short test-race test-pbt lab-e2e e2e-compose lint fmt vet clean
 
 all: fmt vet lint test build
 
@@ -30,6 +30,11 @@ test-race:
 
 test-pbt:
 	go test -run Property ./...
+
+lab-e2e:
+	./scripts/lab-e2e.sh
+
+e2e-compose: lab-e2e
 
 lint:
 	golangci-lint run

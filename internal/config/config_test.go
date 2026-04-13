@@ -66,6 +66,29 @@ targets:
 	}
 }
 
+func TestLoadConfig_DefaultAgentListenAndMetricsPathApplied(t *testing.T) {
+	yaml := `
+agent:
+  default_interval: 30s
+  default_timeout: 5s
+
+targets:
+  - name: "tcp-target"
+    address: "example.com:443"
+    probe_type: tcp
+`
+	cfg, err := LoadConfig(writeConfigFile(t, yaml))
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if cfg.Agent.ListenAddr != ":9275" {
+		t.Errorf("listen_addr = %q, want %q", cfg.Agent.ListenAddr, ":9275")
+	}
+	if cfg.Agent.MetricsPath != "/metrics" {
+		t.Errorf("metrics_path = %q, want %q", cfg.Agent.MetricsPath, "/metrics")
+	}
+}
+
 func TestLoadConfig_DefaultIntervalApplied(t *testing.T) {
 	yaml := `
 agent:
@@ -808,6 +831,15 @@ targets:
 	}
 }
 
+// httpBodyMatchOpt returns a YAML probe_opts snippet that satisfies the
+// http_body body-matcher requirement. Returns empty string for other types.
+func httpBodyMatchOpt(probeType string) string {
+	if probeType == "http_body" {
+		return "      body_match_string: \"ok\"\n"
+	}
+	return ""
+}
+
 func TestLoadConfig_ValidProxyURLs(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -835,7 +867,7 @@ targets:
     timeout: 5s
     probe_opts:
       proxy_url: %q
-`, tt.probeType, tt.proxyURL)
+%s`, tt.probeType, tt.proxyURL, httpBodyMatchOpt(tt.probeType))
 			_, err := LoadConfig(writeConfigFile(t, yaml))
 			if err != nil {
 				t.Fatalf("expected no error for proxy_url %q, got: %v", tt.proxyURL, err)
@@ -877,7 +909,7 @@ targets:
     timeout: 5s
     probe_opts:
       proxy_url: %q
-`, tt.probeType, tt.proxyURL)
+%s`, tt.probeType, tt.proxyURL, httpBodyMatchOpt(tt.probeType))
 			_, err := LoadConfig(writeConfigFile(t, yaml))
 			if err == nil {
 				t.Fatalf("expected error for proxy_url %q, got nil", tt.proxyURL)
@@ -933,11 +965,12 @@ func TestLoadConfig_ValidHTTPMethods(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			probeOpts := ""
-			if tt.method != "" {
-				probeOpts = fmt.Sprintf(`
-    probe_opts:
-      method: %q
-`, tt.method)
+			if tt.method != "" || tt.probeType == "http_body" {
+				probeOpts = "    probe_opts:\n"
+				if tt.method != "" {
+					probeOpts += fmt.Sprintf("      method: %q\n", tt.method)
+				}
+				probeOpts += httpBodyMatchOpt(tt.probeType)
 			}
 			yaml := fmt.Sprintf(`
 agent:
@@ -947,8 +980,8 @@ targets:
   - name: "method-ok"
     address: "https://example.com"
     probe_type: %s
-    timeout: 5s%s
-`, tt.probeType, probeOpts)
+    timeout: 5s
+%s`, tt.probeType, probeOpts)
 			_, err := LoadConfig(writeConfigFile(t, yaml))
 			if err != nil {
 				t.Fatalf("expected no error for method %q on %s, got: %v", tt.method, tt.probeType, err)
@@ -988,7 +1021,7 @@ targets:
     timeout: 5s
     probe_opts:
       method: %q
-`, tt.probeType, tt.method)
+%s`, tt.probeType, tt.method, httpBodyMatchOpt(tt.probeType))
 			_, err := LoadConfig(writeConfigFile(t, yaml))
 			if err == nil {
 				t.Fatalf("expected error for method %q on %s, got nil", tt.method, tt.probeType)
@@ -1038,7 +1071,7 @@ func TestLoadConfig_AllProbeTypes(t *testing.T) {
 		{"mtu-t", "mtu", ""},
 		{"dns-t", "dns", "\n    probe_opts:\n      dns_query_name: example.com\n      dns_query_type: A"},
 		{"tls-t", "tls_cert", ""},
-		{"body-t", "http_body", ""},
+		{"body-t", "http_body", "\n    probe_opts:\n      body_match_string: \"ok\""},
 		{"proxy-t", "proxy", "\n    probe_opts:\n      proxy_url: http://proxy:8888"},
 	}
 
@@ -1299,6 +1332,26 @@ targets:
 	}
 }
 
+func TestLoadConfig_HTTPBodyMissingMatcher(t *testing.T) {
+	yaml := `
+agent:
+  default_interval: 30s
+
+targets:
+  - name: "body-no-matcher"
+    address: "https://example.com"
+    probe_type: http_body
+    timeout: 5s
+`
+	_, err := LoadConfig(writeConfigFile(t, yaml))
+	if err == nil {
+		t.Fatal("expected error for http_body without body_match_regex or body_match_string, got nil")
+	}
+	if !strings.Contains(err.Error(), "body_match_regex") || !strings.Contains(err.Error(), "body_match_string") {
+		t.Errorf("error = %q, want it to mention body_match_regex and body_match_string", err.Error())
+	}
+}
+
 func TestLoadConfig_InvalidHTTPBodyRegex(t *testing.T) {
 	yaml := `
 agent:
@@ -1402,7 +1455,7 @@ targets:
     timeout: 5s
     probe_opts:
       expected_status_codes: %s
-`, tt.probeType, tt.codes)
+%s`, tt.probeType, tt.codes, httpBodyMatchOpt(tt.probeType))
 			_, err := LoadConfig(writeConfigFile(t, yaml))
 			if err == nil {
 				t.Fatal("expected error for invalid expected_status_codes, got nil")
@@ -1522,7 +1575,7 @@ targets:
     timeout: 5s
     probe_opts:
       expected_status_codes: %s
-`, tt.probeType, tt.codes)
+%s`, tt.probeType, tt.codes, httpBodyMatchOpt(tt.probeType))
 			_, err := LoadConfig(writeConfigFile(t, yaml))
 			if err != nil {
 				t.Fatalf("expected no error for valid status codes, got: %v", err)

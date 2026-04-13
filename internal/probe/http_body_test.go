@@ -214,6 +214,46 @@ func TestHTTPBodyProber_StatusCodeRecording(t *testing.T) {
 	}
 }
 
+// TestHTTPBodyProber_ExpectedStatusCodesMismatch verifies that body matches
+// do not hide an unexpected HTTP status code.
+func TestHTTPBodyProber_ExpectedStatusCodesMismatch(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("healthy"))
+	}))
+	defer srv.Close()
+
+	target := config.TargetConfig{
+		Name:      "test-body-status-mismatch",
+		Address:   srv.URL,
+		ProbeType: config.ProbeTypeHTTPBody,
+		Timeout:   5 * time.Second,
+		ProbeOpts: config.ProbeOptions{
+			BodyMatchString:     "healthy",
+			ExpectedStatusCodes: []int{http.StatusOK},
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
+	defer cancel()
+
+	prober := NewHTTPBodyProber(false, true, "", "")
+	result := prober.Probe(ctx, target)
+
+	if result.Success {
+		t.Fatal("expected Success=false when body matches but status code is unexpected")
+	}
+	if !result.BodyMatch {
+		t.Fatal("expected BodyMatch=true when body contains the configured string")
+	}
+	if result.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected StatusCode=%d, got %d", http.StatusInternalServerError, result.StatusCode)
+	}
+	if !strings.Contains(result.Error, "unexpected status code") {
+		t.Fatalf("expected unexpected status code error, got %q", result.Error)
+	}
+}
+
 // TestHTTPBodyProber_NeitherPatternConfigured verifies that when neither
 // body_match_regex nor body_match_string is set, both BodyMatch and Success are false.
 func TestHTTPBodyProber_NeitherPatternConfigured(t *testing.T) {

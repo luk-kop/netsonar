@@ -41,6 +41,9 @@ agent:
 
 When `allowed_tag_keys` contains entries, targets may only use tag keys from this list. When absent or empty, the agent collects tag keys dynamically from all targets (limited to 30 unique keys).
 
+If `listen_addr` is omitted, it defaults to `:9275`. If `metrics_path` is
+omitted, it defaults to `/metrics`.
+
 ## Target Definition
 
 ```yaml
@@ -91,3 +94,7 @@ All tag keys (whether from the allowlist or collected dynamically) must be valid
 - `proxy_url` is required when `probe_type` is `proxy`; optional for `http` and `http_body`
 - When set, `proxy_url` must be `http://[user:pass@]host[:port]` or `https://[user:pass@]host[:port]`; paths other than `/`, query strings, fragments, invalid ports, relative URLs, and non-HTTP schemes are rejected
 - If `proxy_url` includes `user:pass@`, the credentials are used for proxy Basic authentication; `proxy` probes send them as `Proxy-Authorization` on the CONNECT request
+- `mtu_retries` must be ≥ 1 when specified
+- `mtu_per_attempt_timeout` must be > 0 and ≤ `timeout` when specified
+- `icmp_payload_sizes` values must be > 0
+- `expected_min_mtu` must be > 0; defaults to `largest_payload + 28` when not set

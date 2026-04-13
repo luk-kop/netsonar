@@ -182,6 +182,12 @@ func LoadConfig(path string) (*Config, error) {
 
 // applyDefaults fills in missing target-level fields from agent-level defaults.
 func applyDefaults(cfg *Config) {
+	if cfg.Agent.ListenAddr == "" {
+		cfg.Agent.ListenAddr = ":9275"
+	}
+	if cfg.Agent.MetricsPath == "" {
+		cfg.Agent.MetricsPath = "/metrics"
+	}
 	if cfg.Agent.LogLevel == "" {
 		cfg.Agent.LogLevel = "info"
 	}
@@ -365,6 +371,9 @@ func validateProbeOpts(t TargetConfig) error {
 			return err
 		}
 		if t.ProbeType == ProbeTypeHTTPBody {
+			if t.ProbeOpts.BodyMatchRegex == "" && t.ProbeOpts.BodyMatchString == "" {
+				return fmt.Errorf("target %q: probe_type 'http_body' requires 'body_match_regex' or 'body_match_string' in probe_opts", t.Name)
+			}
 			if err := validateBodyMatchRegex(t); err != nil {
 				return err
 			}

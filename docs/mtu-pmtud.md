@@ -52,11 +52,23 @@ For IPv4, the sender can set the DF bit, short for Don't Fragment. If a packet w
 
 The normal flow is:
 
-```text
-Agent sends packet size 1500 with DF set
-Router cannot forward it without fragmentation
-Router returns ICMP Destination Unreachable, code 4
-Agent tries a smaller size
+```mermaid
+sequenceDiagram
+    participant A as Agent
+    participant R as Router<br/>(MTU bottleneck)
+    participant T as Target
+
+    Note over A,T: Attempt 1 — payload too large
+    A->>R: ICMP Echo (1472B payload, DF set)
+    R--xR: Cannot forward without fragmentation
+    R->>A: ICMP Destination Unreachable (code 4)
+    Note right of A: Status: too_large
+
+    Note over A,T: Attempt 2 — smaller payload succeeds
+    A->>R: ICMP Echo (1372B payload, DF set)
+    R->>T: Forwarded (fits link MTU)
+    T->>A: ICMP Echo Reply
+    Note right of A: Status: success<br/>Path MTU = 1372 + 28 = 1400
 ```
 
 When a packet gets through and the agent receives an ICMP echo reply, that payload size is considered successful.
@@ -64,6 +76,52 @@ When a packet gets through and the agent receives an ICMP echo reply, that paylo
 [Back to Table of Contents](#table-of-contents)
 
 ## How the Agent Implements MTU Probes
+
+```mermaid
+flowchart TD
+    classDef startEnd fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    classDef check fill:#f5d76e,stroke:#c9a832,color:#333
+    classDef success fill:#7dcea0,stroke:#27ae60,color:#333
+    classDef failure fill:#f1948a,stroke:#e74c3c,color:#333
+    classDef process fill:#d5e8f0,stroke:#5b9bd5,color:#333
+    classDef loop fill:#e8daef,stroke:#8e44ad,color:#333
+
+    START(Start MTU Probe):::startEnd
+    VALIDATE{icmp_payload_sizes<br/>configured?}:::check
+    RESOLVE(Resolve target to IPv4):::process
+    RESOLVE_OK{Resolved?}:::check
+    SANITY(Sanity check:<br/>small ICMP echo 64B<br/>without DF):::process
+    SANITY_OK{Reply<br/>received?}:::check
+    LOOP(Pick next size from list<br/>descending order):::loop
+    SEND(Send ICMP echo with DF set<br/>up to mtu_retries attempts):::process
+    RESULT{Response?}:::check
+    SUCCESS(Path MTU =<br/>payload + 28<br/>state = ok):::success
+    TOO_LARGE(Size too large<br/>or timeout —<br/>try next smaller):::loop
+    UNREACH(state = unreachable<br/>detail = destination_unreachable):::failure
+    ALL_FAIL(All sizes failed<br/>state = degraded):::failure
+    ERR_CFG(state = error<br/>detail = internal_error):::failure
+    ERR_DNS(state = error<br/>detail = resolve_error):::failure
+    ERR_SANITY(state = unreachable<br/>detail = sanity_check_failed):::failure
+    MORE{More sizes<br/>to try?}:::check
+
+    START --> VALIDATE
+    VALIDATE -- No --> ERR_CFG
+    VALIDATE -- Yes --> RESOLVE
+    RESOLVE --> RESOLVE_OK
+    RESOLVE_OK -- No --> ERR_DNS
+    RESOLVE_OK -- Yes --> SANITY
+    SANITY --> SANITY_OK
+    SANITY_OK -- No --> ERR_SANITY
+    SANITY_OK -- Yes --> LOOP
+    LOOP --> SEND
+    SEND --> RESULT
+    RESULT -- Echo Reply --> SUCCESS
+    RESULT -- ICMP code 4 /<br/>timeout / local error --> TOO_LARGE
+    RESULT -- Dest Unreachable<br/>other code --> UNREACH
+    TOO_LARGE --> MORE
+    MORE -- Yes --> LOOP
+    MORE -- No --> ALL_FAIL
+```
 
 The agent's `mtu` probe:
 
@@ -128,12 +186,70 @@ This matters for diagnosis. The agent treats code `4` as a size failure and trea
 
 A PMTUD black hole happens when oversized packets with DF set are dropped, but the ICMP error that should explain the drop is blocked or lost. The sender keeps sending packets that are too large and never learns the correct path MTU.
 
+```mermaid
+sequenceDiagram
+    participant A as Agent
+    participant FW as Firewall
+    participant R as Router<br/>(MTU bottleneck)
+    participant T as Target
+
+    Note over A,T: Attempt 1 — payload too large, ICMP blocked
+    A->>R: ICMP Echo (1472B payload, DF set)
+    R--xR: Cannot forward without fragmentation
+    R->>FW: ICMP Dest Unreachable (code 4)
+    FW--xFW: Drops ICMP
+    Note right of A: No reply — waits full timeout (2s × 3 retries)
+    Note right of A: Status: timeout
+
+    Note over A,T: Attempt 2 — still too large, same result
+    A->>R: ICMP Echo (1392B payload, DF set)
+    R--xR: Cannot forward
+    R->>FW: ICMP Dest Unreachable (code 4)
+    FW--xFW: Drops ICMP
+    Note right of A: Waits full timeout again
+    Note right of A: Status: timeout
+
+    Note over A,T: Attempt 3 — payload fits the path
+    A->>R: ICMP Echo (1372B payload, DF set)
+    R->>T: Forwarded (fits link MTU)
+    T->>A: ICMP Echo Reply
+    Note right of A: Status: success<br/>Path MTU = 1400<br/>detail = larger_sizes_timed_out
+```
+
 Symptoms can include:
 
 - small requests work, large transfers hang,
 - TCP connections establish but stall during larger responses,
 - HTTPS handshakes or downloads fail inconsistently,
 - direct traffic works but traffic through VPN, tunnel, NAT, or firewall fails.
+
+### Impact on Probe Timing
+
+When ICMP code 4 messages are lost, the probe cannot distinguish "too large" from "no reply". Each oversized payload must wait for the full per-attempt timeout multiplied by the retry count before the probe moves on to the next smaller size.
+
+With default settings (`mtu_per_attempt_timeout: 2s`, `mtu_retries: 3`), each failing size costs up to 6 seconds. If four out of six configured sizes are too large for the path, that is 24 seconds of timeouts before the probe reaches a working size. If the target's global `timeout` is shorter than the accumulated wait, the probe will be cut short and report `state="degraded", detail="inconclusive"` instead of confirming the actual path MTU.
+
+To reduce this cost in environments where ICMP code 4 is known to be blocked:
+
+- increase the target `timeout` to allow enough time for the full size list,
+- reduce `mtu_retries` (e.g. to 1 or 2) to shorten the wait per size,
+- reduce `mtu_per_attempt_timeout` if the network latency is low,
+- trim `icmp_payload_sizes` to only the sizes that are realistic for the path.
+
+Example for a VPN path where the expected MTU is around 1400:
+
+```yaml
+targets:
+  - name: vpn-mtu
+    address: "10.10.20.30"
+    probe_type: mtu
+    interval: 300s
+    timeout: 20s
+    probe_opts:
+      icmp_payload_sizes: [1372, 1272, 1172]
+      mtu_retries: 2
+      mtu_per_attempt_timeout: 2s
+```
 
 ### ICMP Blocking
 

@@ -211,6 +211,14 @@ func executeProbe(ctx context.Context, target config.TargetConfig, prober probe.
 	defer cancel()
 
 	result := prober.Probe(probeCtx, target)
+	// Check parent context after Probe returns: if the target was removed or
+	// changed during a slow probe (Reload/Stop called cancel on ctx), discard
+	// the result so we don't recreate Prometheus series after DeleteTarget.
+	// Do NOT check probeCtx.Err() here — a probe timeout is a valid result
+	// that must be recorded.
+	if ctx.Err() != nil {
+		return
+	}
 	m.Record(target, result)
 	logProbeResult(target, result, state)
 }

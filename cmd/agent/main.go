@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"netsonar/internal/config"
+	"netsonar/internal/doctor"
 	"netsonar/internal/metrics"
 	"netsonar/internal/probe"
 	"netsonar/internal/scheduler"
@@ -35,7 +36,19 @@ func main() {
 func run() int {
 	configPath := flag.String("config", "/etc/netsonar/config.yaml", "Path to YAML configuration file")
 	listenAddr := flag.String("listen-addr", "", "Override agent.listen_addr from config (e.g. :9275)")
+	doctorMode := flag.Bool("doctor", false, "Run environment diagnostics and exit")
 	flag.Parse()
+
+	if *doctorMode {
+		result := doctor.RunWithOptions(*configPath, doctor.DefaultEnv(), doctor.Options{
+			ListenAddrOverride: *listenAddr,
+		})
+		result.WriteText(os.Stdout)
+		if result.OK() {
+			return 0
+		}
+		return 1
+	}
 
 	// Load and validate configuration.
 	cfg, err := config.LoadConfig(*configPath)
@@ -47,12 +60,6 @@ func run() int {
 	// CLI flag overrides config value.
 	if *listenAddr != "" {
 		cfg.Agent.ListenAddr = *listenAddr
-	}
-	if cfg.Agent.ListenAddr == "" {
-		cfg.Agent.ListenAddr = ":9275"
-	}
-	if cfg.Agent.MetricsPath == "" {
-		cfg.Agent.MetricsPath = "/metrics"
 	}
 
 	setupLogger(cfg.Agent.LogLevel)
@@ -81,7 +88,7 @@ func run() int {
 	updateAgentMetrics(exporter, cfg)
 
 	// Start HTTP server for /metrics and health endpoints.
-	srv := newHTTPServer(cfg.Agent.ListenAddr, cfg.Agent.MetricsPath, exporter, true)
+	srv := newHTTPServer(cfg.Agent.ListenAddr, cfg.Agent.MetricsPath, exporter)
 
 	// Run HTTP server in background.
 	srvErr := make(chan error, 1)
@@ -171,10 +178,10 @@ func shutdown(sched *scheduler.Scheduler, srv *http.Server, cancel context.Cance
 }
 
 // newHTTPServer builds the agent HTTP server with defensive timeouts.
-func newHTTPServer(listenAddr, metricsPath string, exporter *metrics.MetricsExporter, ready bool) *http.Server {
+func newHTTPServer(listenAddr, metricsPath string, exporter *metrics.MetricsExporter) *http.Server {
 	return &http.Server{
 		Addr:              listenAddr,
-		Handler:           newHTTPMux(metricsPath, exporter, ready),
+		Handler:           newHTTPMux(metricsPath, exporter),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
@@ -183,18 +190,14 @@ func newHTTPServer(listenAddr, metricsPath string, exporter *metrics.MetricsExpo
 }
 
 // newHTTPMux registers metrics and health/readiness endpoints.
-func newHTTPMux(metricsPath string, exporter *metrics.MetricsExporter, ready bool) http.Handler {
+func newHTTPMux(metricsPath string, exporter *metrics.MetricsExporter) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle(metricsPath, exporter.Handler())
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writePlainText(w, http.StatusOK, "ok\n")
 	})
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
-		if ready {
-			writePlainText(w, http.StatusOK, "ok\n")
-			return
-		}
-		writePlainText(w, http.StatusServiceUnavailable, "not ready\n")
+		writePlainText(w, http.StatusOK, "ok\n")
 	})
 	return mux
 }

@@ -15,13 +15,13 @@ A purpose-built **Go** binary that probes a YAML-configured list of **network ta
 - [Configuration Reference](#configuration-reference) · [full docs](docs/configuration.md)
 - [Probe Types](#probe-types) · [full docs](docs/probe-types.md)
 - [Metrics Reference](#metrics-reference) · [full docs](docs/metrics.md)
-- [Deployment](#deployment)
+- [Deployment](#deployment) · [ICMP Permissions](#icmp-permissions)
 - [Scrape Configuration Examples](#scrape-configuration-examples)
 - [Operations](#operations)
 
 ## Overview
 
-The agent runs as a single static binary (~20-30 MB RSS for up to 100 targets), requires no external dependencies, and uses `CAP_NET_RAW` only for MTU probes (ICMP uses unprivileged sockets). It owns its target list internally and exposes pre-labelled metrics, unlike the Blackbox Exporter's multi-target `/probe?target=X&module=Y` pattern.
+The agent runs as a single static binary (~20-30 MB resident memory for up to 100 targets), requires no external dependencies, and uses `CAP_NET_RAW` only for MTU probes (ICMP uses unprivileged sockets). It owns its target list internally and exposes pre-labelled metrics, unlike the Blackbox Exporter's multi-target `/probe?target=X&module=Y` pattern.
 
 Supported probe types: TCP, HTTP/HTTPS, ICMP, MTU/PMTUD, DNS, TLS certificate expiry, HTTP body validation, proxy connectivity.
 
@@ -64,6 +64,9 @@ The binary is written to `bin/netsonar`.
 
 # Override listen address
 ./bin/netsonar --config config.yaml --listen-addr :9275
+
+# Check whether the current host/container can run the configured probes
+./bin/netsonar --doctor --config config.yaml
 ```
 
 ### CLI Flags
@@ -72,6 +75,7 @@ The binary is written to `bin/netsonar`.
 |-----------------|-------------------------------|------------------------------------|
 | `--config`      | `/etc/netsonar/config.yaml`   | Path to YAML configuration file    |
 | `--listen-addr` | (from config, or `:9275`)     | Override `agent.listen_addr`       |
+| `--doctor`      | `false`                       | Run environment diagnostics and exit |
 
 ## Configuration Reference
 
@@ -103,6 +107,29 @@ All probe and agent metadata metrics with labels and types — see [docs/metrics
 - **`CAP_NET_RAW`** capability (only for MTU probes; all other probe types work without it)
 - Dedicated `netsonar` system user (recommended)
 
+### ICMP Permissions
+
+ICMP probes use unprivileged sockets (`SOCK_DGRAM`) and do **not** require `CAP_NET_RAW`. However, the kernel must allow the process GID to open these sockets via `net.ipv4.ping_group_range`. Most distributions set this to `0 2147483647` by default, but some (notably hardened or minimal images) restrict it.
+
+If ICMP probes fail with `permission denied (check net.ipv4.ping_group_range)`, widen the range:
+
+```bash
+# Temporary (until reboot)
+sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"
+
+# Persistent
+echo 'net.ipv4.ping_group_range = 0 2147483647' | sudo tee /etc/sysctl.d/99-ping-group.conf
+sudo sysctl --system
+```
+
+When running via the included `netsonar.service`, the systemd unit already grants `CAP_NET_RAW` (needed for MTU probes), which also covers ICMP raw sockets — so `ping_group_range` is not required in that case. The sysctl fix is only needed when running the binary directly (e.g. `./netsonar -config config.yaml`) as a non-root user without `CAP_NET_RAW`.
+
+The `--doctor` flag checks this automatically and reports the result:
+
+```bash
+./bin/netsonar --doctor --config config.yaml
+```
+
 ### Install
 
 ```bash
@@ -131,7 +158,10 @@ The included `netsonar.service` provides:
 
 - Runs as `netsonar` user (non-root)
 - `CAP_NET_RAW` ambient capability for MTU probes (ICMP uses unprivileged sockets)
-- Security hardening: `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome=true`, `PrivateTmp=true`, `MemoryDenyWriteExecute=true`, `ProtectKernelTunables`, `ProtectKernelModules`, `ProtectControlGroups`, `RestrictSUIDSGID`, `RestrictNamespaces`, `RestrictRealtime`, `LockPersonality`, `SystemCallArchitectures=native`, `ReadOnlyPaths=/etc/netsonar`
+- `EnvironmentFile=-/etc/default/netsonar` for operator overrides (e.g. `NETSONAR_OPTS="--listen-addr :9999"`)
+- `SyslogIdentifier=netsonar` for consistent journal filtering
+- Security hardening: `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome=true`, `PrivateTmp=true`, `PrivateDevices=true`, `ProtectClock=true`, `MemoryDenyWriteExecute=true`, `ProtectKernelTunables`, `ProtectKernelModules`, `ProtectControlGroups`, `RestrictSUIDSGID`, `RestrictNamespaces`, `RestrictRealtime`, `LockPersonality`, `SystemCallArchitectures=native`, `ReadOnlyPaths=/etc/netsonar`
+- Resource limits: `MemoryMax=256M`, `CPUQuota=25%`
 - Automatic restart on failure with 5-second delay
 - Config reload via `systemctl reload netsonar` (sends SIGHUP)
 
@@ -140,6 +170,9 @@ The included `netsonar.service` provides:
 ```bash
 # Check service status
 sudo systemctl status netsonar
+
+# Check environment capabilities for the configured probes
+sudo -u netsonar ./bin/netsonar --doctor --config /etc/netsonar/config.yaml
 
 # Liveness / readiness
 curl -s http://localhost:9275/healthz
@@ -152,7 +185,12 @@ curl -s http://localhost:9275/metrics | head -20
 curl -s http://localhost:9275/metrics | grep agent_
 ```
 
-`/healthz` returns `200 ok` when the HTTP server is running. `/readyz` returns `200 ok` after the scheduler has started; before readiness it returns `503 not ready`.
+`/healthz` returns `200 ok` when the HTTP server is running. `/readyz` returns `200 ok` when the HTTP server is running (the server starts after the scheduler, so readiness is guaranteed by the time requests arrive).
+
+`--doctor` loads the config, checks only the environment features required by
+the configured probe types, and exits non-zero only on failed required checks.
+For example, missing effective `CAP_NET_RAW` fails when the config contains MTU
+targets, but is skipped when it does not.
 
 ### Container Deployment
 
@@ -169,17 +207,22 @@ docker run --rm \
   netsonar:latest
 ```
 
-Docker with MTU probes:
+Docker with MTU probes (simple runtime model):
 
 ```bash
 docker run --rm \
   --cap-drop=ALL \
   --cap-add=NET_RAW \
+  --user 0:0 \
   --read-only \
   -v /path/to/config.yaml:/etc/netsonar/config.yaml:ro \
   -p 9275:9275 \
   netsonar:latest
 ```
+
+For hardened non-root containers with MTU probes, grant
+`cap_net_raw+ep` to the `netsonar` binary in the image and still keep
+`NET_RAW` in the container bounding set with `--cap-add=NET_RAW`.
 
 Kubernetes security context (without MTU probes):
 
@@ -192,7 +235,12 @@ securityContext:
     drop: [ALL]
 ```
 
-For MTU probes, add `capabilities: { add: [NET_RAW] }`. ICMP probes use unprivileged sockets and require `net.ipv4.ping_group_range` to include the process GID (default on most distributions).
+For MTU probes, `CAP_NET_RAW` must be effective for the process. In Kubernetes,
+either run as root with `NET_RAW`, or use a non-root image with
+`cap_net_raw+ep` on the binary, `capabilities.add: [NET_RAW]` for the bounding
+set, and no `no_new_privs` blocking file capabilities. ICMP probes use
+unprivileged sockets and require `net.ipv4.ping_group_range` to include the
+process GID (default on most distributions).
 
 For the full container deployment guide covering Kubernetes manifests, rootless Podman, `ping_group_range` per-pod configuration, and troubleshooting, see [docs/container-deployment.md](docs/container-deployment.md).
 
@@ -284,7 +332,7 @@ On `SIGTERM` or `SIGINT`, the agent cancels all probe goroutines and allows the 
 
 | Symptom                                  | Cause                                    | Fix                                                    |
 |------------------------------------------|------------------------------------------|--------------------------------------------------------|
-| MTU probes show `probe_success=0`        | Missing `CAP_NET_RAW`                    | Verify systemd unit has `AmbientCapabilities=CAP_NET_RAW` |
+| MTU probes show `probe_success=0`        | Missing effective `CAP_NET_RAW`          | Verify systemd `AmbientCapabilities=CAP_NET_RAW` or container file capability/bounding set |
 | ICMP probes show `probe_success=0`       | `ping_group_range` excludes process GID  | `sysctl -w net.ipv4.ping_group_range="0 2147483647"` |
 | No metrics on `/metrics`                 | Agent not running or wrong listen address| Check `systemctl status` and `--listen-addr` flag      |
 | Probe shows `probe_success=0`             | DNS, TCP, TLS, HTTP, proxy, or permission failure | Check `journalctl -u netsonar` for `probe failed` |

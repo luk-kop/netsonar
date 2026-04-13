@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -82,8 +83,9 @@ func NewHTTPBodyProber(tlsSkipVerify bool, followRedirects bool, proxyURL string
 // Postconditions:
 //   - result.BodyMatch is true when the response body matches the pattern
 //   - result.StatusCode contains the HTTP response status code
-//   - result.Success is true when the HTTP request succeeded and the body
-//     matches the configured pattern
+//   - result.Success is true when the HTTP request succeeded, the body
+//     matches the configured pattern, and the status code matches
+//     expected_status_codes when configured
 //   - The response body is always fully read and closed before returning
 //   - result.Error is non-empty when Success is false
 func (p *HTTPBodyProber) Probe(ctx context.Context, target config.TargetConfig) ProbeResult {
@@ -133,10 +135,19 @@ func (p *HTTPBodyProber) Probe(ctx context.Context, target config.TargetConfig) 
 	}
 
 	result.BodyMatch = matchBody(string(body), target.ProbeOpts, p.compiledBodyMatchRegex)
-	result.Success = result.BodyMatch
+	statusMatch := len(target.ProbeOpts.ExpectedStatusCodes) == 0 ||
+		slices.Contains(target.ProbeOpts.ExpectedStatusCodes, resp.StatusCode)
+	result.Success = result.BodyMatch && statusMatch
 
 	if !result.Success {
-		result.Error = fmt.Sprintf("body match failed (status %d, body length %d)", resp.StatusCode, len(body))
+		switch {
+		case !result.BodyMatch && !statusMatch:
+			result.Error = fmt.Sprintf("body match failed and unexpected status code %d (body length %d)", resp.StatusCode, len(body))
+		case !result.BodyMatch:
+			result.Error = fmt.Sprintf("body match failed (status %d, body length %d)", resp.StatusCode, len(body))
+		default:
+			result.Error = fmt.Sprintf("unexpected status code %d", resp.StatusCode)
+		}
 	}
 
 	return result

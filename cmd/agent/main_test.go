@@ -101,7 +101,7 @@ func TestSetupLogger_WiresLevelVarIntoDefaultHandler(t *testing.T) {
 
 func TestNewHTTPServer_HasTimeouts(t *testing.T) {
 	exporter := metrics.NewMetricsExporter(nil)
-	srv := newHTTPServer(":9275", "/metrics", exporter, true)
+	srv := newHTTPServer(":9275", "/metrics", exporter)
 
 	if srv.ReadHeaderTimeout != 5*time.Second {
 		t.Errorf("ReadHeaderTimeout = %s, want 5s", srv.ReadHeaderTimeout)
@@ -119,7 +119,7 @@ func TestNewHTTPServer_HasTimeouts(t *testing.T) {
 
 func TestNewHTTPMux_Healthz(t *testing.T) {
 	exporter := metrics.NewMetricsExporter(nil)
-	handler := newHTTPMux("/metrics", exporter, true)
+	handler := newHTTPMux("/metrics", exporter)
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
@@ -137,35 +137,21 @@ func TestNewHTTPMux_Healthz(t *testing.T) {
 }
 
 func TestNewHTTPMux_Readyz(t *testing.T) {
-	tests := []struct {
-		name     string
-		ready    bool
-		wantCode int
-		wantBody string
-	}{
-		{"ready", true, http.StatusOK, "ok\n"},
-		{"not ready", false, http.StatusServiceUnavailable, "not ready\n"},
+	exporter := metrics.NewMetricsExporter(nil)
+	handler := newHTTPMux("/metrics", exporter)
+
+	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			exporter := metrics.NewMetricsExporter(nil)
-			handler := newHTTPMux("/metrics", exporter, tt.ready)
-
-			req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
-			rec := httptest.NewRecorder()
-			handler.ServeHTTP(rec, req)
-
-			if rec.Code != tt.wantCode {
-				t.Fatalf("status = %d, want %d", rec.Code, tt.wantCode)
-			}
-			if rec.Body.String() != tt.wantBody {
-				t.Fatalf("body = %q, want %q", rec.Body.String(), tt.wantBody)
-			}
-			if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
-				t.Fatalf("Content-Type = %q, want text/plain", ct)
-			}
-		})
+	if rec.Body.String() != "ok\n" {
+		t.Fatalf("body = %q, want ok newline", rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
+		t.Fatalf("Content-Type = %q, want text/plain", ct)
 	}
 }
 

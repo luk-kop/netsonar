@@ -9,13 +9,24 @@ Type=simple
 User=netsonar
 Group=netsonar
 
-ExecStart=/usr/local/bin/netsonar --config /etc/netsonar/config.yaml
+# Optional overrides (e.g. NETSONAR_OPTS="--listen-addr :9999").
+# The leading dash means "don't fail if the file doesn't exist".
+EnvironmentFile=-/etc/default/netsonar
+
+ExecStart=/usr/local/bin/netsonar --config /etc/netsonar/config.yaml $NETSONAR_OPTS
 ExecReload=/bin/kill -HUP $MAINPID
 
 Restart=on-failure
 RestartSec=5s
 
-# Grant CAP_NET_RAW for ICMP and MTU probes.
+SyslogIdentifier=netsonar
+StandardOutput=journal
+StandardError=journal
+
+# Grant CAP_NET_RAW for MTU probes (raw ICMP sockets). Regular ICMP probes use
+# unprivileged udp4 sockets and do not require this capability. Operators using
+# only TCP/HTTP/DNS/TLS/Proxy probes can safely remove AmbientCapabilities and
+# CapabilityBoundingSet.
 AmbientCapabilities=CAP_NET_RAW
 CapabilityBoundingSet=CAP_NET_RAW
 
@@ -24,7 +35,9 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
+PrivateDevices=true
 ReadOnlyPaths=/etc/netsonar
+ProtectClock=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
@@ -34,6 +47,10 @@ RestrictRealtime=true
 MemoryDenyWriteExecute=true
 LockPersonality=true
 SystemCallArchitectures=native
+
+# Resource limits
+MemoryMax=256M
+CPUQuota=25%
 
 [Install]
 WantedBy=multi-user.target

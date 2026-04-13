@@ -139,7 +139,7 @@ This means most MTU targets need no `probe_opts` at all — they inherit the age
 
 In the legacy `probe_mtu_path_bytes` metric, a value of `-1` means all sizes failed. In the newer metric contract, `probe_mtu_bytes` is absent when no size was confirmed, and `probe_mtu_state` carries the reason.
 
-New MTU metrics expose the planned status contract:
+New MTU metrics expose the status contract:
 
 ```text
 probe_mtu_state{state="ok|degraded|unreachable|error", detail="..."} 1
@@ -243,9 +243,9 @@ Performs a TLS handshake and extracts the leaf certificate's `NotAfter` timestam
 
 ## HTTP Body Validation
 
-HTTP request with regex or substring match on the response body. The probe succeeds (`probe_success=1`) only when the response body matches the configured pattern. The match result is also reported separately via `probe_http_body_match` for diagnostic visibility. The agent reads at most 1 MiB of response body; larger responses fail the probe. Supports optional proxy routing via `proxy_url`.
+HTTP request with regex or substring match on the response body. The probe succeeds (`probe_success=1`) when **both** conditions are met: the response body matches the configured pattern, and the response status code satisfies the `expected_status_codes` rule (empty list accepts any status; non-empty list requires the status code to be present). The match result is also reported separately via `probe_http_body_match` for diagnostic visibility. The agent reads at most 1 MiB of response body; larger responses fail the probe. Supports optional proxy routing via `proxy_url`.
 
-`body_match_regex` must be a valid Go regular expression. It is validated when the config is loaded and compiled once when the target prober is created. If both `body_match_regex` and `body_match_string` are set, the regex takes precedence.
+At least one of `body_match_regex` or `body_match_string` must be set — a target without either is rejected at config load time. `body_match_regex` must be a valid Go regular expression. It is validated when the config is loaded and compiled once when the target prober is created. If both `body_match_regex` and `body_match_string` are set, the regex takes precedence.
 
 ```yaml
 - name: "api-health-body"
