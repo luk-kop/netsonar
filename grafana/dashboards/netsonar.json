@@ -668,6 +668,7 @@
         }
       },
       "title": "All Probes \u2014 Status Table",
+      "description": "Current status of every configured probe target. Status OK (green) = probe succeeded, FAIL (red) = probe failed. Sorted by status so failures appear first.",
       "type": "table",
       "transformations": [
         {
@@ -1414,6 +1415,7 @@
         }
       },
       "title": "HTTP Phase Timing (Direct)",
+      "description": "Breakdown of HTTP probe phases: dns_resolve, tcp_connect, tls_handshake (HTTPS only), ttfb (time to first byte), transfer (body download). Direct probes only (no proxy).",
       "type": "timeseries",
       "targets": [
         {
@@ -1711,6 +1713,7 @@
         }
       },
       "title": "ICMP Avg RTT",
+      "description": "Average ICMP echo round-trip time per target. Only populated when at least one echo reply is received. Zero or absent means 100% packet loss.",
       "type": "timeseries",
       "targets": [
         {
@@ -1785,6 +1788,7 @@
         }
       },
       "title": "ICMP Packet Loss",
+      "description": "Packet loss ratio per target (0.0 = no loss, 1.0 = 100% loss). Calculated as (sent - received) / sent for each probe cycle.",
       "type": "timeseries",
       "targets": [
         {
@@ -1841,6 +1845,7 @@
         }
       },
       "title": "ICMP Reply TTL (routing changes show as TTL shifts)",
+      "description": "TTL value from the ICMP echo reply. A sudden change indicates a routing path change (e.g. failover, new hop added/removed).",
       "type": "timeseries",
       "targets": [
         {
@@ -2131,6 +2136,7 @@
         }
       },
       "title": "All MTU Probe States",
+      "description": "Current MTU probe state per target. State: ok = path MTU detected, degraded = below expected minimum, unreachable = all sizes failed, error = probe error. Detail explains the reason (e.g. fragmentation_needed, largest_size_confirmed).",
       "type": "table",
       "transformations": [
         {
@@ -2309,6 +2315,7 @@
         }
       },
       "title": "Path MTU per Target",
+      "description": "Detected path MTU in bytes over time. Calculated as largest successful ICMP payload + 28 bytes (IP + ICMP headers). Standard Ethernet = 1500, WireGuard typical = 1420.",
       "type": "timeseries",
       "targets": [
         {
@@ -2369,6 +2376,7 @@
         }
       },
       "title": "MTU Diagnostic Events (rate)",
+      "description": "Rate of MTU probe diagnostic events. Spikes are normal — they occur once per probe cycle when the prober tests multiple packet sizes. Sustained non-zero values indicate probes overlapping or continuously retrying.",
       "type": "timeseries",
       "targets": [
         {
@@ -2579,6 +2587,7 @@
         }
       },
       "title": "DNS Result Match",
+      "description": "Shows whether DNS resolution results match the configured dns_expected values. 1 = match, 0 = mismatch. Only populated for targets with dns_expected configured. Useful for detecting DNS hijacking or unexpected record changes.",
       "type": "timeseries",
       "targets": [
         {
@@ -3056,6 +3065,7 @@
         }
       },
       "title": "HTTP Body Match",
+      "description": "Shows whether the HTTP response body matches the configured pattern (body_match_string or body_match_regex). 1 = match, 0 = mismatch.",
       "type": "timeseries",
       "targets": [
         {
@@ -3513,6 +3523,7 @@
         }
       },
       "title": "HTTP Phase Timing (Proxied)",
+      "description": "HTTP phase breakdown for proxied probes. tcp_connect includes proxy dial + CONNECT tunnel, making it notably higher than direct probes. The difference approximates proxy overhead.",
       "type": "timeseries",
       "targets": [
         {
@@ -3806,6 +3817,7 @@
         }
       },
       "title": "Proxy CONNECT Duration",
+      "description": "Total wall-clock time for the CONNECT tunnel establishment per proxy target, including TCP dial to proxy and CONNECT handshake.",
       "type": "timeseries",
       "targets": [
         {
@@ -3959,6 +3971,7 @@
         }
       },
       "title": "Proxy CONNECT Status per Target",
+      "description": "Current status of each proxy CONNECT target. OK = proxy accepted the tunnel, FAIL = proxy rejected or connection failed. Sorted by status so failures appear first.",
       "type": "table",
       "transformations": [
         {
@@ -4105,6 +4118,7 @@
         }
       },
       "title": "Proxy CONNECT Phase Timing",
+      "description": "Breakdown of CONNECT probe phases: proxy_dial (TCP to proxy), proxy_tls (TLS with proxy, if HTTPS proxy), proxy_connect (CONNECT request/response). Shown for both successful and failed probes.",
       "type": "timeseries",
       "targets": [
         {
