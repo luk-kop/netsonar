@@ -1,0 +1,374 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Reading guide for the validation dashboard. This dashboard is a regression guard for comparable HTTP phase semantics, not a production Internet benchmark.",
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
+      "id": 6,
+      "options": {
+        "code": {
+          "language": "plaintext",
+          "showLineNumbers": false,
+          "showMiniMap": false
+        },
+        "content": "PASS when Blackbox Success is 1, p50 absolute phase delta is near or below 5 ms for tiny Docker-network phases, and p50 normalized/relative delta is near or below 20%. Treat isolated spikes as outliers; investigate only phases that stay above threshold for 10-15 minutes. This dashboard validates comparable HTTP phases only: NetSonar dns_resolve/tcp_connect/tls_handshake/ttfb/transfer vs Blackbox resolve/connect/tls/processing/transfer.",
+        "mode": "markdown"
+      },
+      "pluginVersion": "13.0.0",
+      "title": "How To Read This Dashboard",
+      "type": "text"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Minimum Blackbox probe_success across the selected validation targets. Must be 1 before timing deltas are meaningful; if this is 0, fix the reference probe or target first.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 4 },
+      "id": 1,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "min(probe_success{job=~\"blackbox-.*\", target_name=~\"$target_name\"})",
+          "legendFormat": "blackbox success",
+          "refId": "A"
+        }
+      ],
+      "title": "Blackbox Success",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Per-phase p50 absolute difference between matching NetSonar and Blackbox HTTP phases over the last 5 minutes, shown as stat tiles for each selected target. Values near or below 5 ms are expected for tiny local Docker-network phases.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.005 },
+              { "color": "red", "value": 0.025 }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 18, "x": 6, "y": 4 },
+      "id": 2,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["max"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\", phase=\"dns_resolve\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"resolve\"}[5m]))",
+          "legendFormat": "dns {{target_name}}",
+          "refId": "A"
+        },
+        {
+          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\", phase=\"tcp_connect\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"connect\"}[5m]))",
+          "legendFormat": "connect {{target_name}}",
+          "refId": "B"
+        },
+        {
+          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\", phase=\"tls_handshake\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"tls\"}[5m]))",
+          "legendFormat": "tls {{target_name}}",
+          "refId": "C"
+        },
+        {
+          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\", phase=\"ttfb\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"processing\"}[5m]))",
+          "legendFormat": "ttfb {{target_name}}",
+          "refId": "D"
+        },
+        {
+          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\", phase=\"transfer\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"transfer\"}[5m]))",
+          "legendFormat": "transfer {{target_name}}",
+          "refId": "E"
+        }
+      ],
+      "title": "p50 Absolute Delta Summary",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Per-phase p50 absolute delta over 5 minutes. Use this to identify which phase differs: dns_resolve vs resolve, tcp_connect vs connect, tls_handshake vs tls, ttfb vs processing, transfer vs transfer.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "line" }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.005 },
+              { "color": "red", "value": 0.025 }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 9 },
+      "id": 3,
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "hideZeros": false, "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\", phase=\"dns_resolve\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"resolve\"}[5m]))",
+          "legendFormat": "dns {{target_name}}",
+          "refId": "A"
+        },
+        {
+          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\", phase=\"tcp_connect\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"connect\"}[5m]))",
+          "legendFormat": "connect {{target_name}}",
+          "refId": "B"
+        },
+        {
+          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\", phase=\"tls_handshake\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"tls\"}[5m]))",
+          "legendFormat": "tls {{target_name}}",
+          "refId": "C"
+        },
+        {
+          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\", phase=\"ttfb\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"processing\"}[5m]))",
+          "legendFormat": "ttfb {{target_name}}",
+          "refId": "D"
+        },
+        {
+          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\", phase=\"transfer\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"transfer\"}[5m]))",
+          "legendFormat": "transfer {{target_name}}",
+          "refId": "E"
+        }
+      ],
+      "title": "p50 Absolute Phase Delta",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Per-phase p50 delta over 5 minutes divided by the Blackbox p50 reference phase, with the denominator clamped to 25 ms. For tiny phases this behaves like absolute delta / 25 ms, so use it together with the absolute delta panel.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "line" }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.2 },
+              { "color": "red", "value": 0.5 }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 17 },
+      "id": 4,
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "hideZeros": false, "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\", phase=\"dns_resolve\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"resolve\"}[5m])) / on(target_name) clamp_min(quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"resolve\"}[5m]), 0.025)",
+          "legendFormat": "dns {{target_name}}",
+          "refId": "A"
+        },
+        {
+          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\", phase=\"tcp_connect\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"connect\"}[5m])) / on(target_name) clamp_min(quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"connect\"}[5m]), 0.025)",
+          "legendFormat": "connect {{target_name}}",
+          "refId": "B"
+        },
+        {
+          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\", phase=\"tls_handshake\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"tls\"}[5m])) / on(target_name) clamp_min(quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"tls\"}[5m]), 0.025)",
+          "legendFormat": "tls {{target_name}}",
+          "refId": "C"
+        },
+        {
+          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\", phase=\"ttfb\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"processing\"}[5m])) / on(target_name) clamp_min(quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"processing\"}[5m]), 0.025)",
+          "legendFormat": "ttfb {{target_name}}",
+          "refId": "D"
+        },
+        {
+          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\", phase=\"transfer\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"transfer\"}[5m])) / on(target_name) clamp_min(quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"transfer\"}[5m]), 0.025)",
+          "legendFormat": "transfer {{target_name}}",
+          "refId": "E"
+        }
+      ],
+      "title": "p50 Normalized Phase Delta",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "p50 total probe duration over 5 minutes for NetSonar and Blackbox on the same validation targets. Values should be in the same scale, but exact equality is not expected.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 25 },
+      "id": 5,
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "hideZeros": false, "mode": "multi", "sort": "none" }
+      },
+      "targets": [
+        {
+          "expr": "quantile_over_time(0.5, probe_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\"}[5m])",
+          "legendFormat": "netsonar {{target_name}}",
+          "refId": "A"
+        },
+        {
+          "expr": "quantile_over_time(0.5, probe_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\"}[5m])",
+          "legendFormat": "blackbox {{target_name}}",
+          "refId": "B"
+        }
+      ],
+      "title": "p50 Total Duration",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 42,
+  "tags": ["netsonar", "validation", "blackbox"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": false, "text": "Prometheus", "value": "Prometheus" },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "name": "datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "type": "datasource"
+      },
+      {
+        "allValue": ".*",
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "definition": "label_values(probe_success{job=~\"blackbox-.*\"}, target_name)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Target",
+        "multi": true,
+        "name": "target_name",
+        "options": [],
+        "query": {
+          "query": "label_values(probe_success{job=~\"blackbox-.*\"}, target_name)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Metrics Validation",
+  "uid": "netsonar-metrics-validation",
+  "version": 1,
+  "weekStart": ""
+}

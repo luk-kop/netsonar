@@ -1,0 +1,220 @@
+# NetSonar — Example Configuration
+#
+# Deploy to: /etc/netsonar/config.yaml
+
+# ---------------------------------------------------------------------------
+# Agent settings
+# ---------------------------------------------------------------------------
+agent:
+  listen_addr: ":9275"
+  metrics_path: "/metrics"
+  default_interval: 30s
+  default_timeout: 5s
+  # Optional: random delay before each target's first probe after startup/reload.
+  # Set to 0s to disable. Must not exceed the shortest effective target interval.
+  initial_probe_jitter: 0s
+  default_icmp_payload_sizes: [1472, 1392, 1372, 1272, 1172, 1072]
+  log_level: info
+  # Log format: text or json. Changing log_format requires an agent restart.
+  log_format: text
+  # Optional: restrict tag keys to a fixed allowlist. When set, targets may
+  # only use keys from this list. When absent or empty, tag keys are collected
+  # dynamically from all targets (max 30 unique keys).
+  # Changing this list requires an agent restart (SIGHUP is not sufficient).
+  #
+  # These keys map to Prometheus labels and Grafana dashboard columns:
+  #   service          → Service
+  #   scope            → Scope          (same-region, cross-region, aws-regional)
+  #   impact           → Impact         (critical, high, medium, low)
+  #   target_region    → Region
+  #   target_partition → Partition
+  #   target_account   → Account
+  allowed_tag_keys:
+    - service
+    - scope
+    - impact
+    - target_region
+    - target_partition
+    - target_account
+
+# ---------------------------------------------------------------------------
+# Targets
+# ---------------------------------------------------------------------------
+targets:
+
+  # TCP — reachability check
+  - name: api-pub
+    address: "api-pub.example.internal:443"
+    probe_type: tcp
+    timeout: 3s
+    tags:
+      service: api-pub
+      scope: same-region
+      impact: critical
+      target_region: eu-central-1
+      target_partition: global
+      target_account: ep-devops-eu1
+
+  # TCP — cross-region example
+  - name: api-int-cross
+    address: "api-int.example.com:443"
+    probe_type: tcp
+    timeout: 3s
+    tags:
+      service: api-int
+      scope: cross-region
+      impact: critical
+      target_region: us-east-1
+      target_partition: global
+      target_account: ep-devops-us1
+
+  # HTTP — reachability + optional status code check
+  # (AWS endpoints return 403 without SigV4 — leave expected_status_codes empty
+  #  to accept any response; we care about reachability and TLS only)
+  - name: ssm-http
+    address: "https://ssm.eu-central-1.amazonaws.com"
+    probe_type: http
+    timeout: 5s
+    probe_opts:
+      method: GET
+      follow_redirects: false
+      expected_status_codes: []
+      # Optional. 0 or omitted uses the 1 MiB default transfer cap.
+      # max_transfer_bytes: 2097152
+    tags:
+      service: vpce
+      scope: aws-regional
+      target_region: eu-central-1
+      target_partition: global
+      target_account: ep-devops-eu1
+
+  # HTTP — via proxy
+  - name: ssm-http-via-proxy
+    address: "https://ssm.eu-central-1.amazonaws.com"
+    probe_type: http
+    timeout: 5s
+    probe_opts:
+      method: GET
+      follow_redirects: false
+      expected_status_codes: []
+      # For authenticated proxies, use: http://user:pass@proxy:port
+      proxy_url: "http://infra-proxy.example.internal:8888"
+    tags:
+      service: vpce
+      scope: aws-regional
+      target_region: eu-central-1
+      target_partition: global
+      target_account: ep-devops-eu1
+
+  # TLS certificate — via proxy
+  - name: ssm-tls-cert-via-proxy
+    address: "ssm.eu-central-1.amazonaws.com:443"
+    probe_type: tls_cert
+    timeout: 5s
+    probe_opts:
+      tls_skip_verify: false
+      proxy_url: "http://infra-proxy.example.internal:8888"
+    tags:
+      service: vpce
+      scope: aws-regional
+      target_region: eu-central-1
+      target_partition: global
+      target_account: ep-devops-eu1
+
+  # HTTP — response body validation
+  - name: api-pub-health
+    address: "https://api-pub.example.internal/health"
+    probe_type: http_body
+    timeout: 5s
+    probe_opts:
+      method: GET
+      body_match_string: "ok"
+    tags:
+      service: api-pub
+      scope: same-region
+      impact: critical
+      target_region: eu-central-1
+      target_partition: global
+      target_account: ep-devops-eu1
+
+  # ICMP — latency and packet loss (IPv4-only)
+  - name: api-pub-icmp
+    address: "api-pub.example.internal"
+    probe_type: icmp
+    timeout: 5s
+    probe_opts:
+      ping_count: 5
+      ping_interval: 1.0
+    tags:
+      service: api-pub
+      scope: same-region
+      target_region: eu-central-1
+      target_partition: global
+      target_account: ep-devops-eu1
+
+  # MTU / PMTUD detection (IPv4-only)
+  # Path MTU = largest successful payload + 28 (20 IP + 8 ICMP headers)
+  #   payload 1472 → MTU 1500 (standard Ethernet)
+  #   payload 1392 → MTU 1420 (common WireGuard default)
+  #   payload 1372 → MTU 1400 (common with tunnels / VPN)
+  - name: api-gw-int-cn-mtu
+    address: "api-gw-int.example.com"
+    probe_type: mtu
+    interval: 300s
+    timeout: 30s
+    probe_opts:
+      expected_min_mtu: 1500
+      mtu_retries: 3
+      mtu_per_attempt_timeout: 2s
+    tags:
+      service: api-gw-int
+      scope: cross-region
+      target_region: cn-north-1
+      target_partition: china
+      target_account: ep-devops-cn1
+
+  # DNS resolution
+  - name: rds-dns
+    address: "db-postgres.abcdefghijklmn.eu-central-1.rds.amazonaws.com"
+    probe_type: dns
+    timeout: 5s
+    probe_opts:
+      dns_query_name: "db-postgres.abcdefghijklmn.eu-central-1.rds.amazonaws.com"
+      dns_query_type: A
+    tags:
+      service: rds-postgres
+      scope: same-region
+      impact: critical
+      target_region: eu-central-1
+      target_partition: global
+      target_account: ep-devops-eu1
+
+  # TLS certificate expiry
+  - name: api-pub-tls
+    address: "api-pub.example.internal:443"
+    probe_type: tls_cert
+    interval: 300s
+    timeout: 5s
+    tags:
+      service: api-pub
+      scope: same-region
+      impact: critical
+      target_region: eu-central-1
+      target_partition: global
+      target_account: ep-devops-eu1
+
+  # Proxy connectivity
+  - name: fwd-proxy
+    address: "https://example.com"
+    probe_type: proxy
+    timeout: 5s
+    probe_opts:
+      # For authenticated proxies, use: http://user:pass@proxy:port
+      proxy_url: "http://fwd-proxy.example.internal:8888"
+    tags:
+      service: proxy
+      scope: same-region
+      impact: high
+      target_region: eu-central-1
+      target_partition: global
+      target_account: ep-devops-eu1

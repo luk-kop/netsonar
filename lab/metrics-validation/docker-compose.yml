@@ -1,0 +1,70 @@
+services:
+  fake-targets:
+    build:
+      context: ../e2e/fake-targets
+    networks:
+      - validation
+
+  netsonar:
+    build:
+      context: ../..
+      dockerfile: lab/dev-stack/Dockerfile.netsonar
+    command: ["--config", "/config/netsonar.yaml"]
+    depends_on:
+      - fake-targets
+    volumes:
+      - ./config/netsonar.yaml:/config/netsonar.yaml:ro
+    networks:
+      - validation
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.27.0
+    volumes:
+      - ./config/blackbox.yml:/etc/blackbox_exporter/config.yml:ro
+    command:
+      - "--config.file=/etc/blackbox_exporter/config.yml"
+    depends_on:
+      - fake-targets
+    networks:
+      - validation
+
+  prometheus:
+    image: prom/prometheus:v3.11.2
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      - netsonar
+      - blackbox-exporter
+    ports:
+      - "9090:9090"
+    networks:
+      - validation
+
+  grafana:
+    image: grafana/grafana:13.0.0
+    volumes:
+      - ./provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ../../grafana/dashboards/shared:/var/lib/grafana/dashboards/shared:ro
+      - ../../grafana/dashboards/metrics-validation:/var/lib/grafana/dashboards/metrics-validation:ro
+      - grafana-data:/var/lib/grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+    networks:
+      - validation
+
+volumes:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  validation:
+    driver: bridge

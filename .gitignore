@@ -1,0 +1,72 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Code coverage profiles and other test artifacts
+*.out
+coverage.*
+*.coverprofile
+profile.cov
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+/netsonar
+/agent
+bin/
+
+# PKI — generated offline, never committed
+pki/
+
+# Lab — generated files (certs, client config)
+lab/openvpn-data/
+lab/client.ovpn
+lab/aws.env
+
+# Editor/IDE
+.idea/
+.vscode/
+.kiro/specs/
+.kiro/settings/
+.codex
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+venv/
+*.egg-info/
+.ruff_cache/
+.python-version
+python/
+
+# Pytest
+.coverage
+.pytest_cache/
+htmlcov/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+terraform.tfvars
+terraform/.build/
+
+# Custom
+.env
+.cache/
+*.log
+lab/dev-stack/config/netsonar.with-internet.yaml
+notes/
+*.zip

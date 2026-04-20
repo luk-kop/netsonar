@@ -1,0 +1,34 @@
+services:
+  fake-targets:
+    build:
+      context: ./fake-targets
+    networks:
+      - e2e
+
+  netsonar:
+    build:
+      context: ../..
+      dockerfile: lab/e2e/Dockerfile.netsonar
+    sysctls:
+      net.ipv4.ping_group_range: "0 2147483647"
+    command: ["--config", "/config/e2e.yaml"]
+    depends_on:
+      - fake-targets
+    volumes:
+      - ./config/e2e.yaml:/config/e2e.yaml:ro
+    networks:
+      - e2e
+
+  test-runner:
+    build:
+      context: ./test-runner
+    depends_on:
+      - netsonar
+    environment:
+      METRICS_URL: "http://netsonar:9275/metrics"
+    networks:
+      - e2e
+
+networks:
+  e2e:
+    driver: bridge

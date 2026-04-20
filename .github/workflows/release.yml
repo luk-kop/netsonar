@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  GO_VERSION: "1.26"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Test
+        run: go test -v -short ./...
+
+      - name: Build (linux/amd64)
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: amd64
+        run: >
+          go build
+          -ldflags="-s -w -X 'main.version=${{ github.ref_name }}'"
+          -o netsonar-linux-amd64
+          ./cmd/agent
+
+      - name: Build (linux/arm64)
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: arm64
+        run: >
+          go build
+          -ldflags="-s -w -X 'main.version=${{ github.ref_name }}'"
+          -o netsonar-linux-arm64
+          ./cmd/agent
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create ${{ github.ref_name }}
+          netsonar-linux-amd64
+          netsonar-linux-arm64
+          --generate-notes

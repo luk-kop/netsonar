@@ -1,0 +1,244 @@
+agent:
+  listen_addr: ":9275"
+  metrics_path: "/metrics"
+  default_interval: 10s
+  default_timeout: 5s
+  log_level: info
+  allowed_tag_keys:
+    - service
+    - scope
+    - impact
+    - target_region
+    - target_partition
+    - target_account
+
+targets:
+  - name: internet-example-https
+    address: "https://example.com/"
+    probe_type: http
+    probe_opts:
+      method: GET
+      expected_status_codes: [200]
+    tags:
+      service: public-web
+      scope: internet
+      impact: low
+      target_region: global
+      target_partition: internet
+      target_account: public
+
+  - name: internet-example-tcp-443
+    address: "example.com:443"
+    probe_type: tcp
+    tags:
+      service: public-web
+      scope: internet
+      impact: low
+      target_region: global
+      target_partition: internet
+      target_account: public
+
+  - name: internet-cloudflare-tcp-cross-region
+    address: "cloudflare.com:443"
+    probe_type: tcp
+    tags:
+      service: public-web
+      scope: cross-region
+      impact: low
+      target_region: global
+      target_partition: internet
+      target_account: public
+
+  - name: internet-google-dns-tcp-aws-regional
+    address: "dns.google:443"
+    probe_type: tcp
+    tags:
+      service: public-dns
+      scope: aws-regional
+      impact: low
+      target_region: global
+      target_partition: internet
+      target_account: public
+
+  - name: internet-example-tls-cert
+    address: "example.com:443"
+    probe_type: tls_cert
+    tags:
+      service: public-web
+      scope: internet
+      impact: low
+      target_region: global
+      target_partition: internet
+      target_account: public
+
+  - name: internet-cloudflare-dns-a
+    address: "cloudflare.com"
+    probe_type: dns
+    probe_opts:
+      dns_query_name: "cloudflare.com"
+      dns_query_type: A
+      dns_server: "1.1.1.1:53"
+    tags:
+      service: public-dns
+      scope: internet
+      impact: low
+      target_region: global
+      target_partition: internet
+      target_account: public
+
+  - name: internet-cloudflare-dns-match
+    address: "one.one.one.one"
+    probe_type: dns
+    probe_opts:
+      dns_query_name: "one.one.one.one"
+      dns_query_type: A
+      dns_server: "1.1.1.1:53"
+      dns_expected: ["1.0.0.1", "1.1.1.1"]
+    tags:
+      service: public-dns
+      scope: internet
+      impact: low
+      target_region: global
+      target_partition: internet
+      target_account: public
+
+  - name: internet-cloudflare-mtu
+    address: "1.1.1.1"
+    probe_type: mtu
+    interval: 120s
+    timeout: 10s
+    probe_opts:
+      icmp_payload_sizes: [1472, 1452, 1432, 1412, 1392, 1372, 1272, 1172, 1072]
+      expected_min_mtu: 1200
+      mtu_retries: 1
+      mtu_per_attempt_timeout: 750ms
+    tags:
+      service: public-mtu
+      scope: internet
+      impact: low
+      target_region: global
+      target_partition: internet
+      target_account: public
+
+  - name: internet-google-mtu
+    address: "8.8.8.8"
+    probe_type: mtu
+    interval: 120s
+    timeout: 10s
+    probe_opts:
+      icmp_payload_sizes: [1472, 1452, 1432, 1412, 1392, 1372, 1272, 1172, 1072]
+      expected_min_mtu: 1200
+      mtu_retries: 1
+      mtu_per_attempt_timeout: 750ms
+    tags:
+      service: public-mtu
+      scope: internet
+      impact: low
+      target_region: global
+      target_partition: internet
+      target_account: public
+
+  - name: internet-quad9-mtu
+    address: "9.9.9.9"
+    probe_type: mtu
+    interval: 120s
+    timeout: 10s
+    probe_opts:
+      icmp_payload_sizes: [1472, 1452, 1432, 1412, 1392, 1372, 1272, 1172, 1072]
+      expected_min_mtu: 1200
+      mtu_retries: 1
+      mtu_per_attempt_timeout: 750ms
+    tags:
+      service: public-mtu
+      scope: internet
+      impact: low
+      target_region: global
+      target_partition: internet
+      target_account: public
+
+  - name: internet-ripe-ping-mtu
+    address: "ping.ripe.net"
+    probe_type: mtu
+    interval: 120s
+    timeout: 10s
+    probe_opts:
+      icmp_payload_sizes: [1472, 1452, 1432, 1412, 1392, 1372, 1272, 1172, 1072]
+      expected_min_mtu: 1200
+      mtu_retries: 1
+      mtu_per_attempt_timeout: 750ms
+    tags:
+      service: public-mtu
+      scope: internet
+      impact: low
+      target_region: global
+      target_partition: internet
+      target_account: public
+
+  - name: internet-badssl-expired-http
+    address: "https://expired.badssl.com/"
+    probe_type: http
+    probe_opts:
+      method: GET
+      expected_status_codes: [200]
+    tags:
+      service: public-tls-badssl
+      scope: internet
+      impact: low
+      target_region: global
+      target_partition: internet
+      target_account: public
+
+  - name: internet-badssl-wrong-host-http
+    address: "https://wrong.host.badssl.com/"
+    probe_type: http
+    probe_opts:
+      method: GET
+      expected_status_codes: [200]
+    tags:
+      service: public-tls-badssl
+      scope: internet
+      impact: low
+      target_region: global
+      target_partition: internet
+      target_account: public
+
+  - name: internet-badssl-self-signed-http
+    address: "https://self-signed.badssl.com/"
+    probe_type: http
+    probe_opts:
+      method: GET
+      expected_status_codes: [200]
+    tags:
+      service: public-tls-badssl
+      scope: internet
+      impact: low
+      target_region: global
+      target_partition: internet
+      target_account: public
+
+  - name: internet-badssl-untrusted-root-http
+    address: "https://untrusted-root.badssl.com/"
+    probe_type: http
+    probe_opts:
+      method: GET
+      expected_status_codes: [200]
+    tags:
+      service: public-tls-badssl
+      scope: internet
+      impact: low
+      target_region: global
+      target_partition: internet
+      target_account: public
+
+  - name: internet-badssl-expired-cert-inspect
+    address: "expired.badssl.com:443"
+    probe_type: tls_cert
+    probe_opts:
+      tls_skip_verify: true
+    tags:
+      service: public-tls-badssl
+      scope: internet
+      impact: low
+      target_region: global
+      target_partition: internet
+      target_account: public
