@@ -2,6 +2,7 @@ package probe
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -41,7 +42,7 @@ func TestICMPProber_ResolutionFailure(t *testing.T) {
 
 // TestICMPProber_SocketError verifies that when the unprivileged ICMP
 // socket cannot be opened (e.g. net.ipv4.ping_group_range does not
-// include the process GID), the prober reports a clear error,
+// include the process effective or supplementary GID), the prober reports a clear error,
 // PacketLoss=1.0, and Success=false.
 //
 // This test is skipped if the socket opens successfully.
@@ -96,7 +97,7 @@ func TestICMPProber_DefaultPingCount(t *testing.T) {
 	prober := &ICMPProber{}
 	result := prober.Probe(ctx, target)
 
-	// We can't guarantee success (depends on CAP_NET_RAW), but the probe
+	// We can't guarantee success (depends on ping_group_range), but the probe
 	// must complete without hanging and PacketLoss must be valid.
 	if result.PacketLoss < 0.0 || result.PacketLoss > 1.0 {
 		t.Fatalf("expected PacketLoss in [0.0, 1.0], got %f", result.PacketLoss)
@@ -162,9 +163,42 @@ func TestICMPProber_ContextCancelled(t *testing.T) {
 	}
 }
 
+func TestICMPEchoSequencePacketLossUsesActualSentOnCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var sends int
+	result := runICMPEchoSequence(ctx, 5, 0, func(ctx context.Context, seq int) (time.Duration, bool, error) {
+		sends++
+		switch seq {
+		case 0:
+			return 10 * time.Millisecond, true, nil
+		case 1:
+			cancel()
+			return 0, true, errors.New("read icmp: timeout")
+		default:
+			t.Fatalf("sendEcho called after context cancellation for seq=%d", seq)
+			return 0, false, nil
+		}
+	})
+
+	if sends != 2 {
+		t.Fatalf("sendEcho calls = %d, want 2", sends)
+	}
+	if !result.Success {
+		t.Fatalf("Success = false, want true; error=%q", result.Error)
+	}
+	if result.PacketLoss != 0.5 {
+		t.Fatalf("PacketLoss = %f, want 0.5", result.PacketLoss)
+	}
+	if result.ICMPAvgRTT != 10*time.Millisecond {
+		t.Fatalf("ICMPAvgRTT = %v, want 10ms", result.ICMPAvgRTT)
+	}
+}
+
 // TestICMPProber_ResultInvariant_SuccessImpliesEmptyError verifies that
 // when Success=true, Error is always empty. This is tested via localhost
-// if CAP_NET_RAW is available.
+// if ping sockets are allowed.
 func TestICMPProber_ResultInvariant_SuccessImpliesEmptyError(t *testing.T) {
 	target := config.TargetConfig{
 		Name:      "test-icmp-invariant-success",

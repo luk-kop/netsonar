@@ -1,8 +1,12 @@
 import http.server
+import os
+import select
 import socket
 import socketserver
+import ssl
 import threading
 import time
+import urllib.parse
 
 
 class HTTPHandler(http.server.BaseHTTPRequestHandler):
@@ -47,6 +51,10 @@ class ProxyHandler(socketserver.StreamRequestHandler):
             if header in (b"\r\n", b"\n", b""):
                 break
 
+        if method == "GET":
+            self._handle_get(target)
+            return
+
         if method != "CONNECT":
             self.wfile.write(b"HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n")
             return
@@ -54,8 +62,60 @@ class ProxyHandler(socketserver.StreamRequestHandler):
         if target == "fake-targets:9000":
             self.wfile.write(b"HTTP/1.1 200 Connection Established\r\nContent-Length: 0\r\n\r\n")
             return
+        if target == "fake-targets:9443":
+            self._tunnel(("127.0.0.1", 9443))
+            return
 
         self.wfile.write(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+
+    def _handle_get(self, target):
+        parsed = urllib.parse.urlparse(target)
+        if parsed.scheme != "http" or parsed.netloc != "fake-targets:8080":
+            self.wfile.write(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+            return
+
+        path = parsed.path or "/"
+        if parsed.query:
+            path = path + "?" + parsed.query
+
+        with socket.create_connection(("127.0.0.1", 8080), timeout=2) as upstream:
+            upstream.sendall(
+                f"GET {path} HTTP/1.1\r\n"
+                "Host: fake-targets:8080\r\n"
+                "Connection: close\r\n"
+                "\r\n"
+                .encode("ascii")
+            )
+            while True:
+                chunk = upstream.recv(4096)
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+
+    def _tunnel(self, upstream_addr):
+        try:
+            upstream = socket.create_connection(upstream_addr, timeout=2)
+        except OSError:
+            self.wfile.write(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+            return
+
+        self.wfile.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+        self.wfile.flush()
+
+        sockets = [self.connection, upstream]
+        try:
+            while True:
+                readable, _, _ = select.select(sockets, [], [], 10)
+                if not readable:
+                    return
+                for src in readable:
+                    dst = upstream if src is self.connection else self.connection
+                    data = src.recv(4096)
+                    if not data:
+                        return
+                    dst.sendall(data)
+        finally:
+            upstream.close()
 
 
 def serve_http():
@@ -78,8 +138,17 @@ def serve_tcp():
             conn, _ = listener.accept()
             conn.close()
 
+def serve_tls():
+    socketserver.ThreadingTCPServer.allow_reuse_address = True
+    cert_path = os.path.join(os.path.dirname(__file__), "fake-targets.crt")
+    key_path = os.path.join(os.path.dirname(__file__), "fake-targets.key")
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(certfile=cert_path, keyfile=key_path)
+    with socketserver.ThreadingTCPServer(("0.0.0.0", 9443), HTTPHandler) as server:
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+        server.serve_forever()
 
-for fn in (serve_http, serve_proxy, serve_tcp):
+for fn in (serve_http, serve_proxy, serve_tcp, serve_tls):
     thread = threading.Thread(target=fn, daemon=True)
     thread.start()
 

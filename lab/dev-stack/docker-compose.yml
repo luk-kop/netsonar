@@ -1,0 +1,59 @@
+services:
+  fake-targets:
+    build:
+      context: ../e2e/fake-targets
+    networks:
+      - devstack
+
+  netsonar:
+    build:
+      context: ../..
+      dockerfile: lab/dev-stack/Dockerfile.netsonar
+    sysctls:
+      net.ipv4.ping_group_range: "0 2147483647"
+    command: ["--config", "${NETSONAR_CONFIG:-/config/netsonar.yaml}"]
+    depends_on:
+      - fake-targets
+    volumes:
+      - ./config:/config:ro
+    networks:
+      - devstack
+
+  prometheus:
+    image: prom/prometheus:v3.11.2
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      - netsonar
+    ports:
+      - "9090:9090"
+    networks:
+      - devstack
+
+  grafana:
+    image: grafana/grafana:13.0.0
+    volumes:
+      - ./provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ../../grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ../../grafana/dashboards:/var/lib/grafana/dashboards/netsonar:ro
+      - grafana-data:/var/lib/grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+    networks:
+      - devstack
+
+volumes:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  devstack:
+    driver: bridge

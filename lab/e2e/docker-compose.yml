@@ -9,8 +9,8 @@ services:
     build:
       context: ../..
       dockerfile: lab/e2e/Dockerfile.netsonar
-    cap_add:
-      - NET_RAW
+    sysctls:
+      net.ipv4.ping_group_range: "0 2147483647"
     command: ["--config", "/config/e2e.yaml"]
     depends_on:
       - fake-targets

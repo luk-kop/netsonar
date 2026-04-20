@@ -86,6 +86,17 @@ targets:
       service: fake-http
       suite: e2e
 
+  - name: http-via-proxy
+    address: "http://fake-targets:8080/ok"
+    probe_type: http
+    probe_opts:
+      method: GET
+      expected_status_codes: [200]
+      proxy_url: "http://fake-targets:8888"
+    tags:
+      service: fake-proxy
+      suite: e2e
+
   - name: proxy-connect-ok
     address: "fake-targets:9000"
     probe_type: proxy
@@ -104,12 +115,44 @@ targets:
       service: fake-proxy
       suite: e2e
 
+  - name: tls-cert-via-proxy
+    address: "fake-targets:9443"
+    probe_type: tls_cert
+    probe_opts:
+      tls_skip_verify: true
+      proxy_url: "http://fake-targets:8888"
+    tags:
+      service: fake-proxy
+      suite: e2e
+
   - name: dns-fake-targets
     address: "fake-targets"
     probe_type: dns
     probe_opts:
       dns_query_name: "fake-targets"
       dns_query_type: A
+    tags:
+      service: fake-dns
+      suite: e2e
+
+  - name: dns-localhost-match
+    address: "localhost"
+    probe_type: dns
+    probe_opts:
+      dns_query_name: "localhost"
+      dns_query_type: A
+      dns_expected: ["127.0.0.1"]
+    tags:
+      service: fake-dns
+      suite: e2e
+
+  - name: dns-localhost-mismatch
+    address: "localhost"
+    probe_type: dns
+    probe_opts:
+      dns_query_name: "localhost"
+      dns_query_type: A
+      dns_expected: ["203.0.113.10"]
     tags:
       service: fake-dns
       suite: e2e

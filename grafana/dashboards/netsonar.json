@@ -44,7 +44,7 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
+        "w": 3,
         "x": 0,
         "y": 1
       },
@@ -99,8 +99,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 4,
+        "w": 3,
+        "x": 3,
         "y": 1
       },
       "id": 2,
@@ -158,8 +158,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 8,
+        "w": 3,
+        "x": 6,
         "y": 1
       },
       "id": 3,
@@ -215,8 +215,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 12,
+        "w": 3,
+        "x": 9,
         "y": 1
       },
       "id": 4,
@@ -270,8 +270,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 16,
+        "w": 3,
+        "x": 12,
         "y": 1
       },
       "id": 5,
@@ -325,8 +325,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 20,
+        "w": 3,
+        "x": 15,
         "y": 1
       },
       "id": 6,
@@ -350,6 +350,126 @@
         {
           "expr": "agent_info{job=~\"$job\"}",
           "legendFormat": "Agent Version {{version}}",
+          "refId": "A",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "semi-dark-blue",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "-"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 18,
+        "y": 1
+      },
+      "id": 8,
+      "options": {
+        "colorMode": "background_solid",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "name"
+      },
+      "title": "",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "topk(1, last_over_time(agent_config_info{job=~\"$job\"}[30s]))",
+          "legendFormat": "Config {{hash}}",
+          "refId": "A",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 3600
+              },
+              {
+                "color": "orange",
+                "value": 86400
+              }
+            ]
+          },
+          "unit": "s",
+          "decimals": 0,
+          "noValue": "-"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 21,
+        "y": 1
+      },
+      "id": 9,
+      "options": {
+        "colorMode": "background_solid",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name"
+      },
+      "title": "",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "time() - agent_config_reload_timestamp_seconds{job=~\"$job\"}",
+          "legendFormat": "Config Age",
           "refId": "A",
           "instant": true
         }
@@ -491,7 +611,11 @@
               },
               {
                 "id": "custom.width",
-                "value": 80
+                "value": 120
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
               }
             ]
           },
@@ -570,12 +694,12 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Proxied"
+              "options": "Path"
             },
             "properties": [
               {
                 "id": "custom.width",
-                "value": 80
+                "value": 90
               },
               {
                 "id": "mappings",
@@ -607,6 +731,10 @@
                   "mode": "fixed",
                   "fixedColor": "transparent"
                 }
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
               }
             ]
           },
@@ -667,7 +795,7 @@
           "show": false
         }
       },
-      "title": "All Probes \u2014 Status Table",
+      "title": "All Probes — Status Table",
       "description": "Current status of every configured probe target. Status OK (green) = probe succeeded, FAIL (red) = probe failed. Sorted by status so failures appear first.",
       "type": "table",
       "transformations": [
@@ -718,7 +846,7 @@
               "target 2": true,
               "target_name 1": true,
               "target_name 2": true,
-              "proxied 2": true
+              "network_path 2": true
             },
             "indexByName": {
               "Value #A": 0,
@@ -729,8 +857,8 @@
               "target 1": 3,
               "probe_type": 4,
               "probe_type 1": 4,
-              "proxied": 5,
-              "proxied 1": 5,
+              "network_path": 5,
+              "network_path 1": 5,
               "port": 6,
               "port 1": 6,
               "scope": 7,
@@ -761,8 +889,8 @@
               "impact 1": "Impact",
               "probe_type": "Probe",
               "probe_type 1": "Probe",
-              "proxied": "Proxied",
-              "proxied 1": "Proxied",
+              "network_path": "Path",
+              "network_path 1": "Path",
               "target": "Target",
               "target 1": "Target",
               "port": "Port",
@@ -868,7 +996,7 @@
           "mode": "multi"
         }
       },
-      "title": "TCP Duration \u2014 Same Region",
+      "title": "TCP Duration — Same Region",
       "type": "timeseries",
       "targets": [
         {
@@ -940,7 +1068,7 @@
           "mode": "multi"
         }
       },
-      "title": "TCP Duration \u2014 Cross Region",
+      "title": "TCP Duration — Cross Region",
       "type": "timeseries",
       "targets": [
         {
@@ -1012,7 +1140,7 @@
           "mode": "multi"
         }
       },
-      "title": "TCP Duration \u2014 AWS Regional Endpoints",
+      "title": "TCP Duration — AWS Regional Endpoints",
       "type": "timeseries",
       "targets": [
         {
@@ -1082,7 +1210,7 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "count(probe_success{job=~\"$job\", probe_type=\"http\", proxied=\"false\"})",
+          "expr": "count(probe_success{job=~\"$job\", probe_type=\"http\", network_path=\"direct\"})",
           "legendFormat": "Total HTTP Direct",
           "refId": "A",
           "instant": true
@@ -1137,7 +1265,7 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "count(probe_success{job=~\"$job\", probe_type=\"http\", proxied=\"false\"} == 1)",
+          "expr": "count(probe_success{job=~\"$job\", probe_type=\"http\", network_path=\"direct\"} == 1)",
           "legendFormat": "Reachable",
           "refId": "A",
           "instant": true
@@ -1196,7 +1324,7 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "count(probe_success{job=~\"$job\", probe_type=\"http\", proxied=\"false\"} == 0) OR on() vector(0)",
+          "expr": "count(probe_success{job=~\"$job\", probe_type=\"http\", network_path=\"direct\"} == 0) OR on() vector(0)",
           "legendFormat": "Unreachable",
           "refId": "A",
           "instant": true
@@ -1253,7 +1381,7 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "avg(probe_duration_seconds{job=~\"$job\", probe_type=\"http\", proxied=\"false\"})",
+          "expr": "avg(probe_duration_seconds{job=~\"$job\", probe_type=\"http\", network_path=\"direct\"})",
           "legendFormat": "Avg Duration",
           "refId": "A",
           "instant": true
@@ -1286,7 +1414,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 8,
         "x": 0,
         "y": 41
       },
@@ -1309,7 +1437,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "probe_duration_seconds{job=~\"$job\", probe_type=\"http\", proxied=\"false\"}",
+          "expr": "probe_duration_seconds{job=~\"$job\", probe_type=\"http\", network_path=\"direct\"}",
           "legendFormat": "{{target_name}}",
           "refId": "A"
         }
@@ -1342,8 +1470,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
+        "w": 8,
+        "x": 8,
         "y": 41
       },
       "id": 25,
@@ -1363,8 +1491,76 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "probe_http_status_code{job=~\"$job\", probe_type=\"http\", proxied=\"false\"}",
+          "expr": "probe_http_status_code{job=~\"$job\", probe_type=\"http\", network_path=\"direct\"}",
           "legendFormat": "{{target_name}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisLabel": "",
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "lineWidth": 2,
+            "pointSize": 5,
+            "showPoints": "auto",
+            "spanNulls": false
+          },
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 41
+      },
+      "id": 203,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "HTTP Response Truncated",
+      "description": "1 means the HTTP response body exceeded the effective transfer limit. Truncation does not fail normal HTTP probes by itself.",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "probe_http_response_truncated{job=~\"$job\", probe_type=\"http\"}",
+          "legendFormat": "{{target_name}} (path={{network_path}})",
           "refId": "A"
         }
       ]
@@ -1381,13 +1577,16 @@
           },
           "custom": {
             "axisBorderShow": false,
-            "axisLabel": "",
             "drawStyle": "line",
             "fillOpacity": 10,
             "lineWidth": 2,
             "pointSize": 5,
             "showPoints": "auto",
-            "spanNulls": false
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
           },
           "unit": "s"
         },
@@ -1399,7 +1598,7 @@
         "x": 0,
         "y": 49
       },
-      "id": 26,
+      "id": 200,
       "options": {
         "legend": {
           "displayMode": "table",
@@ -1414,13 +1613,204 @@
           "mode": "multi"
         }
       },
-      "title": "HTTP Phase Timing (Direct)",
-      "description": "Breakdown of HTTP probe phases: dns_resolve, tcp_connect, tls_handshake (HTTPS only), ttfb (time to first byte), transfer (body download). Direct probes only (no proxy).",
+      "title": "Slowest HTTP Probes (topk 10)",
+      "description": "Top 10 slowest HTTP probes by total duration, combining direct and proxy-path targets. Use this to spot the slowest endpoints at a glance.",
       "type": "timeseries",
       "targets": [
         {
-          "expr": "probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", proxied=\"false\"}",
-          "legendFormat": "{{target_name}} \u2014 {{phase}}",
+          "expr": "topk(10, probe_duration_seconds{job=~\"$job\", probe_type=\"http\"})",
+          "legendFormat": "{{target_name}} (path={{network_path}})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "cellOptions": {
+              "type": "color-background",
+              "mode": "gradient"
+            },
+            "filterable": true
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.05
+              },
+              {
+                "color": "red",
+                "value": 0.2
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "target_name"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto"
+                }
+              },
+              {
+                "id": "unit",
+                "value": "string"
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Drill down: HTTP Details",
+                    "url": "/d/netsonar-http-details?var-job=$job&var-target_name=${__value.raw}&${__url_time_range}",
+                    "targetBlank": false
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 57
+      },
+      "id": 201,
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "ttfb",
+            "desc": true
+          }
+        ]
+      },
+      "title": "HTTP Phase Breakdown (current)",
+      "description": "Instant snapshot of all HTTP phase durations pivoted by target. Cell colours: green <50 ms, yellow 50–200 ms, red >200 ms. Identifies which phase is slow for each target.",
+      "type": "table",
+      "targets": [
+        {
+          "expr": "probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\"}",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true,
+              "probe_type": true,
+              "network_path": true,
+              "scope": true,
+              "service": true,
+              "target": true,
+              "impact": true,
+              "target_account": true,
+              "target_partition": true,
+              "target_region": true
+            },
+            "indexByName": {
+              "target_name": 0,
+              "phase": 1,
+              "Value": 2
+            }
+          }
+        },
+        {
+          "id": "groupingToMatrix",
+          "options": {
+            "columnField": "phase",
+            "rowField": "target_name",
+            "valueField": "Value"
+          }
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.05
+              },
+              {
+                "color": "red",
+                "value": 0.2
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 67
+      },
+      "id": 202,
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      },
+      "title": "HTTP Total Duration (last)",
+      "description": "Horizontal bar gauge of total HTTP probe duration per target. Thresholds match the phase breakdown table: green <50 ms, yellow 50–200 ms, red >200 ms.",
+      "type": "bargauge",
+      "targets": [
+        {
+          "expr": "probe_duration_seconds{job=~\"$job\", probe_type=\"http\"}",
+          "legendFormat": "{{target_name}} (path={{network_path}})",
           "refId": "A"
         }
       ]
@@ -1431,7 +1821,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 57
+        "y": 75
       },
       "id": 103,
       "title": "ICMP Ping",
@@ -1464,7 +1854,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 58
+        "y": 76
       },
       "id": 30,
       "options": {
@@ -1523,7 +1913,7 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 58
+        "y": 76
       },
       "id": 31,
       "options": {
@@ -1580,7 +1970,7 @@
         "h": 4,
         "w": 6,
         "x": 12,
-        "y": 58
+        "y": 76
       },
       "id": 32,
       "options": {
@@ -1639,7 +2029,7 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 58
+        "y": 76
       },
       "id": 33,
       "options": {
@@ -1695,7 +2085,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 62
+        "y": 80
       },
       "id": 34,
       "options": {
@@ -1770,7 +2160,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 62
+        "y": 80
       },
       "id": 35,
       "options": {
@@ -1788,7 +2178,7 @@
         }
       },
       "title": "ICMP Packet Loss",
-      "description": "Packet loss ratio per target (0.0 = no loss, 1.0 = 100% loss). Calculated as (sent - received) / sent for each probe cycle.",
+      "description": "Packet loss ratio per target (0.0 = no loss, 1.0 = 100% loss). Calculated as (ping_count - received) / ping_count for each probe cycle. If the probe context expires before all pings are sent, unsent pings count as lost.",
       "type": "timeseries",
       "targets": [
         {
@@ -1827,7 +2217,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 70
+        "y": 88
       },
       "id": 36,
       "options": {
@@ -1844,12 +2234,12 @@
           "mode": "multi"
         }
       },
-      "title": "ICMP Reply TTL (routing changes show as TTL shifts)",
-      "description": "TTL value from the ICMP echo reply. A sudden change indicates a routing path change (e.g. failover, new hop added/removed).",
+      "title": "ICMP RTT Stddev",
+      "description": "Population standard deviation of ICMP echo RTT. High stddev with normal average RTT indicates an unstable path.",
       "type": "timeseries",
       "targets": [
         {
-          "expr": "probe_icmp_hop_count{job=~\"$job\"}",
+          "expr": "probe_icmp_stddev_rtt_seconds{job=~\"$job\"}",
           "legendFormat": "{{target_name}}",
           "refId": "A"
         }
@@ -1861,7 +2251,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 78
+        "y": 96
       },
       "id": 104,
       "title": "MTU Detection",
@@ -1894,7 +2284,7 @@
         "h": 4,
         "w": 8,
         "x": 0,
-        "y": 79
+        "y": 97
       },
       "id": 40,
       "options": {
@@ -1953,7 +2343,7 @@
         "h": 4,
         "w": 8,
         "x": 8,
-        "y": 79
+        "y": 97
       },
       "id": 41,
       "options": {
@@ -2018,7 +2408,7 @@
         "h": 4,
         "w": 8,
         "x": 16,
-        "y": 79
+        "y": 97
       },
       "id": 42,
       "options": {
@@ -2120,7 +2510,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 83
+        "y": 101
       },
       "id": 43,
       "options": {
@@ -2189,9 +2579,9 @@
               "target_partition": true,
               "target_partition 1": true,
               "target_partition 2": true,
-              "proxied": true,
-              "proxied 1": true,
-              "proxied 2": true,
+              "network_path": true,
+              "network_path 1": true,
+              "network_path 2": true,
               "target_account": true,
               "target_account 1": true,
               "target_account 2": true,
@@ -2202,7 +2592,8 @@
               "target_region 2": true,
               "target 2": true,
               "state 2": true,
-              "detail 2": true
+              "detail 2": true,
+              "Value #A": true
             },
             "indexByName": {
               "target_name": 0,
@@ -2214,8 +2605,7 @@
               "state 1": 5,
               "detail": 6,
               "detail 1": 6,
-              "Value #B": 7,
-              "Value #A": 8
+              "Value #B": 7
             },
             "renameByName": {
               "target_name": "Name",
@@ -2227,7 +2617,6 @@
               "state 1": "State",
               "detail": "Detail",
               "detail 1": "Detail",
-              "Value #A": "State Value",
               "Value #B": "MTU (bytes)"
             }
           }
@@ -2296,7 +2685,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 91
+        "y": 109
       },
       "id": 46,
       "options": {
@@ -2350,15 +2739,15 @@
               "mode": "none"
             }
           },
-          "unit": "short"
+          "unit": "ops"
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 6,
+        "h": 8,
         "w": 16,
         "x": 0,
-        "y": 99
+        "y": 117
       },
       "id": 44,
       "options": {
@@ -2375,29 +2764,14 @@
           "sort": "desc"
         }
       },
-      "title": "MTU Diagnostic Events (rate)",
-      "description": "Rate of MTU probe diagnostic events. Spikes are normal — they occur once per probe cycle when the prober tests multiple packet sizes. Sustained non-zero values indicate probes overlapping or continuously retrying.",
+      "title": "MTU Current State",
+      "description": "Current MTU probe state counts by state/detail.",
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum(rate(probe_mtu_frag_needed_total{job=~\"$job\"}[$__rate_interval]))",
-          "legendFormat": "Frag Needed",
+          "expr": "sum by (state, detail) (probe_mtu_state{job=~\"$job\"})",
+          "legendFormat": "{{state}} / {{detail}}",
           "refId": "A"
-        },
-        {
-          "expr": "sum(rate(probe_mtu_timeouts_total{job=~\"$job\"}[$__rate_interval]))",
-          "legendFormat": "Timeouts",
-          "refId": "B"
-        },
-        {
-          "expr": "sum(rate(probe_mtu_retries_total{job=~\"$job\"}[$__rate_interval]))",
-          "legendFormat": "Retries",
-          "refId": "C"
-        },
-        {
-          "expr": "sum(rate(probe_mtu_local_errors_total{job=~\"$job\"}[$__rate_interval]))",
-          "legendFormat": "Local Errors",
-          "refId": "D"
         }
       ]
     },
@@ -2431,10 +2805,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 6,
+        "h": 8,
         "w": 8,
         "x": 16,
-        "y": 99
+        "y": 117
       },
       "id": 45,
       "options": {
@@ -2468,7 +2842,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 97
+        "y": 125
       },
       "id": 105,
       "title": "DNS Resolution",
@@ -2502,7 +2876,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 98
+        "y": 126
       },
       "id": 50,
       "options": {
@@ -2571,7 +2945,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 98
+        "y": 126
       },
       "id": 51,
       "options": {
@@ -2603,7 +2977,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 106
+        "y": 134
       },
       "id": 106,
       "title": "TLS Certificate Expiry",
@@ -2632,7 +3006,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Days Until Expiry"
+              "options": "Expires In (d)"
             },
             "properties": [
               {
@@ -2697,6 +3071,53 @@
           {
             "matcher": {
               "id": "byName",
+              "options": "Path"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "true": {
+                        "color": "orange",
+                        "text": "YES"
+                      },
+                      "false": {
+                        "color": "transparent",
+                        "text": ""
+                      }
+                    },
+                    "type": "value"
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "transparent"
+                }
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
               "options": "Service"
             },
             "properties": [
@@ -2705,14 +3126,74 @@
                 "value": 180
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Name"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 300
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Scope"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 130
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Region"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 130
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Account"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 160
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Impact"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
+              }
+            ]
           }
         ]
       },
       "gridPos": {
         "h": 8,
-        "w": 24,
+        "w": 12,
         "x": 0,
-        "y": 107
+        "y": 135
       },
       "id": 60,
       "options": {
@@ -2720,14 +3201,15 @@
         "sortBy": [
           {
             "desc": false,
-            "displayName": "Days Until Expiry"
+            "displayName": "Expires In (d)"
           }
         ],
         "footer": {
           "show": false
         }
       },
-      "title": "TLS Certificate Expiry",
+      "title": "TLS Certificate Expiry — Earliest",
+      "description": "Days until the earliest TLS peer certificate expiry observed in the latest probe result. Targets where the latest probe failed without retrieving a certificate do not appear in this table.",
       "type": "table",
       "transformations": [
         {
@@ -2745,23 +3227,186 @@
               "port": true,
               "visibility": true,
               "provider": true,
-              "target_partition": true,
-              "scope": true
+              "target_partition": true
             },
             "renameByName": {
               "target_name": "Name",
               "target": "Target",
+              "network_path": "Path",
               "service": "Service",
               "impact": "Impact",
+              "scope": "Scope",
               "target_region": "Region",
-              "Value": "Days Until Expiry"
+              "target_account": "Account",
+              "Value": "Expires In (d)"
+            },
+            "indexByName": {
+              "target_name": 0,
+              "target": 1,
+              "network_path": 2,
+              "service": 3,
+              "impact": 4,
+              "scope": 5,
+              "target_region": 6,
+              "target_account": 7,
+              "Value": 8
             }
           }
         }
       ],
       "targets": [
         {
-          "expr": "(probe_tls_cert_expiry_timestamp{job=~\"$job\"} - time()) / 86400",
+          "expr": "(probe_tls_cert_expiry_timestamp_seconds{job=~\"$job\"} - time()) / 86400",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true,
+            "inspect": false
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Expires In (d)"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "gradient"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 14
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 30
+                    },
+                    {
+                      "color": "green",
+                      "value": 60
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 135
+      },
+      "id": 61,
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": false,
+            "displayName": "Expires In (d)"
+          }
+        ],
+        "footer": {
+          "show": false
+        }
+      },
+      "title": "TLS Certificate Expiry — Chain",
+      "description": "Days until each certificate in the peer chain expires, including cert_index and cert_role labels from the latest probe result.",
+      "type": "table",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "instance": true,
+              "url": true,
+              "host": true,
+              "monitor": true,
+              "probe_type": true,
+              "port": true,
+              "visibility": true,
+              "provider": true,
+              "target_partition": true
+            },
+            "renameByName": {
+              "target_name": "Name",
+              "target": "Target",
+              "network_path": "Path",
+              "cert_index": "Cert #",
+              "cert_role": "Role",
+              "service": "Service",
+              "impact": "Impact",
+              "scope": "Scope",
+              "target_region": "Region",
+              "target_account": "Account",
+              "Value": "Expires In (d)"
+            },
+            "indexByName": {
+              "target_name": 0,
+              "target": 1,
+              "network_path": 2,
+              "cert_index": 3,
+              "cert_role": 4,
+              "service": 5,
+              "impact": 6,
+              "scope": 7,
+              "target_region": 8,
+              "target_account": 9,
+              "Value": 10
+            }
+          }
+        }
+      ],
+      "targets": [
+        {
+          "expr": "(probe_tls_cert_chain_expiry_timestamp_seconds{job=~\"$job\"} - time()) / 86400",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -2775,7 +3420,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 115
+        "y": 143
       },
       "id": 107,
       "title": "HTTP Body Probes",
@@ -2808,7 +3453,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 116
+        "y": 144
       },
       "id": 73,
       "options": {
@@ -2863,7 +3508,7 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 116
+        "y": 144
       },
       "id": 74,
       "options": {
@@ -2922,7 +3567,7 @@
         "h": 4,
         "w": 6,
         "x": 12,
-        "y": 116
+        "y": 144
       },
       "id": 75,
       "options": {
@@ -2979,7 +3624,7 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 116
+        "y": 144
       },
       "id": 76,
       "options": {
@@ -3049,7 +3694,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 120
+        "y": 148
       },
       "id": 70,
       "options": {
@@ -3104,7 +3749,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 120
+        "y": 148
       },
       "id": 71,
       "options": {
@@ -3157,7 +3802,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 120
+        "y": 148
       },
       "id": 78,
       "options": {
@@ -3190,10 +3835,10 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 128
+        "y": 156
       },
       "id": 108,
-      "title": "Proxied HTTP Probes",
+      "title": "Proxy-Path HTTP Probes",
       "type": "row"
     },
     {
@@ -3223,7 +3868,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 129
+        "y": 157
       },
       "id": 79,
       "options": {
@@ -3244,8 +3889,8 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "count(probe_success{job=~\"$job\", probe_type=\"http\", proxied=\"true\"})",
-          "legendFormat": "Total Proxied HTTP",
+          "expr": "count(probe_success{job=~\"$job\", probe_type=\"http\", network_path=\"proxy\"})",
+          "legendFormat": "Total Proxy-Path HTTP",
           "refId": "A",
           "instant": true
         }
@@ -3278,7 +3923,7 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 129
+        "y": 157
       },
       "id": 80,
       "options": {
@@ -3299,7 +3944,7 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "count(probe_success{job=~\"$job\", probe_type=\"http\", proxied=\"true\"} == 1)",
+          "expr": "count(probe_success{job=~\"$job\", probe_type=\"http\", network_path=\"proxy\"} == 1)",
           "legendFormat": "Reachable HTTP",
           "refId": "A",
           "instant": true
@@ -3337,7 +3982,7 @@
         "h": 4,
         "w": 6,
         "x": 12,
-        "y": 129
+        "y": 157
       },
       "id": 81,
       "options": {
@@ -3358,7 +4003,7 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "count(probe_success{job=~\"$job\", probe_type=\"http\", proxied=\"true\"} == 0) OR on() vector(0)",
+          "expr": "count(probe_success{job=~\"$job\", probe_type=\"http\", network_path=\"proxy\"} == 0) OR on() vector(0)",
           "legendFormat": "Unreachable HTTP",
           "refId": "A",
           "instant": true
@@ -3394,7 +4039,7 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 129
+        "y": 157
       },
       "id": 82,
       "options": {
@@ -3415,8 +4060,8 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "avg(probe_duration_seconds{job=~\"$job\", probe_type=\"http\", proxied=\"true\"})",
-          "legendFormat": "Avg Proxied HTTP",
+          "expr": "avg(probe_duration_seconds{job=~\"$job\", probe_type=\"http\", network_path=\"proxy\"})",
+          "legendFormat": "Avg Proxy-Path HTTP",
           "refId": "A",
           "instant": true
         }
@@ -3450,7 +4095,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 133
+        "y": 161
       },
       "id": 83,
       "options": {
@@ -3467,68 +4112,12 @@
           "mode": "multi"
         }
       },
-      "title": "Proxied HTTP Duration",
+      "title": "Proxy-Path HTTP Duration",
       "type": "timeseries",
       "targets": [
         {
-          "expr": "probe_duration_seconds{job=~\"$job\", probe_type=\"http\", proxied=\"true\"}",
+          "expr": "probe_duration_seconds{job=~\"$job\", probe_type=\"http\", network_path=\"proxy\"}",
           "legendFormat": "{{target_name}}",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisLabel": "",
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 2,
-            "pointSize": 5,
-            "showPoints": "auto",
-            "spanNulls": false
-          },
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 133
-      },
-      "id": 72,
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "mean",
-            "max",
-            "lastNotNull"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "title": "HTTP Phase Timing (Proxied)",
-      "description": "HTTP phase breakdown for proxied probes. tcp_connect includes proxy dial + CONNECT tunnel, making it notably higher than direct probes. The difference approximates proxy overhead.",
-      "type": "timeseries",
-      "targets": [
-        {
-          "expr": "probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", proxied=\"true\"}",
-          "legendFormat": "{{target_name}} \u2014 {{phase}}",
           "refId": "A"
         }
       ]
@@ -3539,7 +4128,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 141
+        "y": 169
       },
       "id": 109,
       "title": "Proxy CONNECT Probes",
@@ -3572,7 +4161,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 142
+        "y": 170
       },
       "id": 84,
       "options": {
@@ -3627,7 +4216,7 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 142
+        "y": 170
       },
       "id": 85,
       "options": {
@@ -3686,7 +4275,7 @@
         "h": 4,
         "w": 6,
         "x": 12,
-        "y": 142
+        "y": 170
       },
       "id": 86,
       "options": {
@@ -3743,7 +4332,7 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 142
+        "y": 170
       },
       "id": 87,
       "options": {
@@ -3799,7 +4388,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 146
+        "y": 174
       },
       "id": 88,
       "options": {
@@ -3901,7 +4490,11 @@
               },
               {
                 "id": "custom.width",
-                "value": 80
+                "value": 120
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
               }
             ]
           },
@@ -3952,10 +4545,10 @@
         ]
       },
       "gridPos": {
-        "h": 6,
+        "h": 8,
         "w": 24,
         "x": 0,
-        "y": 154
+        "y": 182
       },
       "id": 89,
       "options": {
@@ -4018,9 +4611,9 @@
               "probe_type": true,
               "probe_type 1": true,
               "probe_type 2": true,
-              "proxied": true,
-              "proxied 1": true,
-              "proxied 2": true,
+              "network_path": true,
+              "network_path 1": true,
+              "network_path 2": true,
               "impact 2": true,
               "target_partition 2": true,
               "target_region 2": true,
@@ -4100,7 +4693,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 146
+        "y": 174
       },
       "id": 77,
       "options": {
@@ -4118,12 +4711,12 @@
         }
       },
       "title": "Proxy CONNECT Phase Timing",
-      "description": "Breakdown of CONNECT probe phases: proxy_dial (TCP to proxy), proxy_tls (TLS with proxy, if HTTPS proxy), proxy_connect (CONNECT request/response). Shown for both successful and failed probes.",
+      "description": "Phases observed in the latest CONNECT probe result: proxy_dial (TCP to proxy), proxy_tls (TLS with proxy, if HTTPS proxy), proxy_connect (CONNECT request/response). Shown for both successful and failed probes; missing phases mean the probe did not reach that phase.",
       "type": "timeseries",
       "targets": [
         {
           "expr": "probe_phase_duration_seconds{job=~\"$job\", probe_type=\"proxy\"}",
-          "legendFormat": "{{target_name}} \u2014 {{phase}}",
+          "legendFormat": "{{target_name}} — {{phase}}",
           "refId": "A"
         }
       ]

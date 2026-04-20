@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -90,6 +91,27 @@ func mockAuthProxy(t *testing.T, expectedAuth string) (string, func()) {
 func basicProxyAuth(username, password string) string {
 	token := base64.StdEncoding.EncodeToString([]byte(username + ":" + password))
 	return "Basic " + token
+}
+
+func mockClosingProxy(t *testing.T) (string, func()) {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to start mock proxy listener: %v", err)
+	}
+
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			_ = conn.Close()
+		}
+	}()
+
+	return ln.Addr().String(), func() { _ = ln.Close() }
 }
 
 // TestProxyProber_Success verifies that probing through a mock proxy that
@@ -244,6 +266,40 @@ func TestProxyProber_DoesNotLeakProxyCredentialsInErrors(t *testing.T) {
 	}
 }
 
+func TestProxyProber_PreservesPhasesOnHTTPSProxyTLSFailure(t *testing.T) {
+	proxyAddr, cleanup := mockClosingProxy(t)
+	defer cleanup()
+
+	target := config.TargetConfig{
+		Name:      "test-proxy-tls-failure-phases",
+		Address:   "https://example.com",
+		ProbeType: config.ProbeTypeProxy,
+		Timeout:   5 * time.Second,
+		ProbeOpts: config.ProbeOptions{
+			ProxyURL: "https://" + proxyAddr,
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
+	defer cancel()
+
+	prober := &ProxyProber{}
+	result := prober.Probe(ctx, target)
+
+	if result.Success {
+		t.Fatal("expected Success=false for HTTPS proxy TLS failure")
+	}
+	if !strings.Contains(result.Error, "proxy tls handshake") {
+		t.Fatalf("expected TLS handshake error, got %q", result.Error)
+	}
+	if result.Phases["proxy_dial"] <= 0 {
+		t.Fatalf("expected proxy_dial phase to be preserved, got %v", result.Phases)
+	}
+	if _, ok := result.Phases["proxy_tls"]; ok {
+		t.Fatalf("did not expect proxy_tls phase on failed handshake, got %v", result.Phases)
+	}
+}
+
 // TestProxyProber_ProxyReturnsNon200 verifies that when the proxy returns
 // a non-200 status, Success=false and Error contains the status code.
 func TestProxyProber_ProxyReturnsNon200(t *testing.T) {
@@ -276,6 +332,12 @@ func TestProxyProber_ProxyReturnsNon200(t *testing.T) {
 	expected := "proxy CONNECT returned status 403"
 	if result.Error != expected {
 		t.Fatalf("expected Error=%q, got %q", expected, result.Error)
+	}
+	if result.Phases["proxy_dial"] <= 0 {
+		t.Fatalf("expected proxy_dial phase to be preserved, got %v", result.Phases)
+	}
+	if result.Phases["proxy_connect"] <= 0 {
+		t.Fatalf("expected proxy_connect phase to be preserved, got %v", result.Phases)
 	}
 }
 
@@ -413,5 +475,59 @@ func TestParseTunnelDestination_Invalid(t *testing.T) {
 	_, err := parseTunnelDestination("not-a-url-or-host-port")
 	if err == nil {
 		t.Fatal("expected error for invalid input, got nil")
+	}
+}
+
+// TestParseTunnelDestination_IPv6 verifies that IPv6 literals in URLs are
+// returned with a single pair of brackets and the scheme-default port.
+func TestParseTunnelDestination_IPv6(t *testing.T) {
+	cases := []struct {
+		name    string
+		address string
+		want    string
+	}{
+		{"https no port", "https://[2001:db8::1]", "[2001:db8::1]:443"},
+		{"http no port", "http://[::1]", "[::1]:80"},
+		{"https explicit port", "https://[2001:db8::1]:8443", "[2001:db8::1]:8443"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseTunnelDestination(tc.address)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("parseTunnelDestination(%q) = %q, want %q", tc.address, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestHostPortForURL covers the scheme-default port and IPv6 literal paths
+// used by ProxyProber when resolving the dial address for the proxy itself.
+func TestHostPortForURL(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"http ipv4 no port", "http://127.0.0.1", "127.0.0.1:80"},
+		{"https ipv4 no port", "https://127.0.0.1", "127.0.0.1:443"},
+		{"http ipv6 no port", "http://[2001:db8::1]", "[2001:db8::1]:80"},
+		{"https ipv6 no port", "https://[::1]", "[::1]:443"},
+		{"http ipv6 explicit port", "http://[::1]:3128", "[::1]:3128"},
+		{"http hostname explicit port", "http://proxy.example:3128", "proxy.example:3128"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			u, err := url.Parse(tc.raw)
+			if err != nil {
+				t.Fatalf("url.Parse(%q): %v", tc.raw, err)
+			}
+			got := hostPortForURL(u)
+			if got != tc.want {
+				t.Fatalf("hostPortForURL(%q) = %q, want %q", tc.raw, got, tc.want)
+			}
+		})
 	}
 }

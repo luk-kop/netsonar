@@ -30,12 +30,12 @@ func baseEnv() Env {
 			}
 			return nil, os.ErrNotExist
 		},
-		Getuid:                func() int { return 10001 },
-		Getgid:                func() int { return 10001 },
-		Getgroups:             func() ([]int, error) { return []int{10001, 20000}, nil },
-		OpenUnprivilegedICMP:  func() error { return nil },
-		CheckRawICMPPMTUProbe: func() error { return nil },
-		ListenTCP:             func(string) error { return nil },
+		Getuid:               func() int { return 10001 },
+		Getgid:               func() int { return 10001 },
+		Getgroups:            func() ([]int, error) { return []int{10001, 20000}, nil },
+		OpenUnprivilegedICMP: func() error { return nil },
+		CheckMTUPingSocket:   func() error { return nil },
+		ListenTCP:            func(string) error { return nil },
 	}
 }
 
@@ -50,7 +50,7 @@ func TestRunWithEnv_ConfigLoadFailureIsDoctorFailure(t *testing.T) {
 	}
 }
 
-func TestRunWithEnv_NoMTUSkipsRawICMPFailure(t *testing.T) {
+func TestRunWithEnv_NoMTUSkipsMTUPingSocketFailure(t *testing.T) {
 	path := writeDoctorConfig(t, `
 agent:
   default_interval: 30s
@@ -61,7 +61,7 @@ targets:
     probe_type: tcp
 `)
 	env := baseEnv()
-	env.CheckRawICMPPMTUProbe = func() error { return errors.New("operation not permitted") }
+	env.CheckMTUPingSocket = func() error { return errors.New("operation not permitted") }
 
 	result := RunWithEnv(path, env)
 
@@ -73,7 +73,7 @@ targets:
 	}
 }
 
-func TestRunWithEnv_MTURequiresRawICMPPMTUProbe(t *testing.T) {
+func TestRunWithEnv_MTURequiresPingSocketPMTUProbe(t *testing.T) {
 	path := writeDoctorConfig(t, `
 agent:
   default_interval: 30s
@@ -87,15 +87,15 @@ targets:
       expected_min_mtu: 1400
 `)
 	env := baseEnv()
-	env.CheckRawICMPPMTUProbe = func() error { return errors.New("operation not permitted") }
+	env.CheckMTUPingSocket = func() error { return errors.New("operation not permitted") }
 
 	result := RunWithEnv(path, env)
 
 	if result.OK() {
-		t.Fatal("expected MTU config to fail when raw ICMP PMTU check fails")
+		t.Fatal("expected MTU config to fail when ping socket PMTU check fails")
 	}
-	if got := findCheck(result, "MTU", "raw ICMP + PMTUDISC"); got == nil || got.Severity != Fail {
-		t.Fatalf("raw ICMP check = %+v, want FAIL", got)
+	if got := findCheck(result, "MTU", "ping socket + PMTUDISC"); got == nil || got.Severity != Fail {
+		t.Fatalf("ping socket check = %+v, want FAIL", got)
 	}
 }
 
@@ -260,7 +260,7 @@ targets:
 `)
 	env := baseEnv()
 	env.OpenUnprivilegedICMP = nil
-	env.CheckRawICMPPMTUProbe = nil
+	env.CheckMTUPingSocket = nil
 	env.ReadFile = func(path string) ([]byte, error) {
 		return nil, os.ErrNotExist
 	}
@@ -279,7 +279,7 @@ targets:
 	if got := findCheck(result, "ICMP", "environment"); got == nil || got.Severity != Warn {
 		t.Fatalf("ICMP unsupported check = %+v, want WARN", got)
 	}
-	if got := findCheck(result, "MTU", "raw ICMP + PMTUDISC"); got == nil || got.Severity != Warn {
+	if got := findCheck(result, "MTU", "ping socket + PMTUDISC"); got == nil || got.Severity != Warn {
 		t.Fatalf("MTU unsupported check = %+v, want WARN", got)
 	}
 }

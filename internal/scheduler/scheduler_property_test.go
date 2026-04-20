@@ -278,11 +278,15 @@ func TestPropertySchedulerGoroutineCountMatchesTargetCount(t *testing.T) {
 
 			s.Start(ctx, cfg)
 
-			// Allow goroutines to launch.
-			time.Sleep(50 * time.Millisecond)
+			// Wait for goroutines to launch with a bounded poll instead of
+			// a fixed sleep, which is fragile under CI load.
+			expected := len(targets)
+			deadline := time.Now().Add(2 * time.Second)
+			for s.Targets() != expected && time.Now().Before(deadline) {
+				time.Sleep(5 * time.Millisecond)
+			}
 
 			got := s.Targets()
-			expected := len(targets)
 
 			if got != expected {
 				t.Logf("goroutine count mismatch: got %d, expected %d", got, expected)
@@ -369,8 +373,11 @@ func TestPropertySchedulerStopLeavesZeroGoroutines(t *testing.T) {
 
 			s.Start(ctx, cfg)
 
-			// Allow goroutines to launch and begin blocking.
-			time.Sleep(50 * time.Millisecond)
+			// Wait for goroutines to launch with a bounded poll.
+			deadline := time.Now().Add(2 * time.Second)
+			for s.Targets() != len(targets) && time.Now().Before(deadline) {
+				time.Sleep(5 * time.Millisecond)
+			}
 
 			// Verify goroutines are running before stop.
 			beforeStop := s.Targets()

@@ -4,16 +4,15 @@ package doctor
 
 import (
 	"fmt"
-	"net"
-	"syscall"
 
 	"golang.org/x/net/icmp"
+	"golang.org/x/sys/unix"
 )
 
 func DefaultEnv() Env {
 	env := fillEnvDefaults(Env{})
 	env.OpenUnprivilegedICMP = openUnprivilegedICMP
-	env.CheckRawICMPPMTUProbe = checkRawICMPPMTUProbe
+	env.CheckMTUPingSocket = checkMTUPingSocket
 	return env
 }
 
@@ -26,33 +25,18 @@ func openUnprivilegedICMP() error {
 	return nil
 }
 
-func checkRawICMPPMTUProbe() error {
-	rawPC, err := net.ListenPacket("ip4:icmp", "0.0.0.0")
+func checkMTUPingSocket() error {
+	fd, err := unix.Socket(unix.AF_INET, unix.SOCK_DGRAM|unix.SOCK_CLOEXEC, unix.IPPROTO_ICMP)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = rawPC.Close() }()
+	defer func() { _ = unix.Close(fd) }()
 
-	sc, ok := rawPC.(interface {
-		SyscallConn() (syscall.RawConn, error)
-	})
-	if !ok {
-		return fmt.Errorf("packet conn does not support SyscallConn")
+	if err := unix.SetsockoptInt(fd, unix.IPPROTO_IP, unix.IP_RECVERR, 1); err != nil {
+		return fmt.Errorf("set IP_RECVERR: %w", err)
 	}
-	rawConn, err := sc.SyscallConn()
-	if err != nil {
-		return fmt.Errorf("get raw conn: %w", err)
-	}
-
-	var sockErr error
-	err = rawConn.Control(func(fd uintptr) {
-		sockErr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_IP, syscall.IP_MTU_DISCOVER, syscall.IP_PMTUDISC_PROBE)
-	})
-	if err != nil {
-		return fmt.Errorf("raw conn control: %w", err)
-	}
-	if sockErr != nil {
-		return fmt.Errorf("set IP_MTU_DISCOVER: %w", sockErr)
+	if err := unix.SetsockoptInt(fd, unix.IPPROTO_IP, unix.IP_MTU_DISCOVER, unix.IP_PMTUDISC_PROBE); err != nil {
+		return fmt.Errorf("set IP_MTU_DISCOVER: %w", err)
 	}
 	return nil
 }

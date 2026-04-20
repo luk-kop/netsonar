@@ -2,8 +2,10 @@
 package metrics
 
 import (
+	"bytes"
+	"crypto/x509"
 	"net/http"
-	"strings"
+	"strconv"
 	"time"
 
 	"netsonar/internal/config"
@@ -14,11 +16,11 @@ import (
 )
 
 // commonLabels are the Prometheus labels applied to every probe metric.
-// The first four ("target", "target_name", "probe_type", "proxied") are
-// always present; "proxied" is automatically set to "true" when the target
-// uses a proxy_url, "false" otherwise. The rest are derived dynamically
-// from the tag keys found in the configuration.
-var baseLabels = []string{"target", "target_name", "probe_type", "proxied"}
+// The first four ("target", "target_name", "probe_type", "network_path") are
+// always present; "network_path" is automatically set to "proxy" when the
+// target uses a proxy_url, "direct" otherwise. The rest are derived
+// dynamically from the tag keys found in the configuration.
+var baseLabels = []string{"target", "target_name", "probe_type", "network_path"}
 
 // MetricsExporter registers Prometheus metric descriptors, records probe
 // results, and serves the /metrics HTTP endpoint using a custom registry.
@@ -35,28 +37,25 @@ type MetricsExporter struct {
 	httpStatusCode *prometheus.GaugeVec
 
 	// TLS-specific.
-	tlsCertExpiry *prometheus.GaugeVec
+	tlsCertExpiry      *prometheus.GaugeVec
+	tlsCertChainExpiry *prometheus.GaugeVec
 
 	// ICMP-specific.
 	icmpPacketLoss *prometheus.GaugeVec
 	icmpAvgRTT     *prometheus.GaugeVec
-	icmpHopCount   *prometheus.GaugeVec
+	icmpStddevRTT  *prometheus.GaugeVec
 
 	// MTU-specific.
-	mtuPathMTU          *prometheus.GaugeVec
-	mtuBytes            *prometheus.GaugeVec
-	mtuState            *prometheus.GaugeVec
-	mtuFragNeededTotal  *prometheus.CounterVec
-	mtuTimeoutsTotal    *prometheus.CounterVec
-	mtuRetriesTotal     *prometheus.CounterVec
-	mtuLocalErrorsTotal *prometheus.CounterVec
+	mtuBytes *prometheus.GaugeVec
+	mtuState *prometheus.GaugeVec
 
 	// DNS-specific.
 	dnsResolveTime *prometheus.GaugeVec
 	dnsResultMatch *prometheus.GaugeVec
 
 	// HTTP body-specific.
-	httpBodyMatch *prometheus.GaugeVec
+	httpBodyMatch         *prometheus.GaugeVec
+	httpResponseTruncated *prometheus.GaugeVec
 
 	// Scheduler.
 	probeSkippedOverlapTotal *prometheus.CounterVec
@@ -105,9 +104,14 @@ func NewMetricsExporter(tagKeys []string) *MetricsExporter {
 		}, commonLabels),
 
 		tlsCertExpiry: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "probe_tls_cert_expiry_timestamp",
-			Help: "Unix timestamp of TLS certificate expiry.",
+			Name: "probe_tls_cert_expiry_timestamp_seconds",
+			Help: "Unix timestamp in seconds of the earliest TLS peer certificate expiry.",
 		}, commonLabels),
+
+		tlsCertChainExpiry: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "probe_tls_cert_chain_expiry_timestamp_seconds",
+			Help: "Unix timestamp in seconds of each TLS peer certificate expiry.",
+		}, append(commonLabels, "cert_index", "cert_role")),
 
 		icmpPacketLoss: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "probe_icmp_packet_loss_ratio",
@@ -119,14 +123,9 @@ func NewMetricsExporter(tagKeys []string) *MetricsExporter {
 			Help: "Average ICMP echo round-trip time in seconds.",
 		}, commonLabels),
 
-		icmpHopCount: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "probe_icmp_hop_count",
-			Help: "TTL / hop count from ICMP echo reply.",
-		}, commonLabels),
-
-		mtuPathMTU: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "probe_mtu_path_bytes",
-			Help: "Detected path MTU in bytes (-1 if all sizes failed).",
+		icmpStddevRTT: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "probe_icmp_stddev_rtt_seconds",
+			Help: "Population standard deviation of ICMP echo round-trip time in seconds.",
 		}, commonLabels),
 
 		mtuBytes: prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -138,26 +137,6 @@ func NewMetricsExporter(tagKeys []string) *MetricsExporter {
 			Name: "probe_mtu_state",
 			Help: "MTU probe state as an info metric with state and detail labels (value is always 1).",
 		}, append(commonLabels, "state", "detail")),
-
-		mtuFragNeededTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "probe_mtu_frag_needed_total",
-			Help: "Total ICMP fragmentation-needed responses matched by MTU probes.",
-		}, commonLabels),
-
-		mtuTimeoutsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "probe_mtu_timeouts_total",
-			Help: "Total MTU probe attempts that timed out.",
-		}, commonLabels),
-
-		mtuRetriesTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "probe_mtu_retries_total",
-			Help: "Total additional MTU probe attempts performed after the first attempt in a retry group.",
-		}, commonLabels),
-
-		mtuLocalErrorsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "probe_mtu_local_errors_total",
-			Help: "Total local host/kernel send errors observed by MTU probes, such as EMSGSIZE.",
-		}, commonLabels),
 
 		dnsResolveTime: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "probe_dns_resolve_seconds",
@@ -172,6 +151,11 @@ func NewMetricsExporter(tagKeys []string) *MetricsExporter {
 		httpBodyMatch: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "probe_http_body_match",
 			Help: "1 if response body matches configured pattern, 0 otherwise.",
+		}, commonLabels),
+
+		httpResponseTruncated: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "probe_http_response_truncated",
+			Help: "1 if the HTTP response body exceeded the effective transfer limit, 0 otherwise.",
 		}, commonLabels),
 
 		probeSkippedOverlapTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -195,7 +179,7 @@ func NewMetricsExporter(tagKeys []string) *MetricsExporter {
 		}),
 
 		agentConfigReloadTS: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "agent_config_reload_timestamp",
+			Name: "agent_config_reload_timestamp_seconds",
 			Help: "Unix timestamp of last configuration reload.",
 		}),
 	}
@@ -207,20 +191,17 @@ func NewMetricsExporter(tagKeys []string) *MetricsExporter {
 		m.probePhaseDuration,
 		m.httpStatusCode,
 		m.tlsCertExpiry,
+		m.tlsCertChainExpiry,
 		m.icmpPacketLoss,
 		m.icmpAvgRTT,
-		m.icmpHopCount,
-		m.mtuPathMTU,
+		m.icmpStddevRTT,
 		m.mtuBytes,
 		m.mtuState,
-		m.mtuFragNeededTotal,
-		m.mtuTimeoutsTotal,
-		m.mtuRetriesTotal,
-		m.mtuLocalErrorsTotal,
 		m.probeSkippedOverlapTotal,
 		m.dnsResolveTime,
 		m.dnsResultMatch,
 		m.httpBodyMatch,
+		m.httpResponseTruncated,
 		m.agentInfo,
 		m.agentConfigInfo,
 		m.agentTargetsTotal,
@@ -245,15 +226,15 @@ func (m *MetricsExporter) Handler() http.Handler {
 // Tags map, plus the target address and probe_type. Tag keys are determined
 // dynamically from the exporter's tagKeys slice.
 func (m *MetricsExporter) buildLabels(target config.TargetConfig) prometheus.Labels {
-	proxied := "false"
+	networkPath := "direct"
 	if target.ProbeOpts.ProxyURL != "" {
-		proxied = "true"
+		networkPath = "proxy"
 	}
 	labels := prometheus.Labels{
-		"target":      target.Address,
-		"target_name": target.Name,
-		"probe_type":  string(target.ProbeType),
-		"proxied":     proxied,
+		"target":       target.Address,
+		"target_name":  target.Name,
+		"probe_type":   string(target.ProbeType),
+		"network_path": networkPath,
 	}
 	for _, key := range m.tagKeys {
 		val := ""
@@ -279,6 +260,15 @@ func (m *MetricsExporter) Record(target config.TargetConfig, result probe.ProbeR
 	m.probeSuccess.With(labels).Set(successVal)
 	m.probeDuration.With(labels).Set(result.Duration.Seconds())
 
+	// Current-observation semantics: delete all known phase series first,
+	// then set only phases present in this result. Missing phases (e.g.
+	// tls_handshake when the probe failed before TLS) disappear from
+	// /metrics rather than retaining stale values from a previous run.
+	for _, phase := range knownPhases {
+		phaseLabels := cloneLabels(labels)
+		phaseLabels["phase"] = phase
+		m.probePhaseDuration.Delete(phaseLabels)
+	}
 	for phase, dur := range result.Phases {
 		phaseLabels := cloneLabels(labels)
 		phaseLabels["phase"] = phase
@@ -289,37 +279,35 @@ func (m *MetricsExporter) Record(target config.TargetConfig, result probe.ProbeR
 	switch target.ProbeType {
 	case config.ProbeTypeHTTP:
 		m.httpStatusCode.With(labels).Set(float64(result.StatusCode))
-		if !result.CertExpiry.IsZero() {
-			m.tlsCertExpiry.With(labels).Set(float64(result.CertExpiry.Unix()))
+		m.recordTLSResult(result, labels)
+		truncatedVal := 0.0
+		if result.HTTPResponseTruncated {
+			truncatedVal = 1.0
 		}
+		m.httpResponseTruncated.With(labels).Set(truncatedVal)
 
 	case config.ProbeTypeICMP:
 		m.icmpPacketLoss.With(labels).Set(result.PacketLoss)
 		m.icmpAvgRTT.With(labels).Set(result.ICMPAvgRTT.Seconds())
-		m.icmpHopCount.With(labels).Set(float64(result.HopCount))
+		m.icmpStddevRTT.With(labels).Set(result.ICMPStddevRTT.Seconds())
 
 	case config.ProbeTypeMTU:
-		m.mtuPathMTU.With(labels).Set(float64(result.PathMTU))
-		m.recordMTUResult(target, result, labels)
-		m.mtuFragNeededTotal.With(labels).Add(float64(result.MTUFragNeededCount))
-		m.mtuTimeoutsTotal.With(labels).Add(float64(result.MTUTimeoutCount))
-		m.mtuRetriesTotal.With(labels).Add(float64(result.MTURetryCount))
-		m.mtuLocalErrorsTotal.With(labels).Add(float64(result.MTULocalErrorCount))
+		m.recordMTUResult(result, labels)
 
 	case config.ProbeTypeDNS:
 		m.dnsResolveTime.With(labels).Set(result.DNSResolveTime.Seconds())
-		if len(target.ProbeOpts.DNSExpectedResults) > 0 {
+		if result.DNSMatchEvaluated {
 			matchVal := 0.0
-			if result.Success {
+			if result.DNSMatched {
 				matchVal = 1.0
 			}
 			m.dnsResultMatch.With(labels).Set(matchVal)
+		} else {
+			m.dnsResultMatch.Delete(labels)
 		}
 
 	case config.ProbeTypeTLSCert:
-		if !result.CertExpiry.IsZero() {
-			m.tlsCertExpiry.With(labels).Set(float64(result.CertExpiry.Unix()))
-		}
+		m.recordTLSResult(result, labels)
 
 	case config.ProbeTypeHTTPBody:
 		bodyVal := 0.0
@@ -334,7 +322,37 @@ func (m *MetricsExporter) Record(target config.TargetConfig, result probe.ProbeR
 	}
 }
 
-func (m *MetricsExporter) recordMTUResult(target config.TargetConfig, result probe.ProbeResult, labels prometheus.Labels) {
+func (m *MetricsExporter) recordTLSResult(result probe.ProbeResult, labels prometheus.Labels) {
+	m.tlsCertChainExpiry.DeletePartialMatch(labels)
+
+	if !result.CertExpiry.IsZero() {
+		m.tlsCertExpiry.With(labels).Set(float64(result.CertExpiry.Unix()))
+	} else {
+		m.tlsCertExpiry.Delete(labels)
+	}
+
+	for i, cert := range result.TLSCertificates {
+		if cert == nil {
+			continue
+		}
+		certLabels := cloneLabels(labels)
+		certLabels["cert_index"] = strconv.Itoa(i)
+		certLabels["cert_role"] = certificateRole(i, cert)
+		m.tlsCertChainExpiry.With(certLabels).Set(float64(cert.NotAfter.Unix()))
+	}
+}
+
+func certificateRole(index int, cert *x509.Certificate) string {
+	if index == 0 {
+		return "leaf"
+	}
+	if bytes.Equal(cert.RawIssuer, cert.RawSubject) {
+		return "root"
+	}
+	return "intermediate"
+}
+
+func (m *MetricsExporter) recordMTUResult(result probe.ProbeResult, labels prometheus.Labels) {
 	m.mtuState.DeletePartialMatch(labels)
 
 	if result.PathMTU > 0 {
@@ -343,54 +361,22 @@ func (m *MetricsExporter) recordMTUResult(target config.TargetConfig, result pro
 		m.mtuBytes.Delete(labels)
 	}
 
-	state, detail := mtuStateDetail(target, result)
+	state, detail := mtuStateDetail(result)
 	stateLabels := cloneLabels(labels)
 	stateLabels["state"] = state
 	stateLabels["detail"] = detail
 	m.mtuState.With(stateLabels).Set(1)
 }
 
-func mtuStateDetail(target config.TargetConfig, result probe.ProbeResult) (string, string) {
-	if result.MTUState != "" && result.MTUDetail != "" {
-		return result.MTUState, result.MTUDetail
-	}
-	return legacyMTUStateDetail(target, result)
+func mtuStateDetail(result probe.ProbeResult) (string, string) {
+	return result.MTUState, result.MTUDetail
 }
 
-func legacyMTUStateDetail(target config.TargetConfig, result probe.ProbeResult) (string, string) {
-	if result.Success && result.PathMTU > 0 {
-		state := probe.MTUStateOK
-		if target.ProbeOpts.ExpectedMinMTU > 0 && result.PathMTU < target.ProbeOpts.ExpectedMinMTU {
-			state = probe.MTUStateDegraded
-		}
-		return state, probe.MTUDetailLargestSizeConfirmed
-	}
-
-	switch {
-	case strings.Contains(result.Error, "permission denied"):
-		return probe.MTUStateError, probe.MTUDetailPermissionDenied
-	case strings.Contains(result.Error, "resolve IPv4 address"):
-		return probe.MTUStateError, probe.MTUDetailResolveError
-	case strings.Contains(result.Error, "all MTU sizes failed"), strings.Contains(result.Error, "all sizes failed"):
-		return probe.MTUStateDegraded, probe.MTUDetailAllSizesTimedOut
-	case strings.Contains(result.Error, "context cancelled"):
-		return probe.MTUStateError, probe.MTUDetailInternalError
-	default:
-		return probe.MTUStateError, probe.MTUDetailInternalError
-	}
-}
-
-// knownPhases are the phase label values used by probe_phase_duration_seconds.
-var knownPhases = []string{
-	"dns_resolve",
-	"tcp_connect",
-	"tls_handshake",
-	"ttfb",
-	"transfer",
-	"proxy_dial",
-	"proxy_tls",
-	"proxy_connect",
-}
+// knownPhases are all phase label values used by probe_phase_duration_seconds.
+// Record and DeleteTarget use this list for bounded exact deletes so stale
+// current-observation phase series do not survive later results. Sourced from
+// probe.AllPhases so there is a single source of truth with the probers.
+var knownPhases = probe.AllPhases
 
 // DeleteTarget removes all metric series associated with a target. This
 // must be called when a target is removed or changed during a config reload
@@ -402,20 +388,17 @@ func (m *MetricsExporter) DeleteTarget(target config.TargetConfig) {
 	m.probeDuration.Delete(labels)
 	m.httpStatusCode.Delete(labels)
 	m.tlsCertExpiry.Delete(labels)
+	m.tlsCertChainExpiry.DeletePartialMatch(labels)
 	m.icmpPacketLoss.Delete(labels)
 	m.icmpAvgRTT.Delete(labels)
-	m.icmpHopCount.Delete(labels)
-	m.mtuPathMTU.Delete(labels)
+	m.icmpStddevRTT.Delete(labels)
 	m.mtuBytes.Delete(labels)
 	m.mtuState.DeletePartialMatch(labels)
-	m.mtuFragNeededTotal.Delete(labels)
-	m.mtuTimeoutsTotal.Delete(labels)
-	m.mtuRetriesTotal.Delete(labels)
-	m.mtuLocalErrorsTotal.Delete(labels)
 	m.probeSkippedOverlapTotal.Delete(labels)
 	m.dnsResolveTime.Delete(labels)
 	m.dnsResultMatch.Delete(labels)
 	m.httpBodyMatch.Delete(labels)
+	m.httpResponseTruncated.Delete(labels)
 
 	for _, phase := range knownPhases {
 		phaseLabels := cloneLabels(labels)
@@ -454,7 +437,7 @@ func (m *MetricsExporter) SetTargetsTotal(count int) {
 	m.agentTargetsTotal.Set(float64(count))
 }
 
-// SetConfigReloadTimestamp sets the agent_config_reload_timestamp gauge.
+// SetConfigReloadTimestamp sets the agent_config_reload_timestamp_seconds gauge.
 func (m *MetricsExporter) SetConfigReloadTimestamp(t time.Time) {
 	m.agentConfigReloadTS.Set(float64(t.Unix()))
 }

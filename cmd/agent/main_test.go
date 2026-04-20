@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -74,7 +76,7 @@ func TestSetupLogger_WiresLevelVarIntoDefaultHandler(t *testing.T) {
 
 	ctx := context.Background()
 
-	setupLogger("warn")
+	setupLogger("warn", "text")
 	if got := agentLogLevel.Level(); got != slog.LevelWarn {
 		t.Fatalf("after setupLogger(warn): level = %v, want warn", got)
 	}
@@ -96,6 +98,52 @@ func TestSetupLogger_WiresLevelVarIntoDefaultHandler(t *testing.T) {
 	}
 	if !slog.Default().Enabled(ctx, slog.LevelError) {
 		t.Errorf("default logger should be enabled for LevelError after configureLogger(error)")
+	}
+}
+
+func TestSetupLogger_FormatSelection(t *testing.T) {
+	originalDefault := slog.Default()
+	originalLevel := agentLogLevel.Level()
+	originalStderr := os.Stderr
+	t.Cleanup(func() {
+		slog.SetDefault(originalDefault)
+		agentLogLevel.Set(originalLevel)
+		os.Stderr = originalStderr
+	})
+
+	cases := []struct {
+		name       string
+		format     string
+		wantPrefix string
+	}{
+		{name: "text", format: "text", wantPrefix: "time="},
+		{name: "json", format: "json", wantPrefix: "{"},
+		{name: "unknown-falls-back-to-text", format: "bogus", wantPrefix: "time="},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r, w, err := os.Pipe()
+			if err != nil {
+				t.Fatalf("pipe: %v", err)
+			}
+			os.Stderr = w
+
+			setupLogger("info", tc.format)
+			slog.Info("format probe", "k", "v")
+			_ = w.Close()
+
+			var buf bytes.Buffer
+			if _, err := buf.ReadFrom(r); err != nil {
+				t.Fatalf("read log output: %v", err)
+			}
+			_ = r.Close()
+
+			got := strings.TrimSpace(buf.String())
+			if !strings.HasPrefix(got, tc.wantPrefix) {
+				t.Fatalf("log output prefix = %q, want prefix %q; full output: %q", got, tc.wantPrefix, got)
+			}
+		})
 	}
 }
 
@@ -189,4 +237,18 @@ func TestNewProber_CoversAllValidProbeTypes(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNewProber_PanicsForUnknownProbeType(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic for unknown probe type")
+		}
+	}()
+
+	_ = newProber(config.TargetConfig{
+		Name:      "test",
+		Address:   "example.com:443",
+		ProbeType: config.ProbeType("bogus"),
+	})
 }

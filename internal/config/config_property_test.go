@@ -54,6 +54,14 @@ func genLogLevel() gopter.Gen {
 	})
 }
 
+// genLogFormat picks a random valid log format.
+func genLogFormat() gopter.Gen {
+	formats := []string{"text", "json"}
+	return gen.IntRange(0, len(formats)-1).Map(func(i int) string {
+		return formats[i]
+	})
+}
+
 // genTags generates a small map of alphanumeric key-value pairs (0–3 entries).
 func genTags() gopter.Gen {
 	return gen.IntRange(0, 3).FlatMap(func(v interface{}) gopter.Gen {
@@ -200,6 +208,7 @@ func genAgentConfig() gopter.Gen {
 		genDuration(10, 60), // default interval
 		genDuration(1, 9),   // default timeout
 		genLogLevel(),
+		genLogFormat(),
 		gen.Bool(), // whether to include default_icmp_payload_sizes
 	).Map(func(vals []interface{}) AgentConfig {
 		cfg := AgentConfig{
@@ -208,8 +217,9 @@ func genAgentConfig() gopter.Gen {
 			DefaultInterval: vals[2].(time.Duration),
 			DefaultTimeout:  vals[3].(time.Duration),
 			LogLevel:        vals[4].(string),
+			LogFormat:       vals[5].(string),
 		}
-		if vals[5].(bool) {
+		if vals[6].(bool) {
 			cfg.DefaultICMPPayloadSizes = []int{1472, 1392, 1372, 1272}
 		}
 		return cfg

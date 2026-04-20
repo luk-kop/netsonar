@@ -4,12 +4,15 @@ package config
 import (
 	"fmt"
 	"net"
-	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
-	"strconv"
+	"strings"
 	"time"
+	"unicode"
+
+	"netsonar/internal/proxyurl"
 
 	"go.yaml.in/yaml/v4"
 )
@@ -57,6 +60,13 @@ var ValidLogLevels = map[string]bool{
 	"error": true,
 }
 
+// ValidLogFormats is the case-sensitive set of allowed agent.log_format values.
+// The empty string is resolved to "text" in applyDefaults.
+var ValidLogFormats = map[string]bool{
+	"text": true,
+	"json": true,
+}
+
 var validHTTPMethods = map[string]bool{
 	"GET":  true,
 	"HEAD": true,
@@ -77,10 +87,10 @@ const MaxGlobalTagKeys = 30
 // FixedLabels are the label names hardcoded in the agent binary.
 // Tag keys must not collide with these.
 var FixedLabels = map[string]bool{
-	"target":      true,
-	"target_name": true,
-	"probe_type":  true,
-	"proxied":     true,
+	"target":       true,
+	"target_name":  true,
+	"probe_type":   true,
+	"network_path": true,
 }
 
 // prometheusLabelRe matches valid Prometheus label names: [a-zA-Z_][a-zA-Z0-9_]*.
@@ -108,8 +118,10 @@ type AgentConfig struct {
 	MetricsPath             string        `yaml:"metrics_path"`
 	DefaultInterval         time.Duration `yaml:"default_interval"`
 	DefaultTimeout          time.Duration `yaml:"default_timeout"`
+	InitialProbeJitter      time.Duration `yaml:"initial_probe_jitter"`
 	DefaultICMPPayloadSizes []int         `yaml:"default_icmp_payload_sizes"`
 	LogLevel                string        `yaml:"log_level"`
+	LogFormat               string        `yaml:"log_format"`
 	AllowedTagKeys          []string      `yaml:"allowed_tag_keys"`
 }
 
@@ -132,6 +144,7 @@ type ProbeOptions struct {
 	ExpectedStatusCodes []int             `yaml:"expected_status_codes"`
 	FollowRedirects     bool              `yaml:"follow_redirects"`
 	TLSSkipVerify       bool              `yaml:"tls_skip_verify"`
+	MaxTransferBytes    int64             `yaml:"max_transfer_bytes"`
 
 	// HTTP body validation
 	BodyMatchRegex  string `yaml:"body_match_regex"`
@@ -167,7 +180,7 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	if err := yaml.Load(data, &cfg, yaml.WithKnownFields()); err != nil {
 		return nil, fmt.Errorf("parsing YAML: %w", err)
 	}
 
@@ -191,6 +204,9 @@ func applyDefaults(cfg *Config) {
 	if cfg.Agent.LogLevel == "" {
 		cfg.Agent.LogLevel = "info"
 	}
+	if cfg.Agent.LogFormat == "" {
+		cfg.Agent.LogFormat = "text"
+	}
 
 	for i := range cfg.Targets {
 		if cfg.Targets[i].Interval == 0 {
@@ -203,9 +219,9 @@ func applyDefaults(cfg *Config) {
 		// Apply default ICMP payload sizes for MTU probes that don't specify their own.
 		if cfg.Targets[i].ProbeType == ProbeTypeMTU && len(cfg.Targets[i].ProbeOpts.ICMPPayloadSizes) == 0 {
 			if len(cfg.Agent.DefaultICMPPayloadSizes) > 0 {
-				cfg.Targets[i].ProbeOpts.ICMPPayloadSizes = cfg.Agent.DefaultICMPPayloadSizes
+				cfg.Targets[i].ProbeOpts.ICMPPayloadSizes = slices.Clone(cfg.Agent.DefaultICMPPayloadSizes)
 			} else {
-				cfg.Targets[i].ProbeOpts.ICMPPayloadSizes = DefaultICMPPayloadSizes
+				cfg.Targets[i].ProbeOpts.ICMPPayloadSizes = slices.Clone(DefaultICMPPayloadSizes)
 			}
 		}
 		if cfg.Targets[i].ProbeType == ProbeTypeMTU {
@@ -231,9 +247,24 @@ func validate(cfg *Config) error {
 	if !ValidLogLevels[cfg.Agent.LogLevel] {
 		return fmt.Errorf("agent: invalid log_level %q (valid: debug, info, warn, error)", cfg.Agent.LogLevel)
 	}
+	if !ValidLogFormats[cfg.Agent.LogFormat] {
+		return fmt.Errorf("agent: invalid log_format %q (valid: text, json)", cfg.Agent.LogFormat)
+	}
+
+	if err := validateMetricsPath(cfg.Agent.MetricsPath); err != nil {
+		return err
+	}
+	if cfg.Agent.InitialProbeJitter < 0 {
+		return fmt.Errorf("agent: initial_probe_jitter must be >= 0")
+	}
 
 	// Validate agent-level default_icmp_payload_sizes if provided.
 	if len(cfg.Agent.DefaultICMPPayloadSizes) > 0 {
+		for i, v := range cfg.Agent.DefaultICMPPayloadSizes {
+			if v <= 0 {
+				return fmt.Errorf("agent: default_icmp_payload_sizes[%d] = %d must be > 0", i, v)
+			}
+		}
 		for i := 1; i < len(cfg.Agent.DefaultICMPPayloadSizes); i++ {
 			if cfg.Agent.DefaultICMPPayloadSizes[i] >= cfg.Agent.DefaultICMPPayloadSizes[i-1] {
 				return fmt.Errorf("agent: default_icmp_payload_sizes must be sorted in descending order (found %d at index %d after %d)",
@@ -254,6 +285,7 @@ func validate(cfg *Config) error {
 	allowlistMode := len(allowlist) > 0
 
 	seen := make(map[string]bool, len(cfg.Targets))
+	var shortestInterval time.Duration
 
 	for i, t := range cfg.Targets {
 		// Required fields.
@@ -280,6 +312,9 @@ func validate(cfg *Config) error {
 		if t.Interval <= 0 {
 			return fmt.Errorf("target %q: interval must be > 0 (set target.interval or agent.default_interval)", t.Name)
 		}
+		if shortestInterval == 0 || t.Interval < shortestInterval {
+			shortestInterval = t.Interval
+		}
 
 		// Timeout must be positive and no greater than interval.
 		if t.Timeout <= 0 {
@@ -305,6 +340,10 @@ func validate(cfg *Config) error {
 		}
 	}
 
+	if cfg.Agent.InitialProbeJitter > 0 && shortestInterval > 0 && cfg.Agent.InitialProbeJitter > shortestInterval {
+		return fmt.Errorf("agent: initial_probe_jitter (%s) exceeds shortest target interval (%s)", cfg.Agent.InitialProbeJitter, shortestInterval)
+	}
+
 	// Dynamic mode: enforce MaxGlobalTagKeys safety net.
 	if !allowlistMode {
 		globalKeys := collectDynamicTagKeys(cfg)
@@ -317,9 +356,30 @@ func validate(cfg *Config) error {
 	return nil
 }
 
+func validateMetricsPath(metricsPath string) error {
+	if !strings.HasPrefix(metricsPath, "/") {
+		return fmt.Errorf("agent: metrics_path %q must start with /", metricsPath)
+	}
+	if metricsPath == "/healthz" || metricsPath == "/readyz" {
+		return fmt.Errorf("agent: metrics_path %q conflicts with built-in health endpoints", metricsPath)
+	}
+	if strings.ContainsAny(metricsPath, "{}") {
+		return fmt.Errorf("agent: metrics_path %q must be a plain path, not a ServeMux pattern", metricsPath)
+	}
+	for _, r := range metricsPath {
+		if unicode.IsSpace(r) || unicode.IsControl(r) {
+			return fmt.Errorf("agent: metrics_path %q must not contain whitespace or control characters", metricsPath)
+		}
+	}
+	return nil
+}
+
 // validateAllowedTagKeys checks the agent.allowed_tag_keys list for
-// duplicates, invalid Prometheus label names, and collisions with fixed labels.
+// length, duplicates, invalid Prometheus label names, and collisions with fixed labels.
 func validateAllowedTagKeys(keys []string) error {
+	if len(keys) > MaxGlobalTagKeys {
+		return fmt.Errorf("agent: allowed_tag_keys has %d entries, maximum is %d", len(keys), MaxGlobalTagKeys)
+	}
 	seen := make(map[string]bool, len(keys))
 	for _, k := range keys {
 		if seen[k] {
@@ -365,7 +425,15 @@ func validateLabelName(k string) error {
 
 // validateProbeOpts checks probe-type-specific option constraints.
 func validateProbeOpts(t TargetConfig) error {
+	if t.ProbeOpts.MaxTransferBytes < 0 {
+		return fmt.Errorf("target %q: max_transfer_bytes must be >= 0", t.Name)
+	}
+
 	switch t.ProbeType {
+	case ProbeTypeTCP:
+		if err := validateProxyURLUnsupported(t); err != nil {
+			return err
+		}
 	case ProbeTypeHTTP, ProbeTypeHTTPBody:
 		if err := validateHTTPMethod(t); err != nil {
 			return err
@@ -385,10 +453,16 @@ func validateProbeOpts(t TargetConfig) error {
 			return err
 		}
 	case ProbeTypeICMP:
+		if err := validateProxyURLUnsupported(t); err != nil {
+			return err
+		}
 		if err := validateIPv4OnlyAddress(t); err != nil {
 			return err
 		}
 	case ProbeTypeMTU:
+		if err := validateProxyURLUnsupported(t); err != nil {
+			return err
+		}
 		if err := validateIPv4OnlyAddress(t); err != nil {
 			return err
 		}
@@ -396,7 +470,14 @@ func validateProbeOpts(t TargetConfig) error {
 			return err
 		}
 	case ProbeTypeDNS:
+		if err := validateProxyURLUnsupported(t); err != nil {
+			return err
+		}
 		if err := validateDNSQueryType(t); err != nil {
+			return err
+		}
+	case ProbeTypeTLSCert:
+		if err := validateProxyURL(t.Name, t.ProbeOpts.ProxyURL); err != nil {
 			return err
 		}
 	case ProbeTypeProxy:
@@ -410,6 +491,13 @@ func validateProbeOpts(t TargetConfig) error {
 	return nil
 }
 
+func validateProxyURLUnsupported(t TargetConfig) error {
+	if t.ProbeOpts.ProxyURL == "" {
+		return nil
+	}
+	return fmt.Errorf("target %q: probe_type %q does not support 'proxy_url'", t.Name, t.ProbeType)
+}
+
 func validateBodyMatchRegex(t TargetConfig) error {
 	if t.ProbeOpts.BodyMatchRegex == "" {
 		return nil
@@ -420,10 +508,24 @@ func validateBodyMatchRegex(t TargetConfig) error {
 	return nil
 }
 
-// validateIPv4OnlyAddress rejects literal IPv6 addresses for probe types that
-// currently use IPv4-only ICMP sockets. Hostnames are allowed and resolved at
-// runtime so config loading never depends on DNS availability.
+// validateIPv4OnlyAddress rejects literal IPv6 addresses and host:port forms
+// for probe types that currently use IPv4-only ICMP sockets. Hostnames are
+// allowed and resolved at runtime so config loading never depends on DNS
+// availability.
 func validateIPv4OnlyAddress(t TargetConfig) error {
+	if _, _, err := net.SplitHostPort(t.Address); err == nil {
+		return fmt.Errorf("target %q: probe_type %q address must not include a port", t.Name, t.ProbeType)
+	}
+	// Bracketed form "[...]" is URL-style IPv6 notation. SplitHostPort above
+	// only catches "[...]:port"; "[...]" alone reaches here and would otherwise
+	// pass because net.ParseIP rejects brackets, returning nil.
+	if strings.HasPrefix(t.Address, "[") && strings.HasSuffix(t.Address, "]") {
+		inner := t.Address[1 : len(t.Address)-1]
+		if net.ParseIP(inner) != nil {
+			return fmt.Errorf("target %q: probe_type %q supports IPv4 addresses only", t.Name, t.ProbeType)
+		}
+		return fmt.Errorf("target %q: probe_type %q address %q is malformed", t.Name, t.ProbeType, t.Address)
+	}
 	ip := net.ParseIP(t.Address)
 	if ip == nil {
 		return nil
@@ -446,8 +548,8 @@ func validateHTTPMethod(t TargetConfig) error {
 }
 
 // validateExpectedStatusCodes checks that all expected status codes are
-// valid HTTP status codes (100-599). An empty or nil list is valid and
-// means "accept any fully received response".
+// valid HTTP status codes (100-599). An empty or nil list is valid and means
+// "accept any response that completes according to the probe's read semantics".
 func validateExpectedStatusCodes(t TargetConfig) error {
 	for _, code := range t.ProbeOpts.ExpectedStatusCodes {
 		if code < 100 || code > 599 {
@@ -464,39 +566,8 @@ func validateProxyURL(targetName, raw string) error {
 		return nil
 	}
 
-	u, err := url.ParseRequestURI(raw)
-	if err != nil {
-		// Do not wrap err: *url.Error includes the full input URL, including
-		// userinfo credentials if present.
-		return fmt.Errorf("target %q: proxy_url is not a valid absolute URL", targetName)
-	}
-
-	redacted := u.Redacted()
-
-	if u.Opaque != "" {
-		return fmt.Errorf("target %q: invalid proxy_url %q: must use scheme://host form", targetName, redacted)
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("target %q: invalid proxy_url %q: scheme must be http or https", targetName, redacted)
-	}
-	if u.Hostname() == "" {
-		return fmt.Errorf("target %q: invalid proxy_url %q: host is required", targetName, redacted)
-	}
-	if u.Path != "" && u.Path != "/" {
-		return fmt.Errorf("target %q: invalid proxy_url %q: path is not allowed", targetName, redacted)
-	}
-	if u.RawQuery != "" {
-		return fmt.Errorf("target %q: invalid proxy_url %q: query is not allowed", targetName, redacted)
-	}
-	if u.Fragment != "" {
-		return fmt.Errorf("target %q: invalid proxy_url %q: fragment is not allowed", targetName, redacted)
-	}
-
-	if port := u.Port(); port != "" {
-		n, err := strconv.ParseUint(port, 10, 16)
-		if err != nil || n == 0 {
-			return fmt.Errorf("target %q: invalid proxy_url %q: port must be in range 1-65535", targetName, redacted)
-		}
+	if _, err := proxyurl.Parse(raw); err != nil {
+		return fmt.Errorf("target %q: %w", targetName, err)
 	}
 
 	return nil

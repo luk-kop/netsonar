@@ -3,17 +3,11 @@ package probe
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
 	"os"
-	"sync/atomic"
-	"syscall"
 	"time"
-
-	"golang.org/x/net/icmp"
-	"golang.org/x/net/ipv4"
 
 	"netsonar/internal/config"
 )
@@ -21,9 +15,9 @@ import (
 // MTUProber detects the path MTU to a target by sending ICMP echo requests
 // with the Don't Fragment (DF) bit set, stepping down through configured
 // payload sizes until one succeeds.
-type MTUProber struct{}
-
-var icmpIDCounter atomic.Uint32
+type MTUProber struct {
+	backend mtuProbeBackend
+}
 
 const (
 	mtuSanityPayloadSize = 64
@@ -54,19 +48,9 @@ type mtuClassification struct {
 	success bool
 }
 
-type mtuProbeStats struct {
-	fragNeededCount int
-	timeoutCount    int
-	retryCount      int
-	localErrorCount int
-}
-
-func nextICMPID() int {
-	id := icmpIDCounter.Add(1) & 0xffff
-	if id == 0 {
-		id = icmpIDCounter.Add(1) & 0xffff
-	}
-	return int(id)
+type mtuProbeBackend interface {
+	probeSmallEcho(ctx context.Context, dst *net.IPAddr, payloadSize, seq int) mtuPayloadResult
+	probePayloadWithDF(ctx context.Context, dst *net.IPAddr, payloadSize, seq int) mtuPayloadResult
 }
 
 // Probe executes an MTU/PMTUD probe against target.Address.
@@ -74,7 +58,7 @@ func nextICMPID() int {
 // Preconditions:
 //   - target.Address is a valid hostname or IP address (no port)
 //   - target.ProbeOpts.ICMPPayloadSizes is sorted descending and non-empty
-//   - The process has CAP_NET_RAW capability or runs as root
+//   - On Linux, net.ipv4.ping_group_range includes the process effective GID or a supplementary GID
 //
 // Postconditions:
 //   - result.PathMTU = largest_successful_payload + 28 (IP + ICMP headers)
@@ -108,19 +92,24 @@ func (p *MTUProber) Probe(ctx context.Context, target config.TargetConfig) Probe
 
 	start := time.Now()
 	payloadResults := make([]mtuPayloadResult, 0, len(sizes))
-	icmpID := nextICMPID()
+	if ctx.Err() != nil {
+		setMTUInconclusive(&result, start, ctx.Err())
+		return result
+	}
+
+	backend := p.backend
+	if backend == nil {
+		backend = defaultMTUBackend()
+	}
 	retries := effectiveMTURetries(target.ProbeOpts.MTURetries)
 	perAttemptTimeout := effectiveMTUPerAttemptTimeout(target.ProbeOpts.MTUPerAttemptTimeout)
-	var stats mtuProbeStats
 
-	sanity := p.probeSmallICMPEchoWithRetries(ctx, dst, perAttemptTimeout, retries, icmpID, &stats)
+	sanity := p.probeSmallICMPEchoWithRetries(ctx, backend, dst, perAttemptTimeout, retries)
 	if sanity.status == mtuPayloadTimeout && ctx.Err() != nil {
 		setMTUInconclusive(&result, start, ctx.Err())
-		applyMTUStats(&result, stats)
 		return result
 	}
 	if handled := applySanityFailure(&result, sanity, start); handled {
-		applyMTUStats(&result, stats)
 		return result
 	}
 
@@ -128,15 +117,13 @@ func (p *MTUProber) Probe(ctx context.Context, target config.TargetConfig) Probe
 	for _, payloadSize := range sizes {
 		if ctx.Err() != nil {
 			setMTUInconclusive(&result, start, ctx.Err())
-			applyMTUStats(&result, stats)
 			return result
 		}
 
-		payloadResult := p.probePayloadWithDFRetries(ctx, dst, payloadSize, icmpID, perAttemptTimeout, retries, &stats)
+		payloadResult := p.probePayloadWithDFRetries(ctx, backend, dst, payloadSize, perAttemptTimeout, retries)
 		payloadResults = append(payloadResults, payloadResult)
 		if payloadResult.status == mtuPayloadTimeout && ctx.Err() != nil {
 			setMTUInconclusive(&result, start, ctx.Err())
-			applyMTUStats(&result, stats)
 			return result
 		}
 
@@ -147,7 +134,6 @@ func (p *MTUProber) Probe(ctx context.Context, target config.TargetConfig) Probe
 			result.Success = classification.success
 			result.MTUState = classification.state
 			result.MTUDetail = classification.detail
-			applyMTUStats(&result, stats)
 			result.Duration = time.Since(start)
 			return result
 
@@ -156,16 +142,14 @@ func (p *MTUProber) Probe(ctx context.Context, target config.TargetConfig) Probe
 			result.Error = "destination unreachable"
 			result.MTUState = MTUStateUnreachable
 			result.MTUDetail = MTUDetailDestinationUnreach
-			applyMTUStats(&result, stats)
 			return result
 
 		case mtuPayloadError:
 			result.Duration = time.Since(start)
-			if payloadResult.err != nil && os.IsPermission(payloadResult.err) {
-				result.Error = "permission denied: CAP_NET_RAW required"
+			if isPermissionError(payloadResult.err) {
+				result.Error = mtuPermissionDeniedError()
 				result.MTUState = MTUStateError
 				result.MTUDetail = MTUDetailPermissionDenied
-				applyMTUStats(&result, stats)
 				return result
 			}
 			errText := "unknown error"
@@ -175,7 +159,6 @@ func (p *MTUProber) Probe(ctx context.Context, target config.TargetConfig) Probe
 			result.Error = fmt.Sprintf("mtu probe error: %s", errText)
 			result.MTUState = MTUStateError
 			result.MTUDetail = MTUDetailInternalError
-			applyMTUStats(&result, stats)
 			return result
 
 		case mtuPayloadTooLarge, mtuPayloadLocalTooLarge, mtuPayloadTimeout:
@@ -189,17 +172,9 @@ func (p *MTUProber) Probe(ctx context.Context, target config.TargetConfig) Probe
 	result.Success = classification.success
 	result.MTUState = classification.state
 	result.MTUDetail = classification.detail
-	applyMTUStats(&result, stats)
 	result.Duration = time.Since(start)
 	result.Error = "all MTU sizes failed — target unreachable or path MTU below minimum test size"
 	return result
-}
-
-func applyMTUStats(result *ProbeResult, stats mtuProbeStats) {
-	result.MTUFragNeededCount = stats.fragNeededCount
-	result.MTUTimeoutCount = stats.timeoutCount
-	result.MTURetryCount = stats.retryCount
-	result.MTULocalErrorCount = stats.localErrorCount
 }
 
 func effectiveMTURetries(retries int) int {
@@ -218,16 +193,15 @@ func effectiveMTUPerAttemptTimeout(timeout time.Duration) time.Duration {
 
 func (p *MTUProber) probeSmallICMPEchoWithRetries(
 	ctx context.Context,
+	backend mtuProbeBackend,
 	dst *net.IPAddr,
 	perAttemptTimeout time.Duration,
 	retries int,
-	icmpID int,
-	stats *mtuProbeStats,
 ) mtuPayloadResult {
 	attempts := make([]mtuPayloadResult, 0, retries)
 	for attempt := 0; attempt < retries; attempt++ {
 		attemptCtx, cancel := context.WithTimeout(ctx, perAttemptTimeout)
-		result := p.probeSmallICMPEcho(attemptCtx, dst, mtuSanityPayloadSize, icmpID, mtuSanitySeq)
+		result := backend.probeSmallEcho(attemptCtx, dst, mtuSanityPayloadSize, mtuSanitySeq)
 		cancel()
 		attempts = append(attempts, result)
 		if result.status == mtuPayloadSuccess || result.status == mtuPayloadUnreachable || result.status == mtuPayloadError {
@@ -237,23 +211,21 @@ func (p *MTUProber) probeSmallICMPEchoWithRetries(
 			break
 		}
 	}
-	countAttemptStats(attempts, stats)
 	return classifyPayloadAttempts(attempts)
 }
 
 func (p *MTUProber) probePayloadWithDFRetries(
 	ctx context.Context,
+	backend mtuProbeBackend,
 	dst *net.IPAddr,
 	payloadSize int,
-	icmpID int,
 	perAttemptTimeout time.Duration,
 	retries int,
-	stats *mtuProbeStats,
 ) mtuPayloadResult {
 	attempts := make([]mtuPayloadResult, 0, retries)
 	for attempt := 0; attempt < retries; attempt++ {
 		attemptCtx, cancel := context.WithTimeout(ctx, perAttemptTimeout)
-		result := p.probePayloadWithDF(attemptCtx, dst, payloadSize, icmpID)
+		result := backend.probePayloadWithDF(attemptCtx, dst, payloadSize, payloadSize)
 		cancel()
 		attempts = append(attempts, result)
 		if result.status == mtuPayloadSuccess || result.status == mtuPayloadUnreachable || result.status == mtuPayloadError {
@@ -263,27 +235,7 @@ func (p *MTUProber) probePayloadWithDFRetries(
 			break
 		}
 	}
-	countAttemptStats(attempts, stats)
 	return classifyPayloadAttempts(attempts)
-}
-
-func countAttemptStats(attempts []mtuPayloadResult, stats *mtuProbeStats) {
-	if stats == nil {
-		return
-	}
-	for i, attempt := range attempts {
-		if i > 0 {
-			stats.retryCount++
-		}
-		switch attempt.status {
-		case mtuPayloadTooLarge:
-			stats.fragNeededCount++
-		case mtuPayloadTimeout:
-			stats.timeoutCount++
-		case mtuPayloadLocalTooLarge:
-			stats.localErrorCount++
-		}
-	}
 }
 
 func classifyPayloadAttempts(attempts []mtuPayloadResult) mtuPayloadResult {
@@ -333,8 +285,8 @@ func applySanityFailure(result *ProbeResult, sanity mtuPayloadResult, start time
 	case mtuPayloadError:
 		result.Duration = time.Since(start)
 		result.PathMTU = -1
-		if sanity.err != nil && os.IsPermission(sanity.err) {
-			result.Error = "permission denied: CAP_NET_RAW required"
+		if isPermissionError(sanity.err) {
+			result.Error = mtuPermissionDeniedError()
 			result.MTUState = MTUStateError
 			result.MTUDetail = MTUDetailPermissionDenied
 			return true
@@ -398,6 +350,7 @@ func classifyMTUResult(results []mtuPayloadResult, expectedMinMTU int) mtuClassi
 		classification.state = MTUStateOK
 		if expectedMinMTU > 0 && classification.pathMTU < expectedMinMTU {
 			classification.state = MTUStateDegraded
+			classification.success = false
 		}
 		classification.detail = detailForPriorPayloadFailures(results[:successIndex])
 		return classification
@@ -440,295 +393,10 @@ func hasPayloadStatus(results []mtuPayloadResult, status mtuPayloadStatus) bool 
 	return false
 }
 
-func (p *MTUProber) probeSmallICMPEcho(
-	ctx context.Context,
-	dst *net.IPAddr,
-	payloadSize int,
-	icmpID int,
-	seq int,
-) mtuPayloadResult {
-	result := mtuPayloadResult{
-		status:      mtuPayloadError,
-		payloadSize: payloadSize,
-	}
-
-	rawPC, err := net.ListenPacket("ip4:icmp", "0.0.0.0")
-	if err != nil {
-		result.err = err
-		return result
-	}
-	defer func() { _ = rawPC.Close() }()
-
-	msg := &icmp.Message{
-		Type: ipv4.ICMPTypeEcho,
-		Code: 0,
-		Body: &icmp.Echo{
-			ID:   icmpID,
-			Seq:  seq,
-			Data: make([]byte, payloadSize),
-		},
-	}
-
-	msgBytes, err := msg.Marshal(nil)
-	if err != nil {
-		result.err = fmt.Errorf("marshal icmp: %w", err)
-		return result
-	}
-
-	deadline, ok := ctx.Deadline()
-	if !ok {
-		deadline = time.Now().Add(5 * time.Second)
-	}
-	if err := rawPC.SetDeadline(deadline); err != nil {
-		result.err = fmt.Errorf("set deadline: %w", err)
-		return result
-	}
-
-	if _, err := rawPC.WriteTo(msgBytes, dst); err != nil {
-		result.err = err
-		return result
-	}
-
-	readBuf := make([]byte, 1500)
-	for {
-		if ctx.Err() != nil {
-			result.status = mtuPayloadTimeout
-			return result
-		}
-
-		n, addr, err := rawPC.ReadFrom(readBuf)
-		if err != nil {
-			result.status = mtuPayloadTimeout
-			result.err = err
-			return result
-		}
-
-		reply, err := icmp.ParseMessage(1, readBuf[:n])
-		if err != nil {
-			continue
-		}
-
-		if reply.Type == ipv4.ICMPTypeDestinationUnreachable {
-			dstUnreach, ok := reply.Body.(*icmp.DstUnreach)
-			if !ok || !matchesEmbeddedICMP(dstUnreach.Data, dst.IP, icmpID, seq) {
-				continue
-			}
-			result.status = mtuPayloadUnreachable
-			return result
-		}
-
-		if reply.Type != ipv4.ICMPTypeEchoReply {
-			continue
-		}
-		if !packetAddrMatchesIP(addr, dst.IP) {
-			continue
-		}
-		echo, ok := reply.Body.(*icmp.Echo)
-		if !ok {
-			continue
-		}
-		if echo.ID != icmpID || echo.Seq != seq {
-			continue
-		}
-
-		result.status = mtuPayloadSuccess
-		return result
-	}
+func isPermissionError(err error) bool {
+	return errors.Is(err, os.ErrPermission)
 }
 
-// probePayloadWithDF sends a single ICMP echo request with the Don't Fragment
-// bit set and waits for a reply. It classifies the observed result for this
-// payload size; it does not retry.
-//
-// Preconditions:
-//   - dst is a valid resolved IPv4 address
-//   - payloadSize > 0
-//   - ctx carries the probe timeout
-//
-// Postconditions:
-//   - The ICMP socket is always closed before returning
-//   - Returns mtuPayloadSuccess only if an echo reply matching our ID/seq is received
-func (p *MTUProber) probePayloadWithDF(
-	ctx context.Context,
-	dst *net.IPAddr,
-	payloadSize int,
-	icmpID int,
-) mtuPayloadResult {
-	result := mtuPayloadResult{
-		status:      mtuPayloadError,
-		payloadSize: payloadSize,
-	}
-
-	// Open a privileged raw ICMP socket (requires CAP_NET_RAW).
-	// We use net.ListenPacket directly (instead of icmp.ListenPacket) so
-	// that we get a *net.IPConn which implements syscall.Conn, allowing
-	// us to set the IP_MTU_DISCOVER socket option for the DF bit.
-	rawPC, err := net.ListenPacket("ip4:icmp", "0.0.0.0")
-	if err != nil {
-		result.err = err
-		return result
-	}
-	defer func() { _ = rawPC.Close() }()
-
-	// Set the Don't Fragment bit via IP_MTU_DISCOVER socket option.
-	// IP_PMTUDISC_PROBE sends DF probes without being blocked by cached PMTU.
-	sc, ok := rawPC.(interface {
-		SyscallConn() (syscall.RawConn, error)
-	})
-	if !ok {
-		result.err = fmt.Errorf("packet conn does not support SyscallConn")
-		return result
-	}
-	rawConn, err := sc.SyscallConn()
-	if err != nil {
-		result.err = fmt.Errorf("get raw conn: %w", err)
-		return result
-	}
-
-	var sockErr error
-	err = rawConn.Control(func(fd uintptr) {
-		sockErr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_IP, syscall.IP_MTU_DISCOVER, syscall.IP_PMTUDISC_PROBE)
-	})
-	if err != nil {
-		result.err = fmt.Errorf("raw conn control: %w", err)
-		return result
-	}
-	if sockErr != nil {
-		result.err = fmt.Errorf("set IP_MTU_DISCOVER: %w", sockErr)
-		return result
-	}
-
-	// Build the ICMP echo request with the specified payload size.
-	seq := payloadSize // Use payload size as sequence number for easy identification.
-
-	msg := &icmp.Message{
-		Type: ipv4.ICMPTypeEcho,
-		Code: 0,
-		Body: &icmp.Echo{
-			ID:   icmpID,
-			Seq:  seq,
-			Data: make([]byte, payloadSize),
-		},
-	}
-
-	msgBytes, err := msg.Marshal(nil)
-	if err != nil {
-		result.err = fmt.Errorf("marshal icmp: %w", err)
-		return result
-	}
-
-	// Derive deadline from context.
-	deadline, ok2 := ctx.Deadline()
-	if !ok2 {
-		deadline = time.Now().Add(5 * time.Second)
-	}
-	if err := rawPC.SetDeadline(deadline); err != nil {
-		result.err = fmt.Errorf("set deadline: %w", err)
-		return result
-	}
-
-	// Send the echo request.
-	if _, err := rawPC.WriteTo(msgBytes, dst); err != nil {
-		if errors.Is(err, syscall.EMSGSIZE) {
-			result.status = mtuPayloadLocalTooLarge
-			result.err = err
-			return result
-		}
-		result.err = err
-		return result
-	}
-
-	// Read replies until we find our echo reply or the deadline expires.
-	readBuf := make([]byte, 1500)
-	for {
-		if ctx.Err() != nil {
-			result.status = mtuPayloadTimeout
-			return result
-		}
-
-		n, addr, err := rawPC.ReadFrom(readBuf)
-		if err != nil {
-			// Timeout or read error — this size didn't work.
-			result.status = mtuPayloadTimeout
-			result.err = err
-			return result
-		}
-
-		reply, err := icmp.ParseMessage(1, readBuf[:n]) // protocol 1 = ICMPv4
-		if err != nil {
-			continue
-		}
-
-		// Check for "Destination Unreachable" with code 4 (Fragmentation Needed).
-		// This means the packet was too large for the path.
-		if reply.Type == ipv4.ICMPTypeDestinationUnreachable {
-			dstUnreach, ok := reply.Body.(*icmp.DstUnreach)
-			if !ok || !matchesEmbeddedICMP(dstUnreach.Data, dst.IP, icmpID, seq) {
-				continue
-			}
-			if reply.Code == 4 {
-				result.status = mtuPayloadTooLarge
-				return result
-			}
-			result.status = mtuPayloadUnreachable
-			return result
-		}
-
-		// Accept echo replies matching our ID and sequence.
-		if reply.Type != ipv4.ICMPTypeEchoReply {
-			continue
-		}
-		if !packetAddrMatchesIP(addr, dst.IP) {
-			continue
-		}
-		echo, ok := reply.Body.(*icmp.Echo)
-		if !ok {
-			continue
-		}
-		if echo.ID != icmpID || echo.Seq != seq {
-			continue
-		}
-
-		result.status = mtuPayloadSuccess
-		return result
-	}
-}
-
-func packetAddrMatchesIP(addr net.Addr, ip net.IP) bool {
-	ipAddr, ok := addr.(*net.IPAddr)
-	if !ok {
-		return false
-	}
-	return ipAddr.IP.Equal(ip)
-}
-
-func matchesEmbeddedICMP(data []byte, dstIP net.IP, icmpID, seq int) bool {
-	dst4 := dstIP.To4()
-	if dst4 == nil || len(data) < 20 {
-		return false
-	}
-
-	version := data[0] >> 4
-	if version != 4 {
-		return false
-	}
-
-	ihl := int(data[0]&0x0f) * 4
-	if ihl < 20 || len(data) < ihl+8 {
-		return false
-	}
-
-	if data[9] != 1 { // ICMPv4
-		return false
-	}
-	if !net.IP(data[16:20]).Equal(dst4) {
-		return false
-	}
-	if data[ihl] != byte(ipv4.ICMPTypeEcho) || data[ihl+1] != 0 {
-		return false
-	}
-
-	embeddedID := int(binary.BigEndian.Uint16(data[ihl+4 : ihl+6]))
-	embeddedSeq := int(binary.BigEndian.Uint16(data[ihl+6 : ihl+8]))
-	return embeddedID == icmpID && embeddedSeq == seq
+func mtuPermissionDeniedError() string {
+	return "permission denied: check net.ipv4.ping_group_range for the process effective or supplementary GID"
 }

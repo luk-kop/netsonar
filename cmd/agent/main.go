@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -20,8 +21,10 @@ import (
 	"netsonar/internal/scheduler"
 )
 
-// version is injected at build time via -ldflags.
+// version, commit, and date are injected at build time via -ldflags.
 var version = "dev"
+var commit = "unknown"
+var date = "unknown"
 
 // agentLogLevel is the dynamic level shared by the default slog handler.
 // setupLogger wires it into the handler once at startup; configureLogger
@@ -37,7 +40,13 @@ func run() int {
 	configPath := flag.String("config", "/etc/netsonar/config.yaml", "Path to YAML configuration file")
 	listenAddr := flag.String("listen-addr", "", "Override agent.listen_addr from config (e.g. :9275)")
 	doctorMode := flag.Bool("doctor", false, "Run environment diagnostics and exit")
+	showVersion := flag.Bool("version", false, "Print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("%s commit=%s date=%s\n", version, commit, date)
+		return 0
+	}
 
 	if *doctorMode {
 		result := doctor.RunWithOptions(*configPath, doctor.DefaultEnv(), doctor.Options{
@@ -62,10 +71,12 @@ func run() int {
 		cfg.Agent.ListenAddr = *listenAddr
 	}
 
-	setupLogger(cfg.Agent.LogLevel)
+	setupLogger(cfg.Agent.LogLevel, cfg.Agent.LogFormat)
 
 	slog.Info("starting netsonar",
 		"version", version,
+		"commit", commit,
+		"date", date,
 		"listen_addr", cfg.Agent.ListenAddr,
 		"targets", len(cfg.Targets),
 		"config_hash", mustConfigHash(cfg),
@@ -93,7 +104,7 @@ func run() int {
 	// Run HTTP server in background.
 	srvErr := make(chan error, 1)
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			srvErr <- err
 		}
 		close(srvErr)
@@ -109,14 +120,18 @@ func run() int {
 			switch sig {
 			case syscall.SIGHUP:
 				slog.Info("received SIGHUP, reloading configuration")
-				handleReload(*configPath, ctx, sched, exporter, tagKeys)
+				handleReload(ctx, *configPath, sched, exporter, tagKeys, cfg.Agent.LogFormat, cfg.Agent.ListenAddr, cfg.Agent.MetricsPath)
 
 			case syscall.SIGTERM, syscall.SIGINT:
 				slog.Info("received shutdown signal, initiating graceful shutdown", "signal", sig)
 				return shutdown(sched, srv, cancel)
 			}
 
-		case err := <-srvErr:
+		case err, ok := <-srvErr:
+			if !ok {
+				srvErr = nil
+				continue
+			}
 			if err != nil {
 				slog.Error("HTTP server error", "error", err)
 				sched.Stop()
@@ -128,21 +143,43 @@ func run() int {
 }
 
 // handleReload re-reads the configuration file and applies changes via
-// the scheduler's diff-based reload. If the new config is invalid or the
-// effective tag key set changed (which requires a restart), the agent
-// continues with the previous configuration.
-func handleReload(configPath string, ctx context.Context, sched *scheduler.Scheduler, exporter *metrics.MetricsExporter, startupTagKeys []string) {
+// the scheduler's diff-based reload. If the new config is invalid or a
+// startup-only field changed (tag key set, log_format, listen_addr,
+// metrics_path), the agent continues with the previous configuration.
+func handleReload(ctx context.Context, configPath string, sched *scheduler.Scheduler, exporter *metrics.MetricsExporter, startupTagKeys []string, startupLogFormat, startupListenAddr, startupMetricsPath string) {
 	newCfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		slog.Error("config reload failed, keeping previous configuration", "error", err)
 		return
 	}
 
+	// Reject changes to startup-only fields that require a restart.
 	newTagKeys := config.CollectTagKeys(newCfg)
 	if !slices.Equal(startupTagKeys, newTagKeys) {
 		slog.Error("config reload rejected: tag key set changed; restart required",
 			"old_tag_keys", startupTagKeys,
 			"new_tag_keys", newTagKeys,
+		)
+		return
+	}
+	if newCfg.Agent.LogFormat != startupLogFormat {
+		slog.Error("config reload rejected: log_format changed; restart required",
+			"old_log_format", startupLogFormat,
+			"new_log_format", newCfg.Agent.LogFormat,
+		)
+		return
+	}
+	if newCfg.Agent.ListenAddr != startupListenAddr {
+		slog.Error("config reload rejected: listen_addr changed; restart required",
+			"old", startupListenAddr,
+			"new", newCfg.Agent.ListenAddr,
+		)
+		return
+	}
+	if newCfg.Agent.MetricsPath != startupMetricsPath {
+		slog.Error("config reload rejected: metrics_path changed; restart required",
+			"old", startupMetricsPath,
+			"new", newCfg.Agent.MetricsPath,
 		)
 		return
 	}
@@ -229,9 +266,7 @@ func newProber(target config.TargetConfig) probe.Prober {
 	case config.ProbeTypeProxy:
 		return &probe.ProxyProber{}
 	default:
-		// Should never happen after config validation.
-		slog.Error("unknown probe type", "probe_type", target.ProbeType, "target", target.Name)
-		return &probe.TCPProber{}
+		panic("unreachable: unknown probe type " + string(target.ProbeType))
 	}
 }
 
@@ -258,10 +293,18 @@ func mustConfigHash(cfg *config.Config) string {
 
 // setupLogger installs the default slog logger backed by agentLogLevel.
 // It is called exactly once, at agent startup. Subsequent log_level changes
-// on reload go through configureLogger and do not swap the handler.
-func setupLogger(level string) {
+// on reload go through configureLogger and do not swap the handler. The log
+// format is startup-only; changing agent.log_format requires a restart.
+func setupLogger(level, format string) {
 	configureLogger(level)
-	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: agentLogLevel})
+	opts := &slog.HandlerOptions{Level: agentLogLevel}
+	var handler slog.Handler
+	switch format {
+	case "json":
+		handler = slog.NewJSONHandler(os.Stderr, opts)
+	default:
+		handler = slog.NewTextHandler(os.Stderr, opts)
+	}
 	slog.SetDefault(slog.New(handler))
 }
 

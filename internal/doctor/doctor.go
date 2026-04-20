@@ -41,13 +41,13 @@ type Options struct {
 }
 
 type Env struct {
-	ReadFile              func(string) ([]byte, error)
-	Getuid                func() int
-	Getgid                func() int
-	Getgroups             func() ([]int, error)
-	OpenUnprivilegedICMP  func() error
-	CheckRawICMPPMTUProbe func() error
-	ListenTCP             func(addr string) error
+	ReadFile             func(string) ([]byte, error)
+	Getuid               func() int
+	Getgid               func() int
+	Getgroups            func() ([]int, error)
+	OpenUnprivilegedICMP func() error
+	CheckMTUPingSocket   func() error
+	ListenTCP            func(addr string) error
 }
 
 func Run(configPath string) Result {
@@ -208,42 +208,42 @@ func checkICMP(result *Result, env Env) {
 		return
 	}
 
-	checkPingGroupRange(result, env)
+	checkPingGroupRange(result, env, "ICMP")
 
 	if err := env.OpenUnprivilegedICMP(); err != nil {
-		result.add("ICMP", "unprivileged socket", Fail, err.Error(), "Ensure net.ipv4.ping_group_range includes the process GID.")
+		result.add("ICMP", "unprivileged socket", Fail, err.Error(), "Ensure net.ipv4.ping_group_range includes the process effective or supplementary GID.")
 		return
 	}
 	result.add("ICMP", "unprivileged socket", Pass, "ok", "")
 }
 
-func checkPingGroupRange(result *Result, env Env) {
+func checkPingGroupRange(result *Result, env Env, section string) {
 	data, err := env.ReadFile("/proc/sys/net/ipv4/ping_group_range")
 	if err != nil {
-		result.add("ICMP", "ping_group_range", Warn, err.Error(), "Could not verify whether the kernel allows unprivileged ICMP for this process.")
+		result.add(section, "ping_group_range", Warn, err.Error(), "Could not verify whether the kernel allows unprivileged ICMP for this process.")
 		return
 	}
 
 	start, end, err := parsePingGroupRange(string(data))
 	if err != nil {
-		result.add("ICMP", "ping_group_range", Warn, err.Error(), "Could not parse net.ipv4.ping_group_range.")
+		result.add(section, "ping_group_range", Warn, err.Error(), "Could not parse net.ipv4.ping_group_range.")
 		return
 	}
 
 	gids := []int{env.Getgid()}
 	groups, groupErr := env.Getgroups()
 	if groupErr != nil {
-		result.add("ICMP", "supplementary groups", Warn, groupErr.Error(), "Checking primary GID only.")
+		result.add(section, "supplementary groups", Warn, groupErr.Error(), "Checking primary GID only.")
 	} else {
 		gids = append(gids, groups...)
 	}
 	gids = uniqueInts(gids)
 
 	if anyGIDInRange(gids, start, end) {
-		result.add("ICMP", "ping_group_range", Pass, fmt.Sprintf("%d %d includes gids %v", start, end, gids), "")
+		result.add(section, "ping_group_range", Pass, fmt.Sprintf("%d %d includes gids %v", start, end, gids), "")
 		return
 	}
-	result.add("ICMP", "ping_group_range", Fail, fmt.Sprintf("%d %d does not include gids %v", start, end, gids), "Set net.ipv4.ping_group_range to include the process GID.")
+	result.add(section, "ping_group_range", Fail, fmt.Sprintf("%d %d does not include gids %v", start, end, gids), "Set net.ipv4.ping_group_range to include the process effective or supplementary GID.")
 }
 
 func checkMTU(result *Result, env Env) {
@@ -251,37 +251,18 @@ func checkMTU(result *Result, env Env) {
 		result.add("MTU", "environment", Skip, "no mtu targets in config", "")
 		return
 	}
-	if env.CheckRawICMPPMTUProbe == nil {
-		result.add("MTU", "raw ICMP + PMTUDISC", Warn, "not supported on this platform", "MTU probes require a Linux runtime with effective CAP_NET_RAW.")
+	if env.CheckMTUPingSocket == nil {
+		result.add("MTU", "ping socket + PMTUDISC", Warn, "not supported on this platform", "MTU probes require a Linux runtime with ICMP ping socket support.")
 		return
 	}
 
-	checkCAPNetRaw(result, env)
+	checkPingGroupRange(result, env, "MTU")
 
-	if err := env.CheckRawICMPPMTUProbe(); err != nil {
-		result.add("MTU", "raw ICMP + PMTUDISC", Fail, err.Error(), "MTU probes require effective CAP_NET_RAW. For non-root containers use cap_net_raw+ep on the binary and keep NET_RAW in the bounding set.")
+	if err := env.CheckMTUPingSocket(); err != nil {
+		result.add("MTU", "ping socket + PMTUDISC", Fail, err.Error(), "Ensure net.ipv4.ping_group_range includes the process effective or supplementary GID.")
 		return
 	}
-	result.add("MTU", "raw ICMP + PMTUDISC", Pass, "ok", "")
-}
-
-func checkCAPNetRaw(result *Result, env Env) {
-	data, err := env.ReadFile("/proc/self/status")
-	if err != nil {
-		result.add("MTU", "effective CAP_NET_RAW", Warn, err.Error(), "Could not inspect /proc/self/status.")
-		return
-	}
-
-	hasCap, err := capEffHasNetRaw(string(data))
-	if err != nil {
-		result.add("MTU", "effective CAP_NET_RAW", Warn, err.Error(), "Could not parse CapEff from /proc/self/status.")
-		return
-	}
-	if !hasCap {
-		result.add("MTU", "effective CAP_NET_RAW", Fail, "missing from CapEff", "MTU probes require effective CAP_NET_RAW.")
-		return
-	}
-	result.add("MTU", "effective CAP_NET_RAW", Pass, "present", "")
+	result.add("MTU", "ping socket + PMTUDISC", Pass, "ok", "")
 }
 
 func checkDNS(result *Result, env Env, targets []config.TargetConfig) {
@@ -350,24 +331,6 @@ func anyGIDInRange(gids []int, start, end int) bool {
 		}
 	}
 	return false
-}
-
-func capEffHasNetRaw(procStatus string) (bool, error) {
-	for _, line := range strings.Split(procStatus, "\n") {
-		if !strings.HasPrefix(line, "CapEff:") {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) != 2 {
-			return false, fmt.Errorf("malformed CapEff line %q", line)
-		}
-		value, err := strconv.ParseUint(fields[1], 16, 64)
-		if err != nil {
-			return false, fmt.Errorf("parse CapEff %q: %w", fields[1], err)
-		}
-		return value&(1<<13) != 0, nil
-	}
-	return false, fmt.Errorf("CapEff not found")
 }
 
 func parseNameservers(resolvConf string) []string {

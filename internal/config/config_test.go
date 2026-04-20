@@ -89,6 +89,180 @@ targets:
 	}
 }
 
+func TestLoadConfig_InitialProbeJitterAccepted(t *testing.T) {
+	yaml := `
+agent:
+  default_interval: 30s
+  default_timeout: 5s
+  initial_probe_jitter: 10s
+
+targets:
+  - name: "tcp-target"
+    address: "example.com:443"
+    probe_type: tcp
+`
+	cfg, err := LoadConfig(writeConfigFile(t, yaml))
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if cfg.Agent.InitialProbeJitter != 10*time.Second {
+		t.Errorf("initial_probe_jitter = %v, want 10s", cfg.Agent.InitialProbeJitter)
+	}
+}
+
+func TestLoadConfig_NegativeInitialProbeJitterRejected(t *testing.T) {
+	yaml := `
+agent:
+  default_interval: 30s
+  default_timeout: 5s
+  initial_probe_jitter: -1s
+
+targets:
+  - name: "tcp-target"
+    address: "example.com:443"
+    probe_type: tcp
+`
+	_, err := LoadConfig(writeConfigFile(t, yaml))
+	if err == nil {
+		t.Fatal("expected error for negative initial_probe_jitter, got nil")
+	}
+	if !strings.Contains(err.Error(), "initial_probe_jitter") {
+		t.Fatalf("error = %q, want it to mention initial_probe_jitter", err.Error())
+	}
+}
+
+func TestLoadConfig_InitialProbeJitterExceedsShortestIntervalRejected(t *testing.T) {
+	yaml := `
+agent:
+  default_interval: 30s
+  default_timeout: 5s
+  initial_probe_jitter: 15s
+
+targets:
+  - name: "fast-target"
+    address: "example.com:443"
+    probe_type: tcp
+    interval: 10s
+  - name: "slow-target"
+    address: "example.org:443"
+    probe_type: tcp
+`
+	_, err := LoadConfig(writeConfigFile(t, yaml))
+	if err == nil {
+		t.Fatal("expected error for initial_probe_jitter greater than shortest interval, got nil")
+	}
+	if !strings.Contains(err.Error(), "shortest target interval") {
+		t.Fatalf("error = %q, want it to mention shortest target interval", err.Error())
+	}
+}
+
+func TestLoadConfig_InvalidMetricsPathRejected(t *testing.T) {
+	tests := []struct {
+		name        string
+		metricsPath string
+		want        string
+	}{
+		{"missing-leading-slash", "metrics", "must start with /"},
+		{"health-conflict", "/healthz", "conflicts"},
+		{"ready-conflict", "/readyz", "conflicts"},
+		{"method-pattern", "GET /metrics", "must start with /"},
+		{"wildcard-pattern", "/metrics/{name}", "plain path"},
+		{"space", "/met rics", "whitespace"},
+		{"control", "/metrics\nextra", "whitespace"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			yaml := fmt.Sprintf(`
+agent:
+  metrics_path: %q
+  default_interval: 30s
+  default_timeout: 5s
+
+targets:
+  - name: "tcp-target"
+    address: "example.com:443"
+    probe_type: tcp
+`, tt.metricsPath)
+
+			_, err := LoadConfig(writeConfigFile(t, yaml))
+			if err == nil {
+				t.Fatalf("expected error for metrics_path %q, got nil", tt.metricsPath)
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %q, want it to contain %q", err.Error(), tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadConfig_UnknownYAMLFieldsRejected(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{
+			name: "agent-field",
+			yaml: `
+agent:
+  default_interval: 30s
+  default_timeout: 5s
+  metrics_pat: "/metrics"
+
+targets:
+  - name: "tcp-target"
+    address: "example.com:443"
+    probe_type: tcp
+`,
+			want: "metrics_pat",
+		},
+		{
+			name: "target-field",
+			yaml: `
+agent:
+  default_interval: 30s
+  default_timeout: 5s
+
+targets:
+  - name: "tcp-target"
+    adress: "example.com:443"
+    address: "example.com:443"
+    probe_type: tcp
+`,
+			want: "adress",
+		},
+		{
+			name: "probe-opts-field",
+			yaml: `
+agent:
+  default_interval: 30s
+  default_timeout: 5s
+
+targets:
+  - name: "http-target"
+    address: "https://example.com"
+    probe_type: http
+    probe_opts:
+      tls_skip_verfy: true
+`,
+			want: "tls_skip_verfy",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := LoadConfig(writeConfigFile(t, tt.yaml))
+			if err == nil {
+				t.Fatal("expected error for unknown YAML field, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %q, want it to contain %q", err.Error(), tt.want)
+			}
+		})
+	}
+}
+
 func TestLoadConfig_DefaultIntervalApplied(t *testing.T) {
 	yaml := `
 agent:
@@ -457,6 +631,78 @@ targets:
 	}
 	if !strings.Contains(err.Error(), "supports IPv4 addresses only") {
 		t.Errorf("error = %q, want it to mention IPv4-only support", err.Error())
+	}
+}
+
+func TestLoadConfig_ICMPMTURejectAddressWithPort(t *testing.T) {
+	tests := []struct {
+		name      string
+		probeType string
+		address   string
+	}{
+		{"icmp-hostname-port", "icmp", "example.com:80"},
+		{"icmp-ipv4-port", "icmp", "192.0.2.1:80"},
+		{"icmp-ipv6-port", "icmp", "[2001:db8::1]:80"},
+		{"mtu-hostname-port", "mtu", "example.com:80"},
+		{"mtu-ipv4-port", "mtu", "192.0.2.1:80"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			yaml := `
+agent:
+  default_interval: 300s
+
+targets:
+  - name: "target"
+    address: "` + tt.address + `"
+    probe_type: ` + tt.probeType + `
+    timeout: 30s
+`
+			_, err := LoadConfig(writeConfigFile(t, yaml))
+			if err == nil {
+				t.Fatalf("expected error for %s address %q, got nil", tt.probeType, tt.address)
+			}
+			if !strings.Contains(err.Error(), "address must not include a port") {
+				t.Errorf("error = %q, want it to mention port rejection", err.Error())
+			}
+		})
+	}
+}
+
+func TestLoadConfig_ICMPMTURejectBracketedIPv6Literal(t *testing.T) {
+	tests := []struct {
+		name      string
+		probeType string
+		address   string
+		wantMsg   string
+	}{
+		{"icmp-bracketed-ipv6", "icmp", "[2001:db8::1]", "supports IPv4 addresses only"},
+		{"icmp-bracketed-loopback", "icmp", "[::1]", "supports IPv4 addresses only"},
+		{"mtu-bracketed-ipv6", "mtu", "[2001:db8::1]", "supports IPv4 addresses only"},
+		{"icmp-bracketed-malformed", "icmp", "[not-an-ip]", "is malformed"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			yaml := `
+agent:
+  default_interval: 300s
+
+targets:
+  - name: "target"
+    address: "` + tt.address + `"
+    probe_type: ` + tt.probeType + `
+    timeout: 30s
+`
+			_, err := LoadConfig(writeConfigFile(t, yaml))
+			if err == nil {
+				t.Fatalf("expected error for %s address %q, got nil", tt.probeType, tt.address)
+			}
+			if !strings.Contains(err.Error(), tt.wantMsg) {
+				t.Errorf("error = %q, want it to contain %q", err.Error(), tt.wantMsg)
+			}
+		})
 	}
 }
 
@@ -851,6 +1097,7 @@ func TestLoadConfig_ValidProxyURLs(t *testing.T) {
 		{"http with port", "http", "http://proxy.internal:8888"},
 		{"https with port", "http_body", "https://proxy.internal:443"},
 		{"userinfo", "http", "http://user:pass@proxy.internal:8080"},
+		{"tls cert", "tls_cert", "http://proxy.internal:8888"},
 		{"ipv6 bracketed", "proxy", "http://[::1]:8080"},
 	}
 
@@ -894,6 +1141,7 @@ func TestLoadConfig_InvalidProxyURLs(t *testing.T) {
 		{"query", "http", "http://proxy.internal:8080?x=y", "query is not allowed"},
 		{"fragment", "proxy", "http://proxy.internal:8080#frag", "not a valid absolute URL"},
 		{"ipv6 without brackets", "http", "http://::1:8080", "not a valid absolute URL"},
+		{"tls cert unsupported scheme", "tls_cert", "socks5://proxy.internal:1080", "scheme must be http or https"},
 	}
 
 	for _, tt := range tests {
@@ -916,6 +1164,75 @@ targets:
 			}
 			if !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("error = %q, want it to contain %q", err.Error(), tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadConfig_ProxyURLEmptyAllowedForUnsupportedProbeTypes(t *testing.T) {
+	tests := []struct {
+		name      string
+		probeType string
+	}{
+		{"tcp", "tcp"},
+		{"icmp", "icmp"},
+		{"mtu", "mtu"},
+		{"dns", "dns"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			yaml := fmt.Sprintf(`
+agent:
+  default_interval: 30s
+
+targets:
+  - name: "%s-empty-proxy-url"
+    address: "example.com"
+    probe_type: %s
+    timeout: 5s
+    probe_opts:
+      proxy_url: ""
+`, tt.probeType, tt.probeType)
+			_, err := LoadConfig(writeConfigFile(t, yaml))
+			if err != nil {
+				t.Fatalf("expected no error for empty proxy_url on %s, got: %v", tt.probeType, err)
+			}
+		})
+	}
+}
+
+func TestLoadConfig_ProxyURLRejectedForUnsupportedProbeTypes(t *testing.T) {
+	tests := []struct {
+		name      string
+		probeType string
+	}{
+		{"tcp", "tcp"},
+		{"icmp", "icmp"},
+		{"mtu", "mtu"},
+		{"dns", "dns"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			yaml := fmt.Sprintf(`
+agent:
+  default_interval: 30s
+
+targets:
+  - name: "%s-proxy-url"
+    address: "example.com"
+    probe_type: %s
+    timeout: 5s
+    probe_opts:
+      proxy_url: "http://proxy.internal:8888"
+`, tt.probeType, tt.probeType)
+			_, err := LoadConfig(writeConfigFile(t, yaml))
+			if err == nil {
+				t.Fatalf("expected error for proxy_url on %s, got nil", tt.probeType)
+			}
+			if !strings.Contains(err.Error(), "does not support 'proxy_url'") {
+				t.Fatalf("error = %q, want unsupported proxy_url error", err.Error())
 			}
 		})
 	}
@@ -1063,22 +1380,23 @@ func TestLoadConfig_AllProbeTypes(t *testing.T) {
 	probeTypes := []struct {
 		name      string
 		probeType string
+		address   string
 		extra     string
 	}{
-		{"tcp-t", "tcp", ""},
-		{"http-t", "http", ""},
-		{"icmp-t", "icmp", ""},
-		{"mtu-t", "mtu", ""},
-		{"dns-t", "dns", "\n    probe_opts:\n      dns_query_name: example.com\n      dns_query_type: A"},
-		{"tls-t", "tls_cert", ""},
-		{"body-t", "http_body", "\n    probe_opts:\n      body_match_string: \"ok\""},
-		{"proxy-t", "proxy", "\n    probe_opts:\n      proxy_url: http://proxy:8888"},
+		{"tcp-t", "tcp", "example.com:443", ""},
+		{"http-t", "http", "example.com:443", ""},
+		{"icmp-t", "icmp", "example.com", ""},
+		{"mtu-t", "mtu", "example.com", ""},
+		{"dns-t", "dns", "example.com:443", "\n    probe_opts:\n      dns_query_name: example.com\n      dns_query_type: A"},
+		{"tls-t", "tls_cert", "example.com:443", ""},
+		{"body-t", "http_body", "example.com:443", "\n    probe_opts:\n      body_match_string: \"ok\""},
+		{"proxy-t", "proxy", "example.com:443", "\n    probe_opts:\n      proxy_url: http://proxy:8888"},
 	}
 
 	var targets strings.Builder
 	for _, pt := range probeTypes {
 		targets.WriteString("  - name: \"" + pt.name + "\"\n")
-		targets.WriteString("    address: \"example.com:443\"\n")
+		targets.WriteString("    address: \"" + pt.address + "\"\n")
 		targets.WriteString("    probe_type: " + pt.probeType + "\n")
 		targets.WriteString("    timeout: 5s\n")
 		if pt.extra != "" {
@@ -1218,6 +1536,31 @@ targets:
 	}
 }
 
+func TestLoadConfig_AllowedTagKeysExceedsMaxGlobalTagKeys(t *testing.T) {
+	var keys strings.Builder
+	keys.WriteString("  allowed_tag_keys:\n")
+	for i := 0; i <= MaxGlobalTagKeys; i++ {
+		fmt.Fprintf(&keys, "    - key_%d\n", i)
+	}
+	yaml := fmt.Sprintf(`
+agent:
+  default_interval: 30s
+%s
+targets:
+  - name: "t1"
+    address: "example.com:443"
+    probe_type: tcp
+    timeout: 5s
+`, keys.String())
+	_, err := LoadConfig(writeConfigFile(t, yaml))
+	if err == nil {
+		t.Fatal("expected error for exceeding MaxGlobalTagKeys in allowed_tag_keys, got nil")
+	}
+	if !strings.Contains(err.Error(), "allowed_tag_keys has") {
+		t.Errorf("error = %q, want it to mention allowed_tag_keys limit", err.Error())
+	}
+}
+
 func TestLoadConfig_AllowedTagKeysFixedLabelCollision(t *testing.T) {
 	yaml := `
 agent:
@@ -1273,7 +1616,7 @@ targets:
     probe_type: tcp
     timeout: 5s
     tags:
-      proxied: "true"
+      network_path: "proxy"
 `
 	_, err := LoadConfig(writeConfigFile(t, yaml))
 	if err == nil {
@@ -1467,6 +1810,74 @@ targets:
 	}
 }
 
+func TestLoadConfig_HTTPMaxTransferBytes(t *testing.T) {
+	t.Run("negative rejected", func(t *testing.T) {
+		yaml := `
+agent:
+  default_interval: 30s
+
+targets:
+  - name: "http-negative-transfer"
+    address: "https://example.com"
+    probe_type: http
+    timeout: 5s
+    probe_opts:
+      max_transfer_bytes: -1
+`
+		_, err := LoadConfig(writeConfigFile(t, yaml))
+		if err == nil {
+			t.Fatal("expected error for negative max_transfer_bytes, got nil")
+		}
+		if !strings.Contains(err.Error(), "max_transfer_bytes") {
+			t.Errorf("error = %q, want it to mention max_transfer_bytes", err.Error())
+		}
+	})
+
+	t.Run("zero means default", func(t *testing.T) {
+		yaml := `
+agent:
+  default_interval: 30s
+
+targets:
+  - name: "http-zero-transfer"
+    address: "https://example.com"
+    probe_type: http
+    timeout: 5s
+    probe_opts:
+      max_transfer_bytes: 0
+`
+		cfg, err := LoadConfig(writeConfigFile(t, yaml))
+		if err != nil {
+			t.Fatalf("expected no error for zero max_transfer_bytes, got: %v", err)
+		}
+		if got := cfg.Targets[0].ProbeOpts.MaxTransferBytes; got != 0 {
+			t.Errorf("MaxTransferBytes = %d, want 0", got)
+		}
+	})
+
+	t.Run("positive preserved", func(t *testing.T) {
+		yaml := `
+agent:
+  default_interval: 30s
+
+targets:
+  - name: "http-positive-transfer"
+    address: "https://example.com"
+    probe_type: http
+    timeout: 5s
+    probe_opts:
+      max_transfer_bytes: 2097152
+`
+		cfg, err := LoadConfig(writeConfigFile(t, yaml))
+		if err != nil {
+			t.Fatalf("expected no error for positive max_transfer_bytes, got: %v", err)
+		}
+		if got := cfg.Targets[0].ProbeOpts.MaxTransferBytes; got != 2097152 {
+			t.Errorf("MaxTransferBytes = %d, want 2097152", got)
+		}
+	})
+}
+
 func TestLoadConfig_ValidLogLevels(t *testing.T) {
 	levels := []string{"debug", "info", "warn", "error"}
 	for _, lvl := range levels {
@@ -1510,6 +1921,86 @@ targets:
 	}
 	if cfg.Agent.LogLevel != "info" {
 		t.Errorf("LogLevel = %q, want %q (default)", cfg.Agent.LogLevel, "info")
+	}
+}
+
+func TestLoadConfig_ValidLogFormats(t *testing.T) {
+	formats := []string{"text", "json"}
+	for _, format := range formats {
+		t.Run(format, func(t *testing.T) {
+			yaml := fmt.Sprintf(`
+agent:
+  default_interval: 30s
+  log_format: %s
+
+targets:
+  - name: "t"
+    address: "example.com:80"
+    probe_type: tcp
+    timeout: 5s
+`, format)
+			cfg, err := LoadConfig(writeConfigFile(t, yaml))
+			if err != nil {
+				t.Fatalf("expected no error for log_format=%q, got: %v", format, err)
+			}
+			if cfg.Agent.LogFormat != format {
+				t.Errorf("LogFormat = %q, want %q", cfg.Agent.LogFormat, format)
+			}
+		})
+	}
+}
+
+func TestLoadConfig_EmptyLogFormatDefaultsToText(t *testing.T) {
+	yaml := `
+agent:
+  default_interval: 30s
+
+targets:
+  - name: "t"
+    address: "example.com:80"
+    probe_type: tcp
+    timeout: 5s
+`
+	cfg, err := LoadConfig(writeConfigFile(t, yaml))
+	if err != nil {
+		t.Fatalf("expected no error for missing log_format, got: %v", err)
+	}
+	if cfg.Agent.LogFormat != "text" {
+		t.Errorf("LogFormat = %q, want %q (default)", cfg.Agent.LogFormat, "text")
+	}
+}
+
+func TestLoadConfig_InvalidLogFormats(t *testing.T) {
+	cases := []string{
+		"TEXT",
+		"Json",
+		"jsonl",
+		"console",
+		"pretty",
+		"structured",
+		" text",
+	}
+	for _, format := range cases {
+		t.Run(format, func(t *testing.T) {
+			yaml := fmt.Sprintf(`
+agent:
+  default_interval: 30s
+  log_format: %q
+
+targets:
+  - name: "t"
+    address: "example.com:80"
+    probe_type: tcp
+    timeout: 5s
+`, format)
+			_, err := LoadConfig(writeConfigFile(t, yaml))
+			if err == nil {
+				t.Fatalf("expected error for log_format=%q, got nil", format)
+			}
+			if !strings.Contains(err.Error(), "log_format") {
+				t.Errorf("error %q does not mention log_format", err.Error())
+			}
+		})
 	}
 }
 
@@ -1579,6 +2070,106 @@ targets:
 			_, err := LoadConfig(writeConfigFile(t, yaml))
 			if err != nil {
 				t.Fatalf("expected no error for valid status codes, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestLoadConfig_MaxTagsPerTargetAccepted(t *testing.T) {
+	// Build a target with exactly MaxTagsPerTarget (20) tags.
+	tags := make([]string, 0, MaxTagsPerTarget)
+	for i := 0; i < MaxTagsPerTarget; i++ {
+		tags = append(tags, fmt.Sprintf("      tag_%02d: \"val%d\"", i, i))
+	}
+	yaml := fmt.Sprintf(`
+agent:
+  default_interval: 30s
+  allowed_tag_keys: [%s]
+
+targets:
+  - name: "max-tags"
+    address: "example.com:443"
+    probe_type: tcp
+    timeout: 5s
+    tags:
+%s
+`, func() string {
+		keys := make([]string, MaxTagsPerTarget)
+		for i := 0; i < MaxTagsPerTarget; i++ {
+			keys[i] = fmt.Sprintf("tag_%02d", i)
+		}
+		return strings.Join(keys, ", ")
+	}(), strings.Join(tags, "\n"))
+
+	_, err := LoadConfig(writeConfigFile(t, yaml))
+	if err != nil {
+		t.Fatalf("expected no error for %d tags (MaxTagsPerTarget), got: %v", MaxTagsPerTarget, err)
+	}
+}
+
+func TestLoadConfig_ExceedMaxTagsPerTargetRejected(t *testing.T) {
+	// Build a target with MaxTagsPerTarget+1 (21) tags.
+	count := MaxTagsPerTarget + 1
+	tags := make([]string, 0, count)
+	for i := 0; i < count; i++ {
+		tags = append(tags, fmt.Sprintf("      tag_%02d: \"val%d\"", i, i))
+	}
+	yaml := fmt.Sprintf(`
+agent:
+  default_interval: 30s
+  allowed_tag_keys: [%s]
+
+targets:
+  - name: "too-many-tags"
+    address: "example.com:443"
+    probe_type: tcp
+    timeout: 5s
+    tags:
+%s
+`, func() string {
+		keys := make([]string, count)
+		for i := 0; i < count; i++ {
+			keys[i] = fmt.Sprintf("tag_%02d", i)
+		}
+		return strings.Join(keys, ", ")
+	}(), strings.Join(tags, "\n"))
+
+	_, err := LoadConfig(writeConfigFile(t, yaml))
+	if err == nil {
+		t.Fatalf("expected error for %d tags (exceeds MaxTagsPerTarget=%d), got nil", count, MaxTagsPerTarget)
+	}
+	if !strings.Contains(err.Error(), "too many tags") {
+		t.Fatalf("error = %q, want it to contain 'too many tags'", err.Error())
+	}
+}
+
+func TestLoadConfig_AgentDefaultICMPPayloadSizesNonPositiveRejected(t *testing.T) {
+	tests := []struct {
+		name  string
+		sizes string
+	}{
+		{"zero value", "[1472, 0]"},
+		{"negative value", "[1472, -1]"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			yaml := fmt.Sprintf(`
+agent:
+  default_interval: 300s
+  default_icmp_payload_sizes: %s
+
+targets:
+  - name: "mtu-t"
+    address: "example.com"
+    probe_type: mtu
+    timeout: 30s
+`, tt.sizes)
+			_, err := LoadConfig(writeConfigFile(t, yaml))
+			if err == nil {
+				t.Fatal("expected error for non-positive default_icmp_payload_sizes value, got nil")
+			}
+			if !strings.Contains(err.Error(), "must be > 0") {
+				t.Fatalf("error = %q, want it to contain 'must be > 0'", err.Error())
 			}
 		})
 	}

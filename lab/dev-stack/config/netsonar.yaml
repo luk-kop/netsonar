@@ -1,0 +1,340 @@
+agent:
+  listen_addr: ":9275"
+  metrics_path: "/metrics"
+  default_interval: 5s
+  default_timeout: 2s
+  log_level: info
+  allowed_tag_keys:
+    - service
+    - scope
+    - impact
+    - target_region
+    - target_partition
+    - target_account
+
+targets:
+  - name: tcp-open
+    address: "fake-targets:9000"
+    probe_type: tcp
+    tags:
+      service: fake-tcp
+      scope: same-region
+      impact: high
+      target_region: local
+      target_partition: dev
+      target_account: dev-stack
+
+  - name: tcp-cross-region-open
+    address: "fake-targets:9000"
+    probe_type: tcp
+    interval: 10s
+    tags:
+      service: fake-tcp
+      scope: cross-region
+      impact: high
+      target_region: eu-west-1
+      target_partition: dev
+      target_account: dev-stack-remote
+
+  - name: tcp-closed
+    address: "fake-targets:9001"
+    probe_type: tcp
+    tags:
+      service: fake-tcp
+      scope: same-region
+      impact: low
+      target_region: local
+      target_partition: dev
+      target_account: dev-stack
+
+  - name: http-ok
+    address: "http://fake-targets:8080/ok"
+    probe_type: http
+    probe_opts:
+      method: GET
+      expected_status_codes: [200]
+    tags:
+      service: fake-http
+      scope: same-region
+      impact: critical
+      target_region: local
+      target_partition: dev
+      target_account: dev-stack
+
+  - name: http-cross-region-ok
+    address: "http://fake-targets:8080/ok"
+    probe_type: http
+    interval: 10s
+    probe_opts:
+      method: GET
+      expected_status_codes: [200]
+    tags:
+      service: fake-http
+      scope: cross-region
+      impact: critical
+      target_region: eu-west-1
+      target_partition: dev
+      target_account: dev-stack-remote
+
+  - name: http-500-expected-200
+    address: "http://fake-targets:8080/error"
+    probe_type: http
+    probe_opts:
+      method: GET
+      expected_status_codes: [200]
+    tags:
+      service: fake-http
+      scope: same-region
+      impact: high
+      target_region: local
+      target_partition: dev
+      target_account: dev-stack
+
+  - name: http-500-any-status
+    address: "http://fake-targets:8080/error"
+    probe_type: http
+    probe_opts:
+      method: GET
+      expected_status_codes: []
+    tags:
+      service: fake-http
+      scope: cross-region
+      impact: medium
+      target_region: eu-west-1
+      target_partition: dev
+      target_account: dev-stack-remote
+
+  - name: http-body-ok
+    address: "http://fake-targets:8080/ok"
+    probe_type: http_body
+    probe_opts:
+      method: GET
+      body_match_string: "healthy"
+      expected_status_codes: [200]
+    tags:
+      service: fake-http
+      scope: same-region
+      impact: critical
+      target_region: local
+      target_partition: dev
+      target_account: dev-stack
+
+  - name: http-body-mismatch
+    address: "http://fake-targets:8080/unhealthy"
+    probe_type: http_body
+    probe_opts:
+      method: GET
+      body_match_string: "healthy"
+      expected_status_codes: [200]
+    tags:
+      service: fake-http
+      scope: same-region
+      impact: high
+      target_region: local
+      target_partition: dev
+      target_account: dev-stack
+
+  - name: http-body-bad-status
+    address: "http://fake-targets:8080/error-with-healthy-body"
+    probe_type: http_body
+    probe_opts:
+      method: GET
+      body_match_string: "healthy"
+      expected_status_codes: [200]
+    tags:
+      service: fake-http
+      scope: same-region
+      impact: high
+      target_region: local
+      target_partition: dev
+      target_account: dev-stack
+
+  - name: http-via-proxy
+    address: "http://fake-targets:8080/ok"
+    probe_type: http
+    probe_opts:
+      method: GET
+      expected_status_codes: [200]
+      proxy_url: "http://fake-targets:8888"
+    tags:
+      service: fake-proxy
+      scope: same-region
+      impact: high
+      target_region: local
+      target_partition: dev
+      target_account: dev-stack
+
+  - name: http-cross-region-via-proxy
+    address: "http://fake-targets:8080/ok"
+    probe_type: http
+    interval: 10s
+    probe_opts:
+      method: GET
+      expected_status_codes: [200]
+      proxy_url: "http://fake-targets:8888"
+    tags:
+      service: fake-proxy
+      scope: cross-region
+      impact: high
+      target_region: eu-west-1
+      target_partition: dev
+      target_account: dev-stack-remote
+
+  - name: proxy-connect-ok
+    address: "fake-targets:9000"
+    probe_type: proxy
+    probe_opts:
+      proxy_url: "http://fake-targets:8888"
+    tags:
+      service: fake-proxy
+      scope: same-region
+      impact: high
+      target_region: local
+      target_partition: dev
+      target_account: dev-stack
+
+  - name: proxy-connect-denied
+    address: "fake-targets:9001"
+    probe_type: proxy
+    probe_opts:
+      proxy_url: "http://fake-targets:8888"
+    tags:
+      service: fake-proxy
+      scope: same-region
+      impact: low
+      target_region: local
+      target_partition: dev
+      target_account: dev-stack
+
+  - name: tls-cert-via-proxy
+    address: "fake-targets:9443"
+    probe_type: tls_cert
+    probe_opts:
+      tls_skip_verify: true
+      proxy_url: "http://fake-targets:8888"
+    tags:
+      service: fake-proxy
+      scope: same-region
+      impact: high
+      target_region: local
+      target_partition: dev
+      target_account: dev-stack
+
+  - name: dns-fake-targets
+    address: "fake-targets"
+    probe_type: dns
+    probe_opts:
+      dns_query_name: "fake-targets"
+      dns_query_type: A
+    tags:
+      service: fake-dns
+      scope: same-region
+      impact: high
+      target_region: local
+      target_partition: dev
+      target_account: dev-stack
+
+  - name: dns-localhost-match
+    address: "localhost"
+    probe_type: dns
+    probe_opts:
+      dns_query_name: "localhost"
+      dns_query_type: A
+      dns_expected: ["127.0.0.1"]
+    tags:
+      service: fake-dns
+      scope: same-region
+      impact: high
+      target_region: local
+      target_partition: dev
+      target_account: dev-stack
+
+  - name: dns-localhost-mismatch
+    address: "localhost"
+    probe_type: dns
+    probe_opts:
+      dns_query_name: "localhost"
+      dns_query_type: A
+      dns_expected: ["203.0.113.10"]
+    tags:
+      service: fake-dns
+      scope: same-region
+      impact: low
+      target_region: local
+      target_partition: dev
+      target_account: dev-stack
+
+  - name: icmp-fake-targets
+    address: "fake-targets"
+    probe_type: icmp
+    interval: 10s
+    timeout: 3s
+    probe_opts:
+      ping_count: 3
+      ping_interval: 0.1
+    tags:
+      service: fake-icmp
+      scope: same-region
+      impact: high
+      target_region: local
+      target_partition: dev
+      target_account: dev-stack
+
+  - name: mtu-fake-targets
+    address: "fake-targets"
+    probe_type: mtu
+    interval: 15s
+    timeout: 8s
+    probe_opts:
+      icmp_payload_sizes: [1472, 1452, 1432, 1412, 1392, 1372, 1272, 1172, 1072]
+      expected_min_mtu: 1200
+      mtu_retries: 1
+      mtu_per_attempt_timeout: 500ms
+    tags:
+      service: fake-mtu
+      scope: cross-region
+      impact: critical
+      target_region: eu-west-1
+      target_partition: dev
+      target_account: dev-stack-remote
+
+  # Sizes far exceed the Docker bridge MTU (1500), so the local kernel rejects
+  # each packet with EMSGSIZE before it leaves the host. This exercises the
+  # local_message_too_large detail label, not fragmentation_needed (ICMP
+  # Type 3 Code 4). The Grafana dashboard will never show fragmentation_needed
+  # from this probe; that path requires a real network hop with a smaller MTU.
+  - name: mtu-fake-targets-too-large
+    address: "fake-targets"
+    probe_type: mtu
+    interval: 15s
+    timeout: 3s
+    probe_opts:
+      icmp_payload_sizes: [65000, 32000, 16000]
+      expected_min_mtu: 1500
+      mtu_retries: 1
+      mtu_per_attempt_timeout: 500ms
+    tags:
+      service: fake-mtu
+      scope: same-region
+      impact: high
+      target_region: local
+      target_partition: dev
+      target_account: dev-stack
+
+  - name: mtu-unreachable
+    address: "198.51.100.1"
+    probe_type: mtu
+    interval: 15s
+    timeout: 3s
+    probe_opts:
+      icmp_payload_sizes: [1472, 1372, 1272]
+      expected_min_mtu: 1200
+      mtu_retries: 1
+      mtu_per_attempt_timeout: 500ms
+    tags:
+      service: fake-mtu
+      scope: same-region
+      impact: low
+      target_region: local
+      target_partition: dev
+      target_account: dev-stack

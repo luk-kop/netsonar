@@ -17,7 +17,16 @@ No `probe_opts` required.
 
 ## HTTP/HTTPS
 
-Full HTTP request with `httptrace` phase breakdown (DNS resolve, TCP connect, TLS handshake, TTFB, transfer). Extracts TLS certificate expiry for HTTPS targets. Supports optional proxy routing via `proxy_url`.
+Full HTTP request with `httptrace` phase breakdown (DNS resolve, TCP connect, TLS handshake, TTFB, transfer). Extracts the earliest TLS certificate expiry from the peer chain for HTTPS targets. Supports optional proxy routing via `proxy_url`.
+
+The HTTP probe does not inspect response body content. It discards and reads at
+most the effective transfer limit: `probe_opts.max_transfer_bytes` when set,
+otherwise 1 MiB. Larger or streaming responses do not fail the probe because
+of size; `probe_success` is determined by request/transfer errors and
+`expected_status_codes`, while `probe_http_response_truncated` reports whether
+the limit was exceeded. The `transfer` phase measures time from first response
+byte until either the body ends or the effective transfer limit has been read.
+Use `http_body` when response content must be validated.
 
 ```yaml
 - name: "ssm-http"
@@ -31,6 +40,7 @@ Full HTTP request with `httptrace` phase breakdown (DNS resolve, TCP connect, TL
     follow_redirects: false         # Follow HTTP redirects (default: false)
     tls_skip_verify: false          # Skip TLS certificate verification
     expected_status_codes: []       # Empty = accept any status code
+    max_transfer_bytes: 0           # 0/omitted = 1 MiB capped body read
     proxy_url: ""                   # Optional: route through HTTP proxy
 ```
 
@@ -40,7 +50,7 @@ Controls how `probe_success` is determined from the HTTP response:
 
 | Configuration | Behaviour |
 |---|---|
-| `expected_status_codes: []` | Any fully received HTTP response is a success (`probe_success=1`). The probe fails if the request or response transfer fails (timeout, DNS error, TLS error, interrupted body transfer, etc.). |
+| `expected_status_codes: []` | Any HTTP response that completes the capped body read is a success (`probe_success=1`). The probe fails if the request or capped response transfer fails (timeout, DNS error, TLS error, interrupted body transfer, etc.). |
 | `expected_status_codes: [200]` | Success only if the response status code is exactly 200. Any other code sets `probe_success=0`. |
 | `expected_status_codes: [200, 201, 204]` | Success if the response code matches any value in the list. |
 
@@ -71,11 +81,14 @@ For proxies that require Basic authentication, include credentials in the proxy 
 proxy_url: "http://username:password@infra-proxy.example.internal:8888"
 ```
 
+Skipping TLS verification for HTTPS proxies is not supported. `tls_skip_verify`
+applies to the target TLS connection, not to the proxy's own TLS certificate.
+
 ## ICMP
 
-ICMP echo with configurable ping count, average RTT, packet loss ratio, and hop count. Uses unprivileged ICMP sockets (no `CAP_NET_RAW` needed). Requires `net.ipv4.ping_group_range` to include the process GID (default on most Linux distributions).
+ICMP echo with configurable ping count, packet loss ratio, average RTT, and RTT standard deviation. Uses unprivileged ICMP sockets (no `CAP_NET_RAW` needed). Requires `net.ipv4.ping_group_range` to include the process effective or supplementary GID (default on most Linux distributions).
 
-For ICMP, `probe_duration_seconds` is the wall-clock duration of the full probe execution, including multiple pings and configured `ping_interval` waits. Average echo round-trip time is exposed separately as `probe_icmp_avg_rtt_seconds`.
+For ICMP, `probe_duration_seconds` is the wall-clock duration of the full probe execution, including multiple pings and configured `ping_interval` waits. Echo round-trip timing is exposed separately as `probe_icmp_avg_rtt_seconds` and `probe_icmp_stddev_rtt_seconds`.
 
 ICMP probes are IPv4-only in the current implementation. Literal IPv6 addresses are rejected at config load time. Hostnames are allowed, but they must resolve to an IPv4 address at runtime; hostnames with only `AAAA` records will fail and log a `resolve IPv4 address` error.
 
@@ -91,7 +104,7 @@ ICMP probes are IPv4-only in the current implementation. Literal IPv6 addresses 
 
 ## MTU/PMTUD
 
-Detects path MTU by sending ICMP echo requests with the IPv4 DF-bit set, stepping down through configured payload sizes. Requires `CAP_NET_RAW`.
+Detects path MTU by sending ICMP echo requests with the IPv4 DF-bit set, stepping down through configured payload sizes. Uses Linux unprivileged ICMP ping sockets and does not require `CAP_NET_RAW`; `net.ipv4.ping_group_range` must include the process effective or supplementary GID.
 
 MTU probes are IPv4-only in the current implementation. Literal IPv6 addresses are rejected at config load time. Hostnames are allowed, but they must resolve to an IPv4 address at runtime; hostnames with only `AAAA` records will fail and log a `resolve IPv4 address` error.
 
@@ -137,16 +150,14 @@ This means most MTU targets need no `probe_opts` at all — they inherit the age
 | 1172         | 1200                    |
 | 1072         | 1100                    |
 
-In the legacy `probe_mtu_path_bytes` metric, a value of `-1` means all sizes failed. In the newer metric contract, `probe_mtu_bytes` is absent when no size was confirmed, and `probe_mtu_state` carries the reason.
-
-New MTU metrics expose the status contract:
+MTU metrics expose the status contract:
 
 ```text
 probe_mtu_state{state="ok|degraded|unreachable|error", detail="..."} 1
 probe_mtu_bytes
 ```
 
-`probe_mtu_path_bytes` is still emitted for compatibility, but new dashboards should use `probe_mtu_state` for alerting and `probe_mtu_bytes` for the confirmed MTU value.
+`probe_mtu_bytes` is absent when no size was confirmed, and `probe_mtu_state` carries the reason.
 
 For a detailed explanation of PMTUD, ICMP Destination Unreachable codes, PMTUD black holes, and how the MTU probe interprets results, see [mtu-pmtud.md](mtu-pmtud.md).
 
@@ -231,7 +242,7 @@ On mismatch, the agent logs the actual vs expected values: `dns expected result 
 
 ## TLS Certificate Expiry
 
-Performs a TLS handshake and extracts the leaf certificate's `NotAfter` timestamp.
+Performs a TLS handshake and extracts certificate expiry from the observed peer chain. The alert-oriented `probe_tls_cert_expiry_timestamp_seconds` metric reports the earliest `NotAfter` timestamp in the chain, while `probe_tls_cert_chain_expiry_timestamp_seconds` emits one series per observed certificate with `cert_index` and `cert_role` labels. Supports optional proxy routing via `proxy_url`; for proxy-path targets the agent establishes an HTTP CONNECT tunnel first, then performs the TLS handshake through that tunnel.
 
 ```yaml
 - name: "api-gw-pub-eu-tls"
@@ -239,7 +250,12 @@ Performs a TLS handshake and extracts the leaf certificate's `NotAfter` timestam
   probe_type: tls_cert
   interval: 300s
   timeout: 5s
+  probe_opts:
+    tls_skip_verify: false
+    proxy_url: ""                   # Optional: inspect certificate through HTTP proxy
 ```
+
+The reported expiry is based on the certificate chain observed by NetSonar from that network path. With a normal CONNECT proxy this is the origin chain. With TLS inspection, the observed chain may be proxy-issued; this is useful when the operational question is what workloads behind that proxy actually see.
 
 ## HTTP Body Validation
 
@@ -295,10 +311,17 @@ Use `proxy` when:
 
 **`probe_type: http` with `proxy_url`** — sends a standard HTTP request routed through the proxy using Go's `http.Transport.Proxy`. For HTTPS targets, the transport internally performs CONNECT + TLS handshake + HTTP request as a single operation, which is the standard way clients (curl, wget, apt) use forward proxies.
 
+**`probe_type: tls_cert` with `proxy_url`** — sends CONNECT to the proxy, then performs only the target TLS handshake through the tunnel and records the observed certificate expiry. It does not send an HTTP request to the target.
+
 Use `http` with `proxy_url` when:
 - Testing that a forward proxy can reach a target endpoint (the common case)
 - Verifying proxy connectivity for HTTP/HTTPS traffic as clients actually use it
 - You need full HTTP metrics (status code, phase timing, TLS certificate expiry)
+
+Use `tls_cert` with `proxy_url` when:
+- You only need certificate expiry metrics from `network_path="proxy"`
+- The target has no useful HTTP endpoint, or a full HTTP request would be too invasive
+- You need to observe certificates as workloads behind an egress proxy see them
 
 ```yaml
 # Recommended: test proxy connectivity the way clients use it
@@ -316,29 +339,38 @@ Use `http` with `proxy_url` when:
     # ...
 ```
 
-### Interpreting Metrics for Proxied HTTP Probes
+### Interpreting Metrics for Proxy-Path HTTP Probes
 
-When an HTTP probe uses `proxy_url`, the phase timing metrics reflect the full proxied path:
+When an HTTP probe uses `proxy_url`, the phase timing metrics reflect the full proxy path:
 
-| Phase | What It Measures (proxied) |
+| Phase | What It Measures (`network_path="proxy"`) |
 |---|---|
 | `tcp_connect` | TCP dial to proxy + CONNECT tunnel establishment to target |
 | `tls_handshake` | TLS handshake with the target (through the tunnel) |
-| `ttfb` | Time to first byte from the target (through the tunnel) |
-| `transfer` | Response body transfer (through the tunnel) |
+| `ttfb` | Time from connection ready (after TLS for HTTPS) to first response byte — does not include TLS handshake |
+| `transfer` | Response body read up to the effective transfer limit (through the tunnel) |
 
-The `tcp_connect` phase is notably higher for proxied probes compared to direct ones because it includes both the connection to the proxy and the CONNECT handshake. This is expected and can be used to estimate proxy overhead by comparing `tcp_connect` of a proxied probe against a direct probe to the same target.
+The `tcp_connect` phase is notably higher for proxy-path probes compared to direct ones because it includes both the connection to the proxy and the CONNECT handshake. This is expected and can be used to estimate proxy overhead by comparing `tcp_connect` of a proxy-path probe against a direct probe to the same target.
 
-### Identifying Proxied Probes on the Dashboard
+When a `tls_cert` probe uses `proxy_url`, phase timing metrics show the CONNECT tunnel setup and target TLS handshake:
 
-The agent automatically adds a `proxied` label to every metric: `"true"` when the target has a `proxy_url` configured, `"false"` otherwise. This requires no manual configuration — the agent detects it from `probe_opts.proxy_url`.
+| Phase | What It Measures (`tls_cert` over `network_path="proxy"`) |
+|---|---|
+| `proxy_dial` | TCP dial to the proxy |
+| `proxy_tls` | TLS handshake with the proxy, only for `https://` proxy URLs |
+| `proxy_connect` | CONNECT request write and proxy response read |
+| `tls_handshake` | TLS handshake with the target through the tunnel |
+
+### Identifying Proxy-Path Probes on the Dashboard
+
+The agent automatically adds a `network_path` label to every probe metric: `"proxy"` when the target has a `proxy_url` configured, `"direct"` otherwise. This requires no manual configuration — the agent detects it from `probe_opts.proxy_url`.
 
 On the Grafana dashboard:
-- The "All Probes — Status Table" includes a "Proxied" column that shows "YES" (orange) for proxied probes and is blank for direct ones.
-- The "Proxied HTTP Probes" section filters by `probe_type="http", proxied="true"`.
-- The "HTTP Phase Timing (Proxied)" panel shows HTTP phase timings for proxied HTTP probes.
+- The "All Probes — Status Table" includes a "Path" column.
+- The "Proxy-Path HTTP Probes" section filters by `probe_type="http", network_path="proxy"`.
+- The "HTTP Phase Timing (Proxy Path)" panel shows HTTP phase timings for proxy-path HTTP probes.
 - The "Proxy CONNECT Probes" section filters by `probe_type="proxy"`.
 - The "Proxy CONNECT Phase Timing" panel shows raw CONNECT probe phases: `proxy_dial`, `proxy_tls`, and `proxy_connect`.
-- PromQL filter: `probe_success{proxied="true"}` selects all proxied probes regardless of probe type or service name.
+- PromQL filter: `probe_success{network_path="proxy"}` selects all proxy-path probes regardless of probe type or service name.
 
-For a detailed explanation of how HTTP proxies work, when to use each probe type, and how to interpret proxied metrics, see [proxy-probing.md](proxy-probing.md).
+For a detailed explanation of how HTTP proxies work, when to use each probe type, and how to interpret proxy-path metrics, see [proxy-probing.md](proxy-probing.md).

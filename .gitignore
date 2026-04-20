@@ -65,11 +65,8 @@ terraform/.build/
 
 # Custom
 .env
+.cache/
 *.log
+lab/dev-stack/config/netsonar.with-internet.yaml
 notes/
 *.zip
-
-# Working notes (not part of the project)
-issues.md
-testing-ideas.md
-mtu-*.md

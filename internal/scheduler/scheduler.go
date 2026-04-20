@@ -4,7 +4,8 @@ package scheduler
 import (
 	"context"
 	"log/slog"
-	"reflect"
+	"math"
+	"math/rand/v2"
 	"sync"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 type probeEntry struct {
 	target config.TargetConfig
 	cancel context.CancelFunc
+	done   chan struct{} // closed when goroutine exits
 }
 
 type probeState struct {
@@ -65,7 +67,7 @@ func (s *Scheduler) Start(ctx context.Context, cfg config.Config) {
 	defer s.mu.Unlock()
 
 	for _, t := range cfg.Targets {
-		s.startTarget(ctx, t)
+		s.startTarget(ctx, t, cfg.Agent.InitialProbeJitter)
 	}
 
 	slog.Info("scheduler started", "targets", len(cfg.Targets))
@@ -101,7 +103,7 @@ func (s *Scheduler) Stop() {
 // Postconditions:
 //   - Removed targets are stopped
 //   - New targets are started
-//   - Changed targets are restarted (new goroutine starts before old stops)
+//   - Changed targets are restarted
 //   - Unchanged targets continue without interruption
 func (s *Scheduler) Reload(ctx context.Context, cfg config.Config) {
 	s.mu.Lock()
@@ -115,18 +117,32 @@ func (s *Scheduler) Reload(ctx context.Context, cfg config.Config) {
 
 	toStop, toStart, unchanged := diffTargets(oldTargets, cfg.Targets)
 
-	// Stop removed and changed targets.
+	// Stop removed and changed targets before starting replacements. This,
+	// together with executeProbe's post-probe parent-context check, prevents
+	// stale results from recreating deleted or changed target metrics.
+	//
+	// Collect done channels so we can wait for the old goroutines to fully
+	// exit before starting replacements, preventing overlapping probe traffic.
+	stoppedDone := make([]chan struct{}, 0, len(toStop))
 	for _, t := range toStop {
 		if entry, ok := s.probes[t.Name]; ok {
 			entry.cancel()
+			stoppedDone = append(stoppedDone, entry.done)
 			delete(s.probes, t.Name)
 		}
 		s.metrics.DeleteTarget(t)
 	}
 
+	// Wait for cancelled goroutines to exit before starting replacements.
+	// This is scoped to only the stopped targets, so unrelated probes are
+	// not blocked.
+	for _, done := range stoppedDone {
+		<-done
+	}
+
 	// Start new and changed targets.
 	for _, t := range toStart {
-		s.startTarget(ctx, t)
+		s.startTarget(ctx, t, cfg.Agent.InitialProbeJitter)
 	}
 
 	slog.Info("scheduler reloaded",
@@ -146,28 +162,33 @@ func (s *Scheduler) Targets() int {
 
 // startTarget launches a probe goroutine for a single target. Caller must
 // hold s.mu.
-func (s *Scheduler) startTarget(ctx context.Context, t config.TargetConfig) {
+func (s *Scheduler) startTarget(ctx context.Context, t config.TargetConfig, initialProbeJitter time.Duration) {
 	probeCtx, cancel := context.WithCancel(ctx)
-	s.probes[t.Name] = &probeEntry{target: t, cancel: cancel}
+	done := make(chan struct{})
+	s.probes[t.Name] = &probeEntry{target: t, cancel: cancel, done: done}
 
 	prober := s.proberFn(t)
 
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		runProbeLoop(probeCtx, t, prober, s.metrics)
+		defer close(done)
+		runProbeLoop(probeCtx, t, prober, s.metrics, initialProbeJitter)
 	}()
 }
 
 // runProbeLoop is the per-target goroutine. It executes an immediate first
-// probe, then repeats at the target's configured interval until the context
-// is cancelled.
+// probe, optionally delayed by initialProbeJitter, then repeats at the target's
+// configured interval until the context is cancelled.
 //
 // Invariant: at most one probe is in-flight for this target at any time.
-func runProbeLoop(ctx context.Context, target config.TargetConfig, prober probe.Prober, m *metrics.MetricsExporter) {
+func runProbeLoop(ctx context.Context, target config.TargetConfig, prober probe.Prober, m *metrics.MetricsExporter, initialProbeJitter time.Duration) {
 	var state probeState
 
-	// Run first probe immediately (don't wait for first tick).
+	if !waitInitialProbeJitter(ctx, initialProbeJitter) {
+		return
+	}
+
 	executeProbe(ctx, target, prober, m, &state)
 
 	ticker := time.NewTicker(target.Interval)
@@ -192,6 +213,40 @@ func runProbeLoop(ctx context.Context, target config.TargetConfig, prober probe.
 			default:
 			}
 		}
+	}
+}
+
+// randomInitialProbeDelay returns a random delay in [0, max]. It is a package
+// variable so tests can substitute a deterministic implementation.
+var randomInitialProbeDelay = func(max time.Duration) time.Duration {
+	if max <= 0 {
+		return 0
+	}
+	// int64(MaxInt64)+1 overflows to MinInt64, which would make Int64N panic;
+	// handle the boundary explicitly.
+	if max == time.Duration(math.MaxInt64) {
+		return time.Duration(rand.Int64N(math.MaxInt64))
+	}
+	return time.Duration(rand.Int64N(int64(max) + 1))
+}
+
+// waitInitialProbeJitter sleeps for a random delay in [0, max] before the first
+// probe so agents starting simultaneously don't fire in lockstep. Returns true
+// if the wait completed normally, false if ctx was cancelled during or before.
+func waitInitialProbeJitter(ctx context.Context, max time.Duration) bool {
+	delay := randomInitialProbeDelay(max)
+	if delay <= 0 {
+		return ctx.Err() == nil
+	}
+
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
 	}
 }
 
@@ -303,7 +358,7 @@ func diffTargets(oldTargets, newTargets []config.TargetConfig) (toStop, toStart,
 		oldT, exists := oldMap[name]
 		if !exists {
 			toStart = append(toStart, newT)
-		} else if !reflect.DeepEqual(oldT, newT) {
+		} else if !oldT.Equal(newT) {
 			toStop = append(toStop, oldT)
 			toStart = append(toStart, newT)
 		} else {

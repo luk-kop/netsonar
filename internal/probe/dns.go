@@ -56,7 +56,12 @@ func (p *DNSProber) Probe(ctx context.Context, target config.TargetConfig) Probe
 		return result
 	}
 
+	expectedConfigured := len(target.ProbeOpts.DNSExpectedResults) > 0
 	if len(records) == 0 {
+		if expectedConfigured {
+			result.DNSMatchEvaluated = true
+			result.DNSMatched = false
+		}
 		result.Error = "dns resolve: no results returned"
 		return result
 	}
@@ -64,8 +69,10 @@ func (p *DNSProber) Probe(ctx context.Context, target config.TargetConfig) Probe
 	result.Success = true
 
 	// Validate against expected results if configured.
-	if len(target.ProbeOpts.DNSExpectedResults) > 0 {
-		if !matchExpected(records, target.ProbeOpts.DNSExpectedResults) {
+	if expectedConfigured {
+		result.DNSMatchEvaluated = true
+		result.DNSMatched = matchExpected(records, target.ProbeOpts.DNSExpectedResults)
+		if !result.DNSMatched {
 			result.Success = false
 			result.Error = fmt.Sprintf(
 				"dns expected result mismatch: got %v, want %v",
@@ -91,9 +98,9 @@ func (p *DNSProber) buildResolver(server string) *net.Resolver {
 
 	return &net.Resolver{
 		PreferGo: true,
-		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
 			var d net.Dialer
-			return d.DialContext(ctx, "udp", server)
+			return d.DialContext(ctx, network, server)
 		},
 	}
 }

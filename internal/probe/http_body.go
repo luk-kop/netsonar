@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -42,9 +41,7 @@ func NewHTTPBodyProber(tlsSkipVerify bool, followRedirects bool, proxyURL string
 	}
 
 	if proxyURL != "" {
-		if u, err := url.Parse(proxyURL); err == nil {
-			transport.Proxy = http.ProxyURL(u)
-		}
+		transport.Proxy = http.ProxyURL(mustProxyURL("NewHTTPBodyProber", proxyURL))
 	}
 
 	client := &http.Client{

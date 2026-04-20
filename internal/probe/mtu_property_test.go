@@ -53,7 +53,7 @@ func genICMPPayloadSizes() gopter.Gen {
 }
 
 // genMTUAddress generates addresses that exercise different code paths:
-// localhost (likely succeeds with CAP_NET_RAW), unresolvable hostnames,
+// localhost (likely succeeds when ping sockets are allowed), unresolvable hostnames,
 // TEST-NET addresses (unlikely to respond), and 0.0.0.0.
 func genMTUAddress() gopter.Gen {
 	addresses := []string{

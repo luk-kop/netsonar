@@ -10,13 +10,16 @@ COMMIT   ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 DATE     ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 
 LDFLAGS  := -s -w \
-	-X 'main.version=$(VERSION)'
+	-X 'main.version=$(VERSION)' \
+	-X 'main.commit=$(COMMIT)' \
+	-X 'main.date=$(DATE)'
 
-.PHONY: all build test test-short test-race test-pbt lab-e2e e2e-compose lint fmt vet clean
+.PHONY: all build test test-short test-race test-pbt lab-e2e lab-dev lab-dev-internet lab-dev-reload lab-dev-down lint fmt vet clean
 
 all: fmt vet lint test build
 
 build:
+	mkdir -p $(BINDIR)
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BINDIR)/$(BINARY) $(PKG)
 
 test:
@@ -34,7 +37,18 @@ test-pbt:
 lab-e2e:
 	./scripts/lab-e2e.sh
 
-e2e-compose: lab-e2e
+lab-dev:
+	docker compose -f lab/dev-stack/docker-compose.yml up --build --force-recreate -d
+
+lab-dev-internet:
+	GOCACHE=$(CURDIR)/.cache/go-build go run ./tools/configmerge --base lab/dev-stack/config/netsonar.yaml --overlay lab/dev-stack/config/netsonar-internet.yaml --out lab/dev-stack/config/netsonar.with-internet.yaml
+	NETSONAR_CONFIG=/config/netsonar.with-internet.yaml docker compose -f lab/dev-stack/docker-compose.yml up --build --force-recreate -d
+
+lab-dev-reload:
+	docker compose -f lab/dev-stack/docker-compose.yml kill -s SIGHUP netsonar
+
+lab-dev-down:
+	docker compose -f lab/dev-stack/docker-compose.yml down -v
 
 lint:
 	golangci-lint run
@@ -46,4 +60,4 @@ vet:
 	go vet ./...
 
 clean:
-	rm -rf $(BINDIR)
+	rm -rf $(BINDIR) .cache

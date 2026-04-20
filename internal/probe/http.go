@@ -8,12 +8,17 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptrace"
-	"net/url"
 	"slices"
 	"time"
 
 	"netsonar/internal/config"
 )
+
+// maxHTTPTransferBytes is the maximum number of response body bytes the HTTP
+// prober reads during the transfer phase. The body is discarded — this limit
+// only caps bandwidth and time spent on large or streaming responses. The
+// probe succeeds regardless of body size; status code determines success.
+const maxHTTPTransferBytes int64 = 1 << 20 // 1 MiB
 
 // HTTPProber probes HTTP/HTTPS endpoints with per-phase timing breakdown
 // using net/http/httptrace.ClientTrace.
@@ -36,9 +41,7 @@ func NewHTTPProber(tlsSkipVerify bool, followRedirects bool, proxyURL string) *H
 	}
 
 	if proxyURL != "" {
-		if u, err := url.Parse(proxyURL); err == nil {
-			transport.Proxy = http.ProxyURL(u)
-		}
+		transport.Proxy = http.ProxyURL(mustProxyURL("NewHTTPProber", proxyURL))
 	}
 
 	client := &http.Client{
@@ -71,7 +74,7 @@ func NewHTTPProber(tlsSkipVerify bool, followRedirects bool, proxyURL string) *H
 //   - result.CertExpiry is populated for HTTPS targets with valid TLS state
 //   - If expected_status_codes is non-empty, Success reflects whether the
 //     response code is in the list; if empty, any response is a success
-//   - The response body is always fully read and closed before returning
+//   - The response body is read up to maxHTTPTransferBytes (1 MiB) and closed
 //   - result.Error is non-empty when Success is false
 func (p *HTTPProber) Probe(ctx context.Context, target config.TargetConfig) ProbeResult {
 	var result ProbeResult
@@ -129,17 +132,29 @@ func (p *HTTPProber) Probe(ctx context.Context, target config.TargetConfig) Prob
 
 	result.StatusCode = resp.StatusCode
 	if resp.TLS != nil && len(resp.TLS.PeerCertificates) > 0 {
-		result.CertExpiry = resp.TLS.PeerCertificates[0].NotAfter
+		setTLSCertificateResult(&result, resp.TLS.PeerCertificates)
 	}
 
-	// Read body fully to measure transfer time and prevent connection leaks.
-	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+	effectiveLimit := target.ProbeOpts.MaxTransferBytes
+	if effectiveLimit <= 0 {
+		effectiveLimit = maxHTTPTransferBytes
+	}
+
+	// Read up to effectiveLimit+1 bytes so truncation is observable without
+	// draining arbitrarily large or streaming responses.
+	// The body is discarded; the limit prevents probe goroutines from being
+	// held on large or streaming responses until the context timeout.
+	bytesRead, err := io.Copy(io.Discard, io.LimitReader(resp.Body, effectiveLimit+1))
+	if err != nil {
 		transferEnd := time.Now()
 		result.Duration = transferEnd.Sub(start)
 		result.Error = fmt.Sprintf("reading response body: %s", err.Error())
 		result.Phases = buildPhases(dnsStart, dnsEnd, connectStart, connectEnd,
 			tlsStart, tlsEnd, gotFirstByte, transferEnd)
 		return result
+	}
+	if bytesRead > effectiveLimit {
+		result.HTTPResponseTruncated = true
 	}
 	transferEnd := time.Now()
 
@@ -164,6 +179,11 @@ func (p *HTTPProber) Probe(ctx context.Context, target config.TargetConfig) Prob
 
 // buildPhases constructs the phase duration map from the recorded timestamps.
 // Zero-valued start/end pairs produce a zero duration for that phase.
+//
+// TTFB is anchored at the later of connectEnd and tlsEnd so that for HTTPS
+// the TLS handshake is not double-counted in both tls_handshake and ttfb.
+// Phases are non-overlapping and sum to total duration (within scheduling
+// jitter), matching the W3C Navigation Timing / Blackbox Exporter convention.
 func buildPhases(
 	dnsStart, dnsEnd,
 	connectStart, connectEnd,
@@ -171,13 +191,23 @@ func buildPhases(
 	gotFirstByte, transferEnd time.Time,
 ) map[string]time.Duration {
 	phases := map[string]time.Duration{
-		"dns_resolve":   safeSub(dnsEnd, dnsStart),
-		"tcp_connect":   safeSub(connectEnd, connectStart),
-		"tls_handshake": safeSub(tlsEnd, tlsStart),
-		"ttfb":          safeSub(gotFirstByte, connectEnd),
-		"transfer":      safeSub(transferEnd, gotFirstByte),
+		PhaseDNSResolve:   safeSub(dnsEnd, dnsStart),
+		PhaseTCPConnect:   safeSub(connectEnd, connectStart),
+		PhaseTLSHandshake: safeSub(tlsEnd, tlsStart),
+		PhaseTTFB:         safeSub(gotFirstByte, laterOf(tlsEnd, connectEnd)),
+		PhaseTransfer:     safeSub(transferEnd, gotFirstByte),
 	}
 	return phases
+}
+
+// laterOf returns the later of two timestamps. A zero time.Time compares
+// before any real timestamp, so laterOf(zero, t) == t — this lets callers
+// pass a zero tlsEnd for plain HTTP and still get connectEnd as the anchor.
+func laterOf(a, b time.Time) time.Time {
+	if a.After(b) {
+		return a
+	}
+	return b
 }
 
 // safeSub returns end - start if both are non-zero, otherwise zero.

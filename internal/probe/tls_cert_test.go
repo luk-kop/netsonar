@@ -1,15 +1,121 @@
 package probe
 
 import (
+	"bufio"
 	"context"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"netsonar/internal/config"
 )
+
+func mockTunnelingProxy(t *testing.T, backendAddr string) (string, <-chan string, func()) {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to start mock tunneling proxy listener: %v", err)
+	}
+
+	captured := make(chan string, 8)
+
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(client net.Conn) {
+				defer func() { _ = client.Close() }()
+
+				br := bufio.NewReader(client)
+				req, err := http.ReadRequest(br)
+				if err != nil {
+					return
+				}
+				_ = req.Body.Close()
+
+				select {
+				case captured <- req.Host:
+				default:
+				}
+
+				upstreamAddr := backendAddr
+				if upstreamAddr == "" {
+					upstreamAddr = req.Host
+				}
+				upstream, err := net.Dial("tcp", upstreamAddr)
+				if err != nil {
+					_, _ = client.Write([]byte("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n"))
+					return
+				}
+				defer func() { _ = upstream.Close() }()
+
+				_, _ = client.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
+
+				done := make(chan struct{}, 2)
+				go func() {
+					// ReadRequest may have buffered bytes from the tunneled
+					// TLS stream, so copy from br rather than client directly.
+					_, _ = io.Copy(upstream, br)
+					done <- struct{}{}
+				}()
+				go func() {
+					_, _ = io.Copy(client, upstream)
+					done <- struct{}{}
+				}()
+				<-done
+			}(conn)
+		}
+	}()
+
+	return ln.Addr().String(), captured, func() { _ = ln.Close() }
+}
+
+func mockCapturingProxy(t *testing.T, statusCode int) (string, <-chan string, func()) {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to start mock capturing proxy listener: %v", err)
+	}
+
+	captured := make(chan string, 8)
+
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer func() { _ = c.Close() }()
+
+				req, err := http.ReadRequest(bufio.NewReader(c))
+				if err != nil {
+					return
+				}
+				_ = req.Body.Close()
+
+				select {
+				case captured <- req.Host:
+				default:
+				}
+
+				resp := fmt.Sprintf("HTTP/1.1 %d %s\r\nContent-Length: 0\r\n\r\n", statusCode, http.StatusText(statusCode))
+				_, _ = c.Write([]byte(resp))
+			}(conn)
+		}
+	}()
+
+	return ln.Addr().String(), captured, func() { _ = ln.Close() }
+}
 
 // TestTLSCertProber_Success verifies that probing a TLS-enabled server
 // reports Success=true, CertExpiry in the future, Duration>0, and empty Error.
@@ -132,6 +238,195 @@ func TestTLSCertProber_ConnectionRefused(t *testing.T) {
 	}
 	if result.Duration <= 0 {
 		t.Fatalf("expected Duration > 0 even on failure, got %v", result.Duration)
+	}
+}
+
+func TestTLSCertProber_ProxyTunnelSuccess(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	targetAddr := srv.Listener.Addr().String()
+	proxyAddr, captured, cleanup := mockTunnelingProxy(t, "")
+	defer cleanup()
+
+	target := config.TargetConfig{
+		Name:      "test-tls-via-proxy",
+		Address:   targetAddr,
+		ProbeType: config.ProbeTypeTLSCert,
+		Timeout:   5 * time.Second,
+		ProbeOpts: config.ProbeOptions{
+			ProxyURL:      "http://" + proxyAddr,
+			TLSSkipVerify: true,
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
+	defer cancel()
+
+	prober := &TLSCertProber{}
+	result := prober.Probe(ctx, target)
+
+	if !result.Success {
+		t.Fatalf("expected Success=true, got false; error: %s", result.Error)
+	}
+	if !result.CertExpiry.Equal(srv.Certificate().NotAfter) {
+		t.Fatalf("expected CertExpiry %v, got %v", srv.Certificate().NotAfter, result.CertExpiry)
+	}
+	gotConnectTarget := <-captured
+	if gotConnectTarget != targetAddr {
+		t.Fatalf("expected CONNECT target %q, got %q", targetAddr, gotConnectTarget)
+	}
+	for _, phase := range []string{PhaseProxyDial, PhaseProxyConnect, PhaseTLSHandshake} {
+		if result.Phases[phase] <= 0 {
+			t.Fatalf("expected Phases[%q] > 0, got %v", phase, result.Phases)
+		}
+	}
+}
+
+func TestTLSCertProber_ProxyDefaultPortConnectTarget(t *testing.T) {
+	proxyAddr, captured, cleanup := mockCapturingProxy(t, http.StatusProxyAuthRequired)
+	defer cleanup()
+
+	target := config.TargetConfig{
+		Name:      "test-tls-proxy-default-port",
+		Address:   "example.com",
+		ProbeType: config.ProbeTypeTLSCert,
+		Timeout:   2 * time.Second,
+		ProbeOpts: config.ProbeOptions{
+			ProxyURL: "http://" + proxyAddr,
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
+	defer cancel()
+
+	prober := &TLSCertProber{}
+	result := prober.Probe(ctx, target)
+
+	if result.Success {
+		t.Fatal("expected Success=false when proxy rejects CONNECT")
+	}
+	gotConnectTarget := <-captured
+	if gotConnectTarget != "example.com:443" {
+		t.Fatalf("expected CONNECT target %q, got %q", "example.com:443", gotConnectTarget)
+	}
+}
+
+func TestTLSCertProber_ProxyConnectRejectedPreservesPhases(t *testing.T) {
+	proxyAddr, cleanup := mockProxy(t, http.StatusProxyAuthRequired)
+	defer cleanup()
+
+	target := config.TargetConfig{
+		Name:      "test-tls-proxy-407",
+		Address:   "example.com:443",
+		ProbeType: config.ProbeTypeTLSCert,
+		Timeout:   2 * time.Second,
+		ProbeOpts: config.ProbeOptions{
+			ProxyURL: "http://" + proxyAddr,
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
+	defer cancel()
+
+	prober := &TLSCertProber{}
+	result := prober.Probe(ctx, target)
+
+	if result.Success {
+		t.Fatal("expected Success=false when proxy rejects CONNECT")
+	}
+	if !strings.Contains(result.Error, "proxy CONNECT returned status 407") {
+		t.Fatalf("expected CONNECT 407 error, got %q", result.Error)
+	}
+	if result.Phases[PhaseProxyDial] <= 0 {
+		t.Fatalf("expected proxy_dial phase to be preserved, got %v", result.Phases)
+	}
+	if result.Phases[PhaseProxyConnect] <= 0 {
+		t.Fatalf("expected proxy_connect phase to be preserved, got %v", result.Phases)
+	}
+}
+
+func TestTLSCertProber_ProxyTunnelHandshakeFailurePreservesPhases(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to start listener: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			_ = conn.Close()
+		}
+	}()
+
+	proxyAddr, _, cleanup := mockTunnelingProxy(t, "")
+	defer cleanup()
+
+	target := config.TargetConfig{
+		Name:      "test-tls-proxy-handshake-failure",
+		Address:   ln.Addr().String(),
+		ProbeType: config.ProbeTypeTLSCert,
+		Timeout:   2 * time.Second,
+		ProbeOpts: config.ProbeOptions{
+			ProxyURL:      "http://" + proxyAddr,
+			TLSSkipVerify: true,
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
+	defer cancel()
+
+	prober := &TLSCertProber{}
+	result := prober.Probe(ctx, target)
+
+	if result.Success {
+		t.Fatal("expected Success=false for TLS handshake failure through proxy")
+	}
+	if !strings.HasPrefix(result.Error, "tls handshake:") {
+		t.Fatalf("expected TLS handshake error, got %q", result.Error)
+	}
+	for _, phase := range []string{PhaseProxyDial, PhaseProxyConnect, PhaseTLSHandshake} {
+		if result.Phases[phase] <= 0 {
+			t.Fatalf("expected Phases[%q] > 0, got %v", phase, result.Phases)
+		}
+	}
+}
+
+func TestTLSCertProber_ProxyDialFailure(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to allocate port: %v", err)
+	}
+	proxyAddr := ln.Addr().String()
+	_ = ln.Close()
+
+	target := config.TargetConfig{
+		Name:      "test-tls-proxy-dial-failure",
+		Address:   "example.com:443",
+		ProbeType: config.ProbeTypeTLSCert,
+		Timeout:   2 * time.Second,
+		ProbeOpts: config.ProbeOptions{
+			ProxyURL: "http://" + proxyAddr,
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
+	defer cancel()
+
+	prober := &TLSCertProber{}
+	result := prober.Probe(ctx, target)
+
+	if result.Success {
+		t.Fatal("expected Success=false when proxy dial fails")
+	}
+	if !strings.HasPrefix(result.Error, "proxy dial:") {
+		t.Fatalf("expected proxy dial error, got %q", result.Error)
 	}
 }
 

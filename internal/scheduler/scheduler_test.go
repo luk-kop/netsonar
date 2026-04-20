@@ -2,12 +2,16 @@ package scheduler
 
 import (
 	"bytes"
+	"context"
 	"log/slog"
+	"math"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"netsonar/internal/config"
+	"netsonar/internal/metrics"
 	"netsonar/internal/probe"
 )
 
@@ -205,6 +209,54 @@ func TestLogProbeResult_NilStateDoesNotPanicOrLog(t *testing.T) {
 
 	if logs != "" {
 		t.Fatalf("logs = %q, want no log for nil state", logs)
+	}
+}
+
+func TestWaitInitialProbeJitterZeroDoesNotWait(t *testing.T) {
+	start := time.Now()
+	if !waitInitialProbeJitter(context.Background(), 0) {
+		t.Fatal("expected zero initial jitter wait to succeed")
+	}
+	if elapsed := time.Since(start); elapsed > 20*time.Millisecond {
+		t.Fatalf("zero initial jitter waited too long: %s", elapsed)
+	}
+}
+
+func TestWaitInitialProbeJitterUsesRandomDelay(t *testing.T) {
+	previous := randomInitialProbeDelay
+	randomInitialProbeDelay = func(time.Duration) time.Duration {
+		return 10 * time.Millisecond
+	}
+	t.Cleanup(func() { randomInitialProbeDelay = previous })
+
+	start := time.Now()
+	if !waitInitialProbeJitter(context.Background(), time.Second) {
+		t.Fatal("expected initial jitter wait to succeed")
+	}
+	if elapsed := time.Since(start); elapsed < 10*time.Millisecond {
+		t.Fatalf("initial jitter returned before configured delay: %s", elapsed)
+	}
+}
+
+func TestWaitInitialProbeJitterRespectsCancellation(t *testing.T) {
+	previous := randomInitialProbeDelay
+	randomInitialProbeDelay = func(time.Duration) time.Duration {
+		return time.Hour
+	}
+	t.Cleanup(func() { randomInitialProbeDelay = previous })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if waitInitialProbeJitter(ctx, time.Second) {
+		t.Fatal("expected cancelled context to abort initial jitter wait")
+	}
+}
+
+func TestRandomInitialProbeDelayMaxInt64DoesNotPanic(t *testing.T) {
+	delay := randomInitialProbeDelay(time.Duration(math.MaxInt64))
+	if delay < 0 {
+		t.Fatalf("delay = %s, want non-negative", delay)
 	}
 }
 
@@ -506,5 +558,284 @@ func TestDiffTargets_TagChange(t *testing.T) {
 	}
 	if len(toStart) != 1 || toStart[0].Tags["scope"] != "cross-region" {
 		t.Errorf("expected toStart to contain new config with scope=cross-region")
+	}
+}
+
+// ---------- Scheduler.Reload() Unit Tests (#10) ----------
+
+// countingProber records how many times Probe was called and returns a
+// configurable result. It blocks until the context is cancelled.
+type countingProber struct {
+	calls int
+	mu    sync.Mutex
+}
+
+func (p *countingProber) Probe(ctx context.Context, _ config.TargetConfig) probe.ProbeResult {
+	p.mu.Lock()
+	p.calls++
+	p.mu.Unlock()
+	<-ctx.Done()
+	return probe.ProbeResult{Success: true, Duration: time.Millisecond}
+}
+
+func (p *countingProber) CallCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.calls
+}
+
+// waitForTargets polls s.Targets() until it equals expected or the deadline
+// passes. Returns the final count.
+func waitForTargets(s *Scheduler, expected int, timeout time.Duration) int {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if s.Targets() == expected {
+			return expected
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return s.Targets()
+}
+
+func TestReload_AddTarget(t *testing.T) {
+	me := metrics.NewMetricsExporter(nil)
+	factory := func(_ config.TargetConfig) probe.Prober { return &noopProber{} }
+	s := New(me, factory)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	initial := config.Config{
+		Agent:   config.AgentConfig{DefaultInterval: 30 * time.Second},
+		Targets: []config.TargetConfig{makeTarget("a", "10.0.0.1:80", config.ProbeTypeTCP, 30*time.Second)},
+	}
+	s.Start(ctx, initial)
+	waitForTargets(s, 1, 2*time.Second)
+
+	// Reload with an additional target.
+	reloaded := config.Config{
+		Agent: config.AgentConfig{DefaultInterval: 30 * time.Second},
+		Targets: []config.TargetConfig{
+			makeTarget("a", "10.0.0.1:80", config.ProbeTypeTCP, 30*time.Second),
+			makeTarget("b", "10.0.0.2:80", config.ProbeTypeTCP, 30*time.Second),
+		},
+	}
+	s.Reload(ctx, reloaded)
+
+	got := waitForTargets(s, 2, 2*time.Second)
+	if got != 2 {
+		t.Fatalf("after adding target: Targets() = %d, want 2", got)
+	}
+
+	s.Stop()
+}
+
+func TestReload_RemoveTarget(t *testing.T) {
+	me := metrics.NewMetricsExporter(nil)
+	factory := func(_ config.TargetConfig) probe.Prober { return &noopProber{} }
+	s := New(me, factory)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	initial := config.Config{
+		Agent: config.AgentConfig{DefaultInterval: 30 * time.Second},
+		Targets: []config.TargetConfig{
+			makeTarget("a", "10.0.0.1:80", config.ProbeTypeTCP, 30*time.Second),
+			makeTarget("b", "10.0.0.2:80", config.ProbeTypeTCP, 30*time.Second),
+		},
+	}
+	s.Start(ctx, initial)
+	waitForTargets(s, 2, 2*time.Second)
+
+	// Reload with only target "a".
+	reloaded := config.Config{
+		Agent:   config.AgentConfig{DefaultInterval: 30 * time.Second},
+		Targets: []config.TargetConfig{makeTarget("a", "10.0.0.1:80", config.ProbeTypeTCP, 30*time.Second)},
+	}
+	s.Reload(ctx, reloaded)
+
+	got := waitForTargets(s, 1, 2*time.Second)
+	if got != 1 {
+		t.Fatalf("after removing target: Targets() = %d, want 1", got)
+	}
+
+	s.Stop()
+}
+
+func TestReload_ChangeTarget(t *testing.T) {
+	me := metrics.NewMetricsExporter(nil)
+	var probers []*countingProber
+	var mu sync.Mutex
+	factory := func(_ config.TargetConfig) probe.Prober {
+		p := &countingProber{}
+		mu.Lock()
+		probers = append(probers, p)
+		mu.Unlock()
+		return p
+	}
+	s := New(me, factory)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	initial := config.Config{
+		Agent:   config.AgentConfig{DefaultInterval: 30 * time.Second},
+		Targets: []config.TargetConfig{makeTarget("a", "10.0.0.1:80", config.ProbeTypeTCP, 30*time.Second)},
+	}
+	s.Start(ctx, initial)
+	waitForTargets(s, 1, 2*time.Second)
+
+	mu.Lock()
+	proberCountBefore := len(probers)
+	mu.Unlock()
+
+	// Reload with changed interval for target "a".
+	reloaded := config.Config{
+		Agent:   config.AgentConfig{DefaultInterval: 30 * time.Second},
+		Targets: []config.TargetConfig{makeTarget("a", "10.0.0.1:80", config.ProbeTypeTCP, 60*time.Second)},
+	}
+	s.Reload(ctx, reloaded)
+
+	// Wait for the new goroutine to start.
+	waitForTargets(s, 1, 2*time.Second)
+
+	mu.Lock()
+	proberCountAfter := len(probers)
+	mu.Unlock()
+
+	// A new prober should have been created for the changed target.
+	if proberCountAfter <= proberCountBefore {
+		t.Fatalf("expected new prober to be created after change, before=%d after=%d", proberCountBefore, proberCountAfter)
+	}
+
+	s.Stop()
+}
+
+func TestReload_UnchangedTargetContinues(t *testing.T) {
+	me := metrics.NewMetricsExporter(nil)
+	var proberCount int
+	var mu sync.Mutex
+	factory := func(_ config.TargetConfig) probe.Prober {
+		mu.Lock()
+		proberCount++
+		mu.Unlock()
+		return &noopProber{}
+	}
+	s := New(me, factory)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cfg := config.Config{
+		Agent:   config.AgentConfig{DefaultInterval: 30 * time.Second},
+		Targets: []config.TargetConfig{makeTarget("a", "10.0.0.1:80", config.ProbeTypeTCP, 30*time.Second)},
+	}
+	s.Start(ctx, cfg)
+	waitForTargets(s, 1, 2*time.Second)
+
+	mu.Lock()
+	countBefore := proberCount
+	mu.Unlock()
+
+	// Reload with the same config — no targets should be restarted.
+	s.Reload(ctx, cfg)
+
+	// Give a moment for any spurious restarts.
+	time.Sleep(50 * time.Millisecond)
+
+	mu.Lock()
+	countAfter := proberCount
+	mu.Unlock()
+
+	if countAfter != countBefore {
+		t.Fatalf("unchanged target should not create new prober: before=%d after=%d", countBefore, countAfter)
+	}
+
+	s.Stop()
+}
+
+// ---------- executeProbe post-cancel discard test (#11) ----------
+
+// blockingProber blocks in Probe() until released via a channel, then returns
+// a successful result. This allows tests to control exactly when a probe
+// completes relative to context cancellation.
+type blockingProber struct {
+	started chan struct{} // closed when Probe() begins
+	release chan struct{} // close to let Probe() return
+}
+
+func newBlockingProber() *blockingProber {
+	return &blockingProber{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+}
+
+func (p *blockingProber) Probe(_ context.Context, _ config.TargetConfig) probe.ProbeResult {
+	close(p.started)
+	<-p.release
+	return probe.ProbeResult{Success: true, Duration: time.Millisecond}
+}
+
+func TestExecuteProbe_DiscardsResultAfterContextCancel(t *testing.T) {
+	// This test verifies that when the parent context is cancelled (e.g. by
+	// Reload removing a target) while a probe is in flight, the result is
+	// discarded and Record is NOT called on the exporter.
+	me := metrics.NewMetricsExporter(nil)
+
+	target := config.TargetConfig{
+		Name:      "discard-test",
+		Address:   "10.0.0.1:80",
+		ProbeType: config.ProbeTypeTCP,
+		Interval:  30 * time.Second,
+		Timeout:   30 * time.Second,
+	}
+
+	bp := newBlockingProber()
+
+	// Create a cancellable context to simulate Reload cancelling the target.
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Run executeProbe in a goroutine since it will block.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		state := &probeState{}
+		executeProbe(ctx, target, bp, me, state)
+	}()
+
+	// Wait for the prober to start.
+	<-bp.started
+
+	// Cancel the context (simulating Reload removing this target).
+	cancel()
+
+	// Release the prober so it returns its result.
+	close(bp.release)
+
+	// Wait for executeProbe to finish.
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("executeProbe did not return within 5 seconds")
+	}
+
+	// Verify that no metrics were recorded for this target. If the discard
+	// guard works, probe_success should have no series for "discard-test".
+	families, err := me.Registry().Gather()
+	if err != nil {
+		t.Fatalf("failed to gather metrics: %v", err)
+	}
+	for _, fam := range families {
+		if fam.GetName() == "probe_success" {
+			for _, m := range fam.GetMetric() {
+				for _, lp := range m.GetLabel() {
+					if lp.GetName() == "target_name" && lp.GetValue() == "discard-test" {
+						t.Fatal("probe_success was recorded for cancelled target — discard guard failed")
+					}
+				}
+			}
+		}
 	}
 }

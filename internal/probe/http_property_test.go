@@ -189,20 +189,13 @@ func TestPropertyHTTPPhaseBreakdownCompleteness(t *testing.T) {
 
 			// --- Property 8b: Sum of phases ≈ total duration ---
 			//
-			// For HTTPS targets, the httptrace-based ttfb is measured from
-			// connectEnd to gotFirstByte, which *includes* the TLS handshake
-			// duration. To compute a non-overlapping sum we subtract the
-			// tls_handshake from ttfb for HTTPS connections, giving us the
-			// "server think time" portion of TTFB that doesn't overlap with
-			// the TLS phase.
-			//
-			// Non-overlapping phases:
-			//   dns_resolve + tcp_connect + tls_handshake + (ttfb - tls_handshake) + transfer
-			// = dns_resolve + tcp_connect + ttfb + transfer
-			//
-			// For plain HTTP, tls_handshake is zero so the formula is the same.
+			// All five phases are non-overlapping: ttfb is anchored at the
+			// later of connectEnd and tlsEnd, so for HTTPS it excludes the
+			// TLS handshake (which is reported separately as tls_handshake).
+			// Sum of all five phases should approximate total duration.
 			phaseSum := result.Phases["dns_resolve"] +
 				result.Phases["tcp_connect"] +
+				result.Phases["tls_handshake"] +
 				result.Phases["ttfb"] +
 				result.Phases["transfer"]
 

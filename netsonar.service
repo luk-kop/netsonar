@@ -23,13 +23,6 @@ SyslogIdentifier=netsonar
 StandardOutput=journal
 StandardError=journal
 
-# Grant CAP_NET_RAW for MTU probes (raw ICMP sockets). Regular ICMP probes use
-# unprivileged udp4 sockets and do not require this capability. Operators using
-# only TCP/HTTP/DNS/TLS/Proxy probes can safely remove AmbientCapabilities and
-# CapabilityBoundingSet.
-AmbientCapabilities=CAP_NET_RAW
-CapabilityBoundingSet=CAP_NET_RAW
-
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict

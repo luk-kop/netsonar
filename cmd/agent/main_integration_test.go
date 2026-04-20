@@ -72,7 +72,7 @@ func TestIntegration_MetricsEndpoint(t *testing.T) {
 					"target_partition": "test",
 					"visibility":       "internal",
 					"port":             tcpPort,
-					"impact":      "low",
+					"impact":           "low",
 				},
 			},
 		},
@@ -170,7 +170,7 @@ func TestIntegration_MetricsEndpoint(t *testing.T) {
 		"probe_duration_seconds",
 		"agent_info",
 		"agent_targets_total",
-		"agent_config_reload_timestamp",
+		"agent_config_reload_timestamp_seconds",
 	}
 
 	for _, name := range expectedMetrics {
@@ -183,6 +183,7 @@ func TestIntegration_MetricsEndpoint(t *testing.T) {
 	expectedLabels := []string{
 		"target",
 		"probe_type",
+		"network_path",
 		"service",
 		"scope",
 		"provider",
@@ -332,7 +333,7 @@ func TestIntegration_ConfigReloadSIGHUP(t *testing.T) {
 			"target_partition": "test",
 			"visibility":       "internal",
 			"port":             portA,
-			"impact":      "low",
+			"impact":           "low",
 		},
 	}
 
@@ -350,7 +351,7 @@ func TestIntegration_ConfigReloadSIGHUP(t *testing.T) {
 			"target_partition": "test",
 			"visibility":       "internal",
 			"port":             portB,
-			"impact":      "high",
+			"impact":           "high",
 		},
 	}
 
@@ -465,7 +466,7 @@ func TestIntegration_ConfigReloadSIGHUP(t *testing.T) {
 	writeConfig([]map[string]interface{}{targetB})
 
 	// Simulate SIGHUP by calling handleReload (same code path as the signal handler).
-	handleReload(configPath, ctx, sched, exporter, tagKeys)
+	handleReload(ctx, configPath, sched, exporter, tagKeys, "text", ":0", "/metrics")
 
 	// --- 7. Wait for the new probe to execute, then scrape again ---
 	time.Sleep(500 * time.Millisecond)
@@ -480,23 +481,23 @@ func TestIntegration_ConfigReloadSIGHUP(t *testing.T) {
 		t.Errorf("post-reload agent_targets_total = %v, want 1", total)
 	}
 
-	// --- 8. Verify agent_config_reload_timestamp was updated ---
-	if fam, ok := families["agent_config_reload_timestamp"]; ok {
+	// --- 8. Verify agent_config_reload_timestamp_seconds was updated ---
+	if fam, ok := families["agent_config_reload_timestamp_seconds"]; ok {
 		if len(fam.GetMetric()) == 0 {
-			t.Error("agent_config_reload_timestamp has no time series")
+			t.Error("agent_config_reload_timestamp_seconds has no time series")
 		} else {
 			ts := fam.GetMetric()[0].GetGauge().GetValue()
 			if ts <= 0 {
-				t.Errorf("agent_config_reload_timestamp = %v, want > 0", ts)
+				t.Errorf("agent_config_reload_timestamp_seconds = %v, want > 0", ts)
 			}
 		}
 	} else {
-		t.Error("agent_config_reload_timestamp not found after reload")
+		t.Error("agent_config_reload_timestamp_seconds not found after reload")
 	}
 
 	// --- 9. Test reload with both targets (additive reload) ---
 	writeConfig([]map[string]interface{}{targetA, targetB})
-	handleReload(configPath, ctx, sched, exporter, tagKeys)
+	handleReload(ctx, configPath, sched, exporter, tagKeys, "text", ":0", "/metrics")
 
 	time.Sleep(500 * time.Millisecond)
 
@@ -518,7 +519,7 @@ func TestIntegration_ConfigReloadSIGHUP(t *testing.T) {
 		t.Fatalf("failed to write invalid config: %v", err)
 	}
 
-	handleReload(configPath, ctx, sched, exporter, tagKeys)
+	handleReload(ctx, configPath, sched, exporter, tagKeys, "text", ":0", "/metrics")
 
 	// Agent should still be running with the previous 2-target config.
 	time.Sleep(200 * time.Millisecond)
@@ -582,7 +583,7 @@ func TestIntegration_GracefulShutdown(t *testing.T) {
 					"target_partition": "test",
 					"visibility":       "internal",
 					"port":             tcpPort,
-					"impact":      "low",
+					"impact":           "low",
 				},
 			},
 			{
@@ -599,7 +600,7 @@ func TestIntegration_GracefulShutdown(t *testing.T) {
 					"target_partition": "test",
 					"visibility":       "internal",
 					"port":             tcpPort,
-					"impact":      "low",
+					"impact":           "low",
 				},
 			},
 		},
@@ -776,7 +777,7 @@ func TestIntegration_ConfigReloadLogLevel(t *testing.T) {
 						"target_partition": "test",
 						"visibility":       "internal",
 						"port":             port,
-						"impact":      "low",
+						"impact":           "low",
 					},
 				},
 			},
@@ -798,7 +799,7 @@ func TestIntegration_ConfigReloadLogLevel(t *testing.T) {
 		t.Fatalf("LoadConfig (initial) failed: %v", err)
 	}
 
-	setupLogger(cfg.Agent.LogLevel)
+	setupLogger(cfg.Agent.LogLevel, cfg.Agent.LogFormat)
 
 	ctx := context.Background()
 
@@ -828,7 +829,7 @@ func TestIntegration_ConfigReloadLogLevel(t *testing.T) {
 
 	// --- 4. Rewrite config with log_level: debug and reload ---
 	writeConfig("debug")
-	handleReload(configPath, schedCtx, sched, exporter, tagKeys)
+	handleReload(schedCtx, configPath, sched, exporter, tagKeys, "text", ":0", "/metrics")
 
 	if got := agentLogLevel.Level(); got != slog.LevelDebug {
 		t.Errorf("after reload to debug: level = %v, want debug", got)
@@ -839,7 +840,7 @@ func TestIntegration_ConfigReloadLogLevel(t *testing.T) {
 
 	// --- 5. Reload to error and verify down-level transition ---
 	writeConfig("error")
-	handleReload(configPath, schedCtx, sched, exporter, tagKeys)
+	handleReload(schedCtx, configPath, sched, exporter, tagKeys, "text", ":0", "/metrics")
 
 	if got := agentLogLevel.Level(); got != slog.LevelError {
 		t.Errorf("after reload to error: level = %v, want error", got)
@@ -861,13 +862,43 @@ targets:
     probe_type: tcp
     interval: 5s
     timeout: 2s
+    tags:
+      service: svc
+      scope: local
+      provider: test
+      target_region: test-region
 `), 0644); err != nil {
 		t.Fatalf("failed to write invalid config: %v", err)
 	}
-	handleReload(configPath, schedCtx, sched, exporter, tagKeys)
+	handleReload(schedCtx, configPath, sched, exporter, tagKeys, "text", ":0", "/metrics")
 
 	// Rejected reload keeps previous level (error from step 5).
 	if got := agentLogLevel.Level(); got != slog.LevelError {
 		t.Errorf("after rejected reload: level = %v, want error (previous)", got)
+	}
+
+	// --- 7. Rejected reload (log_format change) must NOT change the level ---
+	if err := os.WriteFile(configPath, []byte(`agent:
+  default_interval: 30s
+  log_level: debug
+  log_format: json
+targets:
+  - name: x
+    address: `+addr+`
+    probe_type: tcp
+    interval: 5s
+    timeout: 2s
+    tags:
+      service: svc
+      scope: local
+      provider: test
+      target_region: test-region
+`), 0644); err != nil {
+		t.Fatalf("failed to write log_format change config: %v", err)
+	}
+	handleReload(schedCtx, configPath, sched, exporter, tagKeys, "text", ":0", "/metrics")
+
+	if got := agentLogLevel.Level(); got != slog.LevelError {
+		t.Errorf("after rejected log_format reload: level = %v, want error (previous)", got)
 	}
 }

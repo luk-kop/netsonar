@@ -12,134 +12,6 @@ import (
 	"netsonar/internal/config"
 )
 
-func TestNextICMPID(t *testing.T) {
-	icmpIDCounter.Store(0)
-
-	first := nextICMPID()
-	second := nextICMPID()
-
-	if first == 0 {
-		t.Fatal("first ICMP ID must not be zero")
-	}
-	if second == 0 {
-		t.Fatal("second ICMP ID must not be zero")
-	}
-	if first == second {
-		t.Fatalf("consecutive ICMP IDs should differ, both were %d", first)
-	}
-
-	icmpIDCounter.Store(0xffff)
-	wrapped := nextICMPID()
-	if wrapped == 0 {
-		t.Fatal("wrapped ICMP ID must skip zero")
-	}
-}
-
-func TestPacketAddrMatchesIP(t *testing.T) {
-	if !packetAddrMatchesIP(&net.IPAddr{IP: net.ParseIP("192.0.2.10")}, net.ParseIP("192.0.2.10")) {
-		t.Fatal("expected matching IPAddr to match")
-	}
-	if packetAddrMatchesIP(&net.IPAddr{IP: net.ParseIP("192.0.2.11")}, net.ParseIP("192.0.2.10")) {
-		t.Fatal("expected different IPAddr not to match")
-	}
-	if packetAddrMatchesIP(&net.TCPAddr{IP: net.ParseIP("192.0.2.10")}, net.ParseIP("192.0.2.10")) {
-		t.Fatal("expected non-IPAddr packet address not to match")
-	}
-}
-
-func TestMatchesEmbeddedICMP(t *testing.T) {
-	dst := net.ParseIP("192.0.2.20")
-	const icmpID = 1234
-	const seq = 1472
-
-	tests := []struct {
-		name string
-		data []byte
-		want bool
-	}{
-		{
-			name: "valid",
-			data: embeddedICMPEchoPacket(t, dst, icmpID, seq, 20),
-			want: true,
-		},
-		{
-			name: "valid_with_ipv4_options",
-			data: embeddedICMPEchoPacket(t, dst, icmpID, seq, 24),
-			want: true,
-		},
-		{
-			name: "wrong_id",
-			data: embeddedICMPEchoPacket(t, dst, icmpID+1, seq, 20),
-			want: false,
-		},
-		{
-			name: "wrong_seq",
-			data: embeddedICMPEchoPacket(t, dst, icmpID, seq+1, 20),
-			want: false,
-		},
-		{
-			name: "wrong_destination",
-			data: embeddedICMPEchoPacket(t, net.ParseIP("192.0.2.21"), icmpID, seq, 20),
-			want: false,
-		},
-		{
-			name: "non_icmp_protocol",
-			data: func() []byte {
-				data := embeddedICMPEchoPacket(t, dst, icmpID, seq, 20)
-				data[9] = 6
-				return data
-			}(),
-			want: false,
-		},
-		{
-			name: "non_echo_type",
-			data: func() []byte {
-				data := embeddedICMPEchoPacket(t, dst, icmpID, seq, 20)
-				data[20] = 0
-				return data
-			}(),
-			want: false,
-		},
-		{
-			name: "ipv6_version",
-			data: func() []byte {
-				data := embeddedICMPEchoPacket(t, dst, icmpID, seq, 20)
-				data[0] = 0x65
-				return data
-			}(),
-			want: false,
-		},
-		{
-			name: "too_short_ip_header",
-			data: []byte{0x45, 0, 0},
-			want: false,
-		},
-		{
-			name: "too_short_for_ihl_and_icmp_header",
-			data: embeddedICMPEchoPacket(t, dst, icmpID, seq, 24)[:28],
-			want: false,
-		},
-		{
-			name: "invalid_ihl",
-			data: func() []byte {
-				data := embeddedICMPEchoPacket(t, dst, icmpID, seq, 20)
-				data[0] = 0x44
-				return data
-			}(),
-			want: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := matchesEmbeddedICMP(tt.data, dst, icmpID, seq)
-			if got != tt.want {
-				t.Fatalf("matchesEmbeddedICMP() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestClassifyPayloadAttempts(t *testing.T) {
 	errBoom := errors.New("boom")
 	tests := []struct {
@@ -236,58 +108,6 @@ func TestClassifyPayloadAttempts(t *testing.T) {
 			}
 			if tt.wantErr != nil && !errors.Is(got.err, tt.wantErr) {
 				t.Fatalf("err = %v, want %v", got.err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestCountAttemptStats(t *testing.T) {
-	tests := []struct {
-		name      string
-		attempts  []mtuPayloadResult
-		wantStats mtuProbeStats
-	}{
-		{
-			name: "timeout_timeout_success",
-			attempts: []mtuPayloadResult{
-				{status: mtuPayloadTimeout, payloadSize: 1472},
-				{status: mtuPayloadTimeout, payloadSize: 1472},
-				{status: mtuPayloadSuccess, payloadSize: 1472},
-			},
-			wantStats: mtuProbeStats{
-				timeoutCount: 2,
-				retryCount:   2,
-			},
-		},
-		{
-			name: "fragmentation_needed",
-			attempts: []mtuPayloadResult{
-				{status: mtuPayloadTooLarge, payloadSize: 1472},
-			},
-			wantStats: mtuProbeStats{
-				fragNeededCount: 1,
-			},
-		},
-		{
-			name: "local_too_large_timeout",
-			attempts: []mtuPayloadResult{
-				{status: mtuPayloadLocalTooLarge, payloadSize: 1472},
-				{status: mtuPayloadTimeout, payloadSize: 1472},
-			},
-			wantStats: mtuProbeStats{
-				localErrorCount: 1,
-				timeoutCount:    1,
-				retryCount:      1,
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var stats mtuProbeStats
-			countAttemptStats(tt.attempts, &stats)
-			if stats != tt.wantStats {
-				t.Fatalf("stats = %+v, want %+v", stats, tt.wantStats)
 			}
 		})
 	}
@@ -456,7 +276,7 @@ func TestClassifyMTUResult(t *testing.T) {
 			wantState:      MTUStateDegraded,
 			wantDetail:     MTUDetailFragmentationNeeded,
 			wantPathMTU:    1420,
-			wantSuccess:    true,
+			wantSuccess:    false,
 		},
 		{
 			name: "local_too_large_has_priority_over_fragmentation_needed",
@@ -612,11 +432,11 @@ func TestMTUProber_ResolutionFailure(t *testing.T) {
 	}
 }
 
-// TestMTUProber_PermissionDenied verifies that when the process lacks
-// CAP_NET_RAW, the prober reports a clear "permission denied" error,
+// TestMTUProber_PermissionDenied verifies that when the process cannot open
+// Linux ping sockets, the prober reports a clear "permission denied" error,
 // PathMTU=-1, and Success=false.
 //
-// This test is skipped if the process has raw socket privileges (e.g. root).
+// This test is skipped if the process can open ping sockets.
 func TestMTUProber_PermissionDenied(t *testing.T) {
 	target := config.TargetConfig{
 		Name:      "test-mtu-permission",
@@ -634,13 +454,13 @@ func TestMTUProber_PermissionDenied(t *testing.T) {
 	prober := &MTUProber{}
 	result := prober.Probe(ctx, target)
 
-	// If the probe succeeded, we have raw socket access — skip.
+	// If the probe succeeded, ping sockets are allowed — skip.
 	if result.Success {
-		t.Skip("process has CAP_NET_RAW; skipping permission denied test")
+		t.Skip("process can open ping sockets; skipping permission denied test")
 	}
 
-	// On systems without CAP_NET_RAW, expect the permission error.
-	if result.Error == "permission denied: CAP_NET_RAW required" {
+	// On systems where ping sockets are blocked, expect the permission error.
+	if result.Error == mtuPermissionDeniedError() {
 		if result.PathMTU != -1 {
 			t.Fatalf("expected PathMTU=-1 on permission denied, got %d", result.PathMTU)
 		}
@@ -664,7 +484,7 @@ func TestMTUProber_PermissionDenied(t *testing.T) {
 // TestMTUProber_PathMTUCalculation verifies that when a probe succeeds,
 // PathMTU equals the successful payload size + 28 (20 IP + 8 ICMP headers).
 //
-// This test requires CAP_NET_RAW and probes localhost.
+// This test requires ping sockets and probes localhost.
 func TestMTUProber_PathMTUCalculation(t *testing.T) {
 	sizes := []int{1472, 1372, 1272, 1172, 1072}
 	target := config.TargetConfig{
@@ -684,7 +504,7 @@ func TestMTUProber_PathMTUCalculation(t *testing.T) {
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {
-		t.Skipf("probe did not succeed (likely no CAP_NET_RAW): %s", result.Error)
+		t.Skipf("probe did not succeed (check net.ipv4.ping_group_range): %s", result.Error)
 	}
 
 	// PathMTU must be one of the configured sizes + 28.
@@ -739,7 +559,7 @@ func TestMTUProber_EarlyExit(t *testing.T) {
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {
-		t.Skipf("probe did not succeed (likely no CAP_NET_RAW): %s", result.Error)
+		t.Skipf("probe did not succeed (check net.ipv4.ping_group_range): %s", result.Error)
 	}
 
 	// On localhost, the largest size (1472) should succeed because the
@@ -827,11 +647,11 @@ func TestMTUProber_ContextCancelled(t *testing.T) {
 	if result.PathMTU != -1 {
 		t.Fatalf("expected PathMTU=-1 with cancelled context, got %d", result.PathMTU)
 	}
-	if result.MTUState != MTUStateError {
-		t.Fatalf("expected MTUState=%q, got %q", MTUStateError, result.MTUState)
+	if result.MTUState != MTUStateDegraded {
+		t.Fatalf("expected MTUState=%q, got %q", MTUStateDegraded, result.MTUState)
 	}
-	if result.MTUDetail != MTUDetailInternalError {
-		t.Fatalf("expected MTUDetail=%q, got %q", MTUDetailInternalError, result.MTUDetail)
+	if result.MTUDetail != MTUDetailInconclusive {
+		t.Fatalf("expected MTUDetail=%q, got %q", MTUDetailInconclusive, result.MTUDetail)
 	}
 }
 
@@ -855,7 +675,7 @@ func TestMTUProber_SingleSize(t *testing.T) {
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {
-		t.Skipf("probe did not succeed (likely no CAP_NET_RAW): %s", result.Error)
+		t.Skipf("probe did not succeed (check net.ipv4.ping_group_range): %s", result.Error)
 	}
 
 	expectedMTU := 1072 + 28
@@ -884,7 +704,7 @@ func TestMTUProber_ResultInvariant_SuccessImpliesEmptyError(t *testing.T) {
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {
-		t.Skipf("probe did not succeed (likely no CAP_NET_RAW): %s", result.Error)
+		t.Skipf("probe did not succeed (check net.ipv4.ping_group_range): %s", result.Error)
 	}
 
 	if result.Error != "" {

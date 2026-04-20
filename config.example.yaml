@@ -10,8 +10,13 @@ agent:
   metrics_path: "/metrics"
   default_interval: 30s
   default_timeout: 5s
+  # Optional: random delay before each target's first probe after startup/reload.
+  # Set to 0s to disable. Must not exceed the shortest effective target interval.
+  initial_probe_jitter: 0s
   default_icmp_payload_sizes: [1472, 1392, 1372, 1272, 1172, 1072]
   log_level: info
+  # Log format: text or json. Changing log_format requires an agent restart.
+  log_format: text
   # Optional: restrict tag keys to a fixed allowlist. When set, targets may
   # only use keys from this list. When absent or empty, tag keys are collected
   # dynamically from all targets (max 30 unique keys).
@@ -74,6 +79,8 @@ targets:
       method: GET
       follow_redirects: false
       expected_status_codes: []
+      # Optional. 0 or omitted uses the 1 MiB default transfer cap.
+      # max_transfer_bytes: 2097152
     tags:
       service: vpce
       scope: aws-regional
@@ -91,6 +98,21 @@ targets:
       follow_redirects: false
       expected_status_codes: []
       # For authenticated proxies, use: http://user:pass@proxy:port
+      proxy_url: "http://infra-proxy.example.internal:8888"
+    tags:
+      service: vpce
+      scope: aws-regional
+      target_region: eu-central-1
+      target_partition: global
+      target_account: ep-devops-eu1
+
+  # TLS certificate — via proxy
+  - name: ssm-tls-cert-via-proxy
+    address: "ssm.eu-central-1.amazonaws.com:443"
+    probe_type: tls_cert
+    timeout: 5s
+    probe_opts:
+      tls_skip_verify: false
       proxy_url: "http://infra-proxy.example.internal:8888"
     tags:
       service: vpce

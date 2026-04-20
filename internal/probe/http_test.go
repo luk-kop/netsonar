@@ -374,6 +374,50 @@ func TestHTTPProber_BodyCleanup(t *testing.T) {
 	}
 }
 
+// TestHTTPProber_LargeBodyCapped verifies that a response body larger than
+// maxHTTPTransferBytes is silently capped — the probe succeeds and the
+// transfer phase reflects time spent reading up to the limit, not the full body.
+func TestHTTPProber_LargeBodyCapped(t *testing.T) {
+	// Serve 2 MiB, which is larger than maxHTTPTransferBytes (1 MiB).
+	bodySize := 2 * 1024 * 1024
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		// Write in chunks to avoid buffering the entire body.
+		chunk := bytes.Repeat([]byte("x"), 64*1024) // 64 KB chunks
+		for written := 0; written < bodySize; written += len(chunk) {
+			_, _ = w.Write(chunk)
+		}
+	}))
+	defer srv.Close()
+
+	target := config.TargetConfig{
+		Name:      "test-large-body",
+		Address:   srv.URL,
+		ProbeType: config.ProbeTypeHTTP,
+		Timeout:   5 * time.Second,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
+	defer cancel()
+
+	prober := NewHTTPProber(false, true, "")
+	result := prober.Probe(ctx, target)
+
+	// The probe should succeed — large body is not an error.
+	if !result.Success {
+		t.Fatalf("expected Success=true for large body, got false; error: %s", result.Error)
+	}
+	if result.Error != "" {
+		t.Fatalf("expected no error for large body, got %q", result.Error)
+	}
+	if result.Phases == nil {
+		t.Fatal("expected Phases to be non-nil")
+	}
+	if _, ok := result.Phases["transfer"]; !ok {
+		t.Fatal("expected transfer phase to be present")
+	}
+}
+
 func TestHTTPProber_BodyReadErrorFailsProbe(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Length", "100")

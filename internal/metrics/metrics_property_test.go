@@ -67,9 +67,11 @@ func genTargetWithTags() gopter.Gen {
 		genTagValue(),      // visibility
 		genTagValue(),      // port
 		genTagValue(),      // impact
+		gen.Bool(),         // has proxy URL
 	).Map(func(vals []interface{}) targetWithTags {
 		address := vals[0].(string) + ".example.com:443"
 		pt := vals[1].(config.ProbeType)
+		hasProxy := vals[10].(bool)
 
 		tagValues := make([]string, 8)
 		for i := 0; i < 8; i++ {
@@ -90,13 +92,17 @@ func genTargetWithTags() gopter.Gen {
 			}
 		}
 
-		// Build the expected label map: target + target_name + probe_type + proxied + all 8 tag keys.
+		// Build the expected label map: target + target_name + probe_type + network_path + all 8 tag keys.
 		// Missing tags should default to "".
+		networkPath := "direct"
+		if hasProxy {
+			networkPath = "proxy"
+		}
 		expected := map[string]string{
-			"target":      address,
-			"target_name": "prop-test",
-			"probe_type":  string(pt),
-			"proxied":     "false",
+			"target":       address,
+			"target_name":  "prop-test",
+			"probe_type":   string(pt),
+			"network_path": networkPath,
 		}
 		for i, key := range tagKeyNames {
 			expected[key] = tagValues[i]
@@ -109,6 +115,9 @@ func genTargetWithTags() gopter.Gen {
 			Interval:  30 * time.Second,
 			Timeout:   5 * time.Second,
 			Tags:      tags,
+		}
+		if hasProxy {
+			target.ProbeOpts.ProxyURL = "http://proxy.example.com:3128"
 		}
 
 		return targetWithTags{Target: target, ExpectedLabels: expected}
@@ -135,15 +144,15 @@ func probeResultForType(pt config.ProbeType) probe.ProbeResult {
 	case config.ProbeTypeHTTP:
 		base.StatusCode = 200
 		base.Phases = map[string]time.Duration{
-			"dns_resolve":   5 * time.Millisecond,
-			"tcp_connect":   10 * time.Millisecond,
-			"tls_handshake": 12 * time.Millisecond,
-			"ttfb":          10 * time.Millisecond,
-			"transfer":      5 * time.Millisecond,
+			probe.PhaseDNSResolve:   5 * time.Millisecond,
+			probe.PhaseTCPConnect:   10 * time.Millisecond,
+			probe.PhaseTLSHandshake: 12 * time.Millisecond,
+			probe.PhaseTTFB:         10 * time.Millisecond,
+			probe.PhaseTransfer:     5 * time.Millisecond,
 		}
 	case config.ProbeTypeICMP:
 		base.PacketLoss = 0.0
-		base.HopCount = 10
+		base.ICMPAvgRTT = 5 * time.Millisecond
 	case config.ProbeTypeMTU:
 		base.PathMTU = 1500
 	case config.ProbeTypeDNS:

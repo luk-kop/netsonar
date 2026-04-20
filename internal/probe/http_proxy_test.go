@@ -2,8 +2,10 @@ package probe
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -119,6 +121,12 @@ func TestHTTPProber_ProxyUnreachable(t *testing.T) {
 	}
 }
 
+func TestNewHTTPProber_InvalidProxyURLPanics(t *testing.T) {
+	assertPanicsWith(t, "NewHTTPProber", func() {
+		NewHTTPProber(false, true, "ftp://proxy.internal:21")
+	})
+}
+
 // TestHTTPBodyProber_ProxyRouting verifies that when proxy_url is configured,
 // the HTTP body prober routes requests through the proxy.
 func TestHTTPBodyProber_ProxyRouting(t *testing.T) {
@@ -203,4 +211,27 @@ func TestHTTPBodyProber_ProxyUnreachable(t *testing.T) {
 	if result.Error == "" {
 		t.Fatal("expected non-empty Error when proxy is unreachable")
 	}
+}
+
+func TestNewHTTPBodyProber_InvalidProxyURLPanics(t *testing.T) {
+	assertPanicsWith(t, "NewHTTPBodyProber", func() {
+		NewHTTPBodyProber(false, true, "http://proxy.internal:8888/path", "")
+	})
+}
+
+func assertPanicsWith(t *testing.T, want string, fn func()) {
+	t.Helper()
+
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatalf("expected panic containing %q", want)
+		}
+		got := fmt.Sprint(r)
+		if !strings.Contains(got, want) {
+			t.Fatalf("panic = %q, want it to contain %q", got, want)
+		}
+	}()
+
+	fn()
 }
