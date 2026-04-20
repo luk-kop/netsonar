@@ -2,9 +2,7 @@ package probe
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
-	"net"
 	"os"
 	"testing"
 	"time"
@@ -184,29 +182,6 @@ func TestApplySanityFailure(t *testing.T) {
 			}
 		})
 	}
-}
-
-func embeddedICMPEchoPacket(t *testing.T, dst net.IP, icmpID, seq, ipHeaderLen int) []byte {
-	t.Helper()
-	if ipHeaderLen < 20 || ipHeaderLen%4 != 0 {
-		t.Fatalf("invalid IP header length %d", ipHeaderLen)
-	}
-
-	dst4 := dst.To4()
-	if dst4 == nil {
-		t.Fatalf("destination %q is not IPv4", dst)
-	}
-
-	data := make([]byte, ipHeaderLen+8)
-	data[0] = byte(0x40 | (ipHeaderLen / 4))
-	data[9] = 1 // ICMPv4
-	copy(data[16:20], dst4)
-
-	data[ipHeaderLen] = 8 // ICMP echo request
-	data[ipHeaderLen+1] = 0
-	binary.BigEndian.PutUint16(data[ipHeaderLen+4:ipHeaderLen+6], uint16(icmpID))
-	binary.BigEndian.PutUint16(data[ipHeaderLen+6:ipHeaderLen+8], uint16(seq))
-	return data
 }
 
 func TestClassifyMTUResult(t *testing.T) {
