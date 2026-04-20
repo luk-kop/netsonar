@@ -305,22 +305,20 @@ func TestDNSProber_NXDOMAIN(t *testing.T) {
 // TestDNSProber_ExpectedResultMatch verifies that when dns_expected is
 // configured and the resolved records match, the probe reports Success=true.
 func TestDNSProber_ExpectedResultMatch(t *testing.T) {
-	// First resolve localhost to discover the actual loopback address,
-	// since it may be 127.0.0.1 or ::1 depending on the system.
+	// Resolve localhost and keep only IPv4 addresses, since the probe
+	// uses DNSQueryType "A" which returns only A records.
 	addrs, err := net.LookupHost("localhost")
 	if err != nil || len(addrs) == 0 {
 		t.Skip("cannot resolve localhost on this system")
 	}
-	// Find a loopback address from the results.
-	var loopback string
+	var ipv4Addrs []string
 	for _, addr := range addrs {
-		if ip := net.ParseIP(addr); ip != nil && ip.IsLoopback() {
-			loopback = addr
-			break
+		if ip := net.ParseIP(addr); ip != nil && ip.To4() != nil {
+			ipv4Addrs = append(ipv4Addrs, addr)
 		}
 	}
-	if loopback == "" {
-		t.Skip("localhost did not resolve to a loopback address")
+	if len(ipv4Addrs) == 0 {
+		t.Skip("localhost did not resolve to any IPv4 address")
 	}
 
 	target := config.TargetConfig{
@@ -331,7 +329,7 @@ func TestDNSProber_ExpectedResultMatch(t *testing.T) {
 		ProbeOpts: config.ProbeOptions{
 			DNSQueryName:       "localhost",
 			DNSQueryType:       "A",
-			DNSExpectedResults: addrs,
+			DNSExpectedResults: ipv4Addrs,
 		},
 	}
 

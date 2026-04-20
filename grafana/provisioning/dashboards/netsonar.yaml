@@ -7,5 +7,5 @@ providers:
     disableDeletion: false
     editable: true
     options:
-      path: /var/lib/grafana/dashboards/netsonar
+      path: /var/lib/grafana/dashboards/shared
       foldersFromFilesStructure: false

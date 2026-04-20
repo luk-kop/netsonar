@@ -45,8 +45,9 @@ services:
     image: grafana/grafana:13.0.0
     volumes:
       - ./provisioning/datasources:/etc/grafana/provisioning/datasources:ro
-      - ../../grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ../../grafana/dashboards:/var/lib/grafana/dashboards/netsonar:ro
+      - ./provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ../../grafana/dashboards/shared:/var/lib/grafana/dashboards/shared:ro
+      - ../../grafana/dashboards/metrics-validation:/var/lib/grafana/dashboards/metrics-validation:ro
       - grafana-data:/var/lib/grafana
     environment:
       GF_SECURITY_ADMIN_USER: admin

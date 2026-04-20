@@ -36,7 +36,7 @@ services:
     volumes:
       - ./provisioning/datasources:/etc/grafana/provisioning/datasources:ro
       - ../../grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ../../grafana/dashboards:/var/lib/grafana/dashboards/netsonar:ro
+      - ../../grafana/dashboards/shared:/var/lib/grafana/dashboards/shared:ro
       - grafana-data:/var/lib/grafana
     environment:
       GF_SECURITY_ADMIN_USER: admin

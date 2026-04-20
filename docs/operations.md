@@ -75,7 +75,7 @@ resets when alerting on skipped overlaps.
 
 ## Dashboard Layout
 
-Two Grafana dashboards are provisioned from `grafana/dashboards/`:
+Two Grafana dashboards are provisioned from `grafana/dashboards/shared/`:
 
 - **NetSonar** (`netsonar.json`, uid `netsonar`) — overview of all probe types.
   The HTTP section includes overview panels (topk, phase breakdown table, bar

@@ -163,6 +163,6 @@ Reload supports target changes and tag values as long as the configured tag key
 set stays the same. Changes to `agent.allowed_tag_keys` or `agent.log_format`
 require restarting the `netsonar` container.
 
-The Grafana dashboard JSON is mounted from `grafana/dashboards/` in the repo
+The Grafana dashboard JSON is mounted from `grafana/dashboards/shared/` in the repo
 root, so any dashboard changes you make in the repo are reflected on next
 Grafana restart.
