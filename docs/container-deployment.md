@@ -12,11 +12,11 @@
 - [Kubernetes](#kubernetes)
   - [Without MTU probes](#without-mtu-probes-1)
   - [With MTU probes](#with-mtu-probes-1)
-  - [Setting ping_group_range per pod](#setting-ping_group_range-per-pod)
+  - [Setting ping_group_range per pod](#setting-pinggrouprange-per-pod)
 - [Rootless Podman](#rootless-podman)
 - [Troubleshooting](#troubleshooting)
   - [ICMP or MTU probes fail with "permission denied"](#icmp-or-mtu-probes-fail-with-permission-denied)
-  - [Checking ping_group_range](#checking-ping_group_range)
+  - [Checking ping_group_range](#checking-pinggrouprange)
   - [Hardened hosts](#hardened-hosts)
 
 ## Overview
@@ -211,7 +211,7 @@ sudo sysctl --system
 
 **Fix (Kubernetes, kernel 4.18+):**
 
-Add the sysctl to the pod spec as shown in [Setting ping_group_range per pod](#setting-ping_group_range-per-pod).
+Add the sysctl to the pod spec as shown in [Setting ping_group_range per pod](#setting-pinggrouprange-per-pod).
 
 ### Checking ping_group_range
 

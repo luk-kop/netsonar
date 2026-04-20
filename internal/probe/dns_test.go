@@ -2,13 +2,187 @@ package probe
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
 	"netsonar/internal/config"
 )
+
+const (
+	testDNSTypeA     uint16 = 1
+	testDNSTypeCNAME uint16 = 5
+	testDNSTypeAAAA  uint16 = 28
+	testDNSClassIN   uint16 = 1
+)
+
+type testDNSAnswer struct {
+	qtype uint16
+	value string
+}
+
+func startTestDNSServer(t *testing.T, records map[string][]testDNSAnswer) string {
+	t.Helper()
+
+	conn, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to start test DNS server: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	go func() {
+		buf := make([]byte, 1500)
+		for {
+			n, addr, err := conn.ReadFrom(buf)
+			if err != nil {
+				return
+			}
+			packet := append([]byte(nil), buf[:n]...)
+			response, err := buildTestDNSResponse(packet, records)
+			if err != nil {
+				continue
+			}
+			_, _ = conn.WriteTo(response, addr)
+		}
+	}()
+
+	return conn.LocalAddr().String()
+}
+
+func buildTestDNSResponse(query []byte, records map[string][]testDNSAnswer) ([]byte, error) {
+	if len(query) < 12 {
+		return nil, fmt.Errorf("short dns query")
+	}
+
+	name, qtype, questionEnd, err := parseTestDNSQuestion(query)
+	if err != nil {
+		return nil, err
+	}
+
+	answers := matchingTestDNSAnswers(records[strings.ToLower(name)], qtype)
+	response := make([]byte, 0, len(query)+len(answers)*32)
+	response = append(response, query[:2]...)
+	response = append(response, 0x81, 0x80)
+	response = append(response, 0x00, 0x01)
+	response = appendUint16(response, uint16(len(answers)))
+	response = append(response, 0x00, 0x00)
+	response = append(response, 0x00, 0x00)
+	response = append(response, query[12:questionEnd]...)
+
+	for _, answer := range answers {
+		response = append(response, 0xc0, 0x0c)
+		response = appendUint16(response, answer.qtype)
+		response = appendUint16(response, testDNSClassIN)
+		response = appendUint32(response, 60)
+
+		rdata, err := testDNSRData(answer)
+		if err != nil {
+			return nil, err
+		}
+		response = appendUint16(response, uint16(len(rdata)))
+		response = append(response, rdata...)
+	}
+
+	return response, nil
+}
+
+func parseTestDNSQuestion(query []byte) (string, uint16, int, error) {
+	offset := 12
+	labels := []string{}
+	for {
+		if offset >= len(query) {
+			return "", 0, 0, fmt.Errorf("dns question name exceeds packet")
+		}
+		labelLen := int(query[offset])
+		offset++
+		if labelLen == 0 {
+			break
+		}
+		if labelLen&0xc0 != 0 {
+			return "", 0, 0, fmt.Errorf("compressed query names are not supported")
+		}
+		if offset+labelLen > len(query) {
+			return "", 0, 0, fmt.Errorf("dns question label exceeds packet")
+		}
+		labels = append(labels, string(query[offset:offset+labelLen]))
+		offset += labelLen
+	}
+	if offset+4 > len(query) {
+		return "", 0, 0, fmt.Errorf("dns question missing type/class")
+	}
+
+	qtype := binary.BigEndian.Uint16(query[offset : offset+2])
+	qclass := binary.BigEndian.Uint16(query[offset+2 : offset+4])
+	if qclass != testDNSClassIN {
+		return "", 0, 0, fmt.Errorf("unsupported dns query class %d", qclass)
+	}
+
+	return strings.Join(labels, "."), qtype, offset + 4, nil
+}
+
+func matchingTestDNSAnswers(answers []testDNSAnswer, qtype uint16) []testDNSAnswer {
+	matched := make([]testDNSAnswer, 0, len(answers))
+	for _, answer := range answers {
+		if answer.qtype == qtype {
+			matched = append(matched, answer)
+		}
+	}
+	return matched
+}
+
+func testDNSRData(answer testDNSAnswer) ([]byte, error) {
+	switch answer.qtype {
+	case testDNSTypeA:
+		ip := net.ParseIP(answer.value).To4()
+		if ip == nil {
+			return nil, fmt.Errorf("invalid A record IP %q", answer.value)
+		}
+		return []byte(ip), nil
+	case testDNSTypeAAAA:
+		ip := net.ParseIP(answer.value).To16()
+		if ip == nil || ip.To4() != nil {
+			return nil, fmt.Errorf("invalid AAAA record IP %q", answer.value)
+		}
+		return []byte(ip), nil
+	case testDNSTypeCNAME:
+		return encodeTestDNSName(answer.value)
+	default:
+		return nil, fmt.Errorf("unsupported answer type %d", answer.qtype)
+	}
+}
+
+func encodeTestDNSName(name string) ([]byte, error) {
+	trimmed := strings.TrimSuffix(name, ".")
+	if trimmed == "" {
+		return nil, fmt.Errorf("empty dns name")
+	}
+
+	encoded := []byte{}
+	for _, label := range strings.Split(trimmed, ".") {
+		if len(label) == 0 || len(label) > 63 {
+			return nil, fmt.Errorf("invalid dns label %q", label)
+		}
+		encoded = append(encoded, byte(len(label)))
+		encoded = append(encoded, label...)
+	}
+	encoded = append(encoded, 0)
+	return encoded, nil
+}
+
+func appendUint16(buf []byte, value uint16) []byte {
+	var tmp [2]byte
+	binary.BigEndian.PutUint16(tmp[:], value)
+	return append(buf, tmp[:]...)
+}
+
+func appendUint32(buf []byte, value uint32) []byte {
+	var tmp [4]byte
+	binary.BigEndian.PutUint32(tmp[:], value)
+	return append(buf, tmp[:]...)
+}
 
 // TestDNSProber_SuccessfulResolution verifies that resolving a well-known
 // domain returns Success=true, positive DNSResolveTime, and empty Error.
@@ -206,6 +380,154 @@ func TestDNSProber_ExpectedResultMismatch(t *testing.T) {
 	// The error should mention "mismatch".
 	if !containsSubstring(result.Error, "mismatch") {
 		t.Fatalf("expected Error to mention 'mismatch', got %q", result.Error)
+	}
+}
+
+func TestDNSProber_ResultMatchIntegration_ARecordMatch(t *testing.T) {
+	dnsServer := startTestDNSServer(t, map[string][]testDNSAnswer{
+		"a.integration.test": {
+			{qtype: testDNSTypeA, value: "192.0.2.10"},
+			{qtype: testDNSTypeA, value: "192.0.2.11"},
+		},
+	})
+
+	target := config.TargetConfig{
+		Name:      "test-dns-integration-a-match",
+		Address:   "a.integration.test",
+		ProbeType: config.ProbeTypeDNS,
+		Timeout:   5 * time.Second,
+		ProbeOpts: config.ProbeOptions{
+			DNSQueryName:       "a.integration.test",
+			DNSQueryType:       "A",
+			DNSServer:          dnsServer,
+			DNSExpectedResults: []string{"192.0.2.11", "192.0.2.10"},
+		},
+	}
+
+	result := probeDNSForTest(t, target)
+	assertDNSMatchResult(t, result, true)
+	if !result.Success {
+		t.Fatalf("expected Success=true for matching A records, got false; error: %s", result.Error)
+	}
+	if result.Error != "" {
+		t.Fatalf("expected empty Error for matching A records, got %q", result.Error)
+	}
+}
+
+func TestDNSProber_ResultMatchIntegration_ARecordMismatch(t *testing.T) {
+	dnsServer := startTestDNSServer(t, map[string][]testDNSAnswer{
+		"a-mismatch.integration.test": {
+			{qtype: testDNSTypeA, value: "192.0.2.20"},
+		},
+	})
+
+	target := config.TargetConfig{
+		Name:      "test-dns-integration-a-mismatch",
+		Address:   "a-mismatch.integration.test",
+		ProbeType: config.ProbeTypeDNS,
+		Timeout:   5 * time.Second,
+		ProbeOpts: config.ProbeOptions{
+			DNSQueryName:       "a-mismatch.integration.test",
+			DNSQueryType:       "A",
+			DNSServer:          dnsServer,
+			DNSExpectedResults: []string{"192.0.2.21"},
+		},
+	}
+
+	result := probeDNSForTest(t, target)
+	assertDNSMatchResult(t, result, false)
+	if result.Success {
+		t.Fatal("expected Success=false for mismatching A records")
+	}
+	if !containsSubstring(result.Error, "mismatch") {
+		t.Fatalf("expected Error to mention 'mismatch', got %q", result.Error)
+	}
+}
+
+func TestDNSProber_ResultMatchIntegration_AAAARecordMatch(t *testing.T) {
+	dnsServer := startTestDNSServer(t, map[string][]testDNSAnswer{
+		"aaaa.integration.test": {
+			{qtype: testDNSTypeAAAA, value: "2001:db8::10"},
+		},
+	})
+
+	target := config.TargetConfig{
+		Name:      "test-dns-integration-aaaa-match",
+		Address:   "aaaa.integration.test",
+		ProbeType: config.ProbeTypeDNS,
+		Timeout:   5 * time.Second,
+		ProbeOpts: config.ProbeOptions{
+			DNSQueryName:       "aaaa.integration.test",
+			DNSQueryType:       "AAAA",
+			DNSServer:          dnsServer,
+			DNSExpectedResults: []string{"2001:db8::10"},
+		},
+	}
+
+	result := probeDNSForTest(t, target)
+	assertDNSMatchResult(t, result, true)
+	if !result.Success {
+		t.Fatalf("expected Success=true for matching AAAA record, got false; error: %s", result.Error)
+	}
+	if result.Error != "" {
+		t.Fatalf("expected empty Error for matching AAAA record, got %q", result.Error)
+	}
+}
+
+func TestDNSProber_ResultMatchIntegration_CNAMENormalization(t *testing.T) {
+	dnsServer := startTestDNSServer(t, map[string][]testDNSAnswer{
+		"alias.integration.test": {
+			{qtype: testDNSTypeCNAME, value: "Target.Integration.Test."},
+		},
+	})
+
+	target := config.TargetConfig{
+		Name:      "test-dns-integration-cname-match",
+		Address:   "alias.integration.test",
+		ProbeType: config.ProbeTypeDNS,
+		Timeout:   5 * time.Second,
+		ProbeOpts: config.ProbeOptions{
+			DNSQueryName:       "alias.integration.test",
+			DNSQueryType:       "CNAME",
+			DNSServer:          dnsServer,
+			DNSExpectedResults: []string{"target.integration.test"},
+		},
+	}
+
+	result := probeDNSForTest(t, target)
+	assertDNSMatchResult(t, result, true)
+	if !result.Success {
+		t.Fatalf("expected Success=true for normalized CNAME match, got false; error: %s", result.Error)
+	}
+	if result.Error != "" {
+		t.Fatalf("expected empty Error for normalized CNAME match, got %q", result.Error)
+	}
+}
+
+func probeDNSForTest(t *testing.T, target config.TargetConfig) ProbeResult {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
+	defer cancel()
+
+	prober := &DNSProber{}
+	return prober.Probe(ctx, target)
+}
+
+func assertDNSMatchResult(t *testing.T, result ProbeResult, wantMatched bool) {
+	t.Helper()
+
+	if !result.DNSMatchEvaluated {
+		t.Fatal("expected DNSMatchEvaluated=true")
+	}
+	if result.DNSMatched != wantMatched {
+		t.Fatalf("expected DNSMatched=%v, got %v", wantMatched, result.DNSMatched)
+	}
+	if result.DNSResolveTime <= 0 {
+		t.Fatalf("expected DNSResolveTime > 0, got %v", result.DNSResolveTime)
+	}
+	if result.Duration != result.DNSResolveTime {
+		t.Fatalf("expected Duration (%v) == DNSResolveTime (%v)", result.Duration, result.DNSResolveTime)
 	}
 }
 

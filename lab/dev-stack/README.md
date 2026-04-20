@@ -27,6 +27,10 @@ Select the **Prometheus** datasource in the dashboard variable dropdown.
 
 Prometheus UI is available at [http://localhost:9090](http://localhost:9090).
 
+For side-by-side HTTP phase validation against Prometheus Blackbox Exporter,
+use the dedicated [Metrics Validation Lab](../metrics-validation/) instead of
+this general-purpose dev stack.
+
 ## Internet Smoke Targets
 
 The default stack is fully local and deterministic. To check outbound Internet

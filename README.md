@@ -15,7 +15,7 @@ A purpose-built **Go** binary that probes a YAML-configured list of **network ta
 - [Configuration Reference](#configuration-reference) · [full docs](docs/configuration.md)
 - [Probe Types](#probe-types) · [full docs](docs/probe-types.md)
 - [Metrics Reference](#metrics-reference) · [full docs](docs/metrics.md)
-- [Deployment](#deployment) · [ICMP Permissions](#icmp-permissions)
+- [Deployment](#deployment) · [ICMP and MTU Permissions](#icmp-and-mtu-permissions)
 - [Scrape Configuration Examples](#scrape-configuration-examples)
 - [Operations](#operations) · [full docs](docs/operations.md)
 
@@ -60,6 +60,10 @@ The binary is written to `bin/netsonar`.
 | `lab-dev-internet` | Start dev-stack with public Internet smoke targets |
 | `lab-dev-reload` | Reload dev-stack agent config with SIGHUP            |
 | `lab-dev-down` | Stop dev-stack and remove volumes                     |
+| `lab-mv` | Start NetSonar + Blackbox side-by-side validation lab |
+| `lab-mv-down` | Stop metrics validation lab and remove volumes |
+| `lab-metrics-validation` | Alias for `lab-mv` |
+| `lab-metrics-validation-down` | Alias for `lab-mv-down` |
 
 ## Usage
 
@@ -96,12 +100,15 @@ Supported: TCP, HTTP/HTTPS, ICMP, MTU/PMTUD, DNS, TLS certificate expiry, HTTP b
 Each probe type with full YAML examples, options, and behaviour details — see [docs/probe-types.md](docs/probe-types.md).
 
 Additional deep-dives:
+
 - [MTU/PMTUD internals](docs/mtu-pmtud.md)
 - [Proxy probing guide](docs/proxy-probing.md)
 
 ## Metrics Reference
 
 All probe and agent metadata metrics with labels and types — see [docs/metrics.md](docs/metrics.md).
+Metric validation against independent tools is documented in
+[docs/metrics-validation.md](docs/metrics-validation.md).
 
 ## Deployment
 
@@ -258,6 +265,15 @@ make lab-dev-reload
 # Adds HTTP/TCP/DNS/TLS checks, BadSSL failures, and MTU smoke probes.
 make lab-dev-internet
 make lab-dev-down
+```
+
+For side-by-side HTTP phase validation against Prometheus Blackbox Exporter, use
+the dedicated [lab/metrics-validation/](lab/metrics-validation/) stack:
+
+```bash
+make lab-mv
+# Grafana: http://localhost:3000  Prometheus: http://localhost:9090
+make lab-mv-down
 ```
 
 ### Prometheus

@@ -124,6 +124,130 @@ func TestHTTPProber_PhaseBreakdownHTTPS(t *testing.T) {
 	}
 }
 
+func TestHTTPProber_PhaseTTFBIncludesHandlerDelay(t *testing.T) {
+	const handlerDelay = 75 * time.Millisecond
+	const timingTolerance = 25 * time.Millisecond
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(handlerDelay)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	target := config.TargetConfig{
+		Name:      "test-http-ttfb-delay",
+		Address:   srv.URL,
+		ProbeType: config.ProbeTypeHTTP,
+		Timeout:   5 * time.Second,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
+	defer cancel()
+
+	prober := NewHTTPProber(false, true, "")
+	result := prober.Probe(ctx, target)
+
+	assertHTTPProbeSuccess(t, result)
+	assertHTTPPhaseAtLeast(t, result, PhaseTTFB, handlerDelay-timingTolerance)
+
+	if transfer := result.Phases[PhaseTransfer]; transfer >= handlerDelay/2 {
+		t.Fatalf("expected transfer phase to stay below half the handler delay, got %v", transfer)
+	}
+	assertHTTPPhaseSumNearDuration(t, result, timingTolerance)
+}
+
+func TestHTTPProber_PhaseTransferIncludesSlowBody(t *testing.T) {
+	const chunkDelay = 40 * time.Millisecond
+	const expectedTransferDelay = 2 * chunkDelay
+	const timingTolerance = 25 * time.Millisecond
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("response writer does not implement http.Flusher")
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("first"))
+		flusher.Flush()
+
+		time.Sleep(chunkDelay)
+		_, _ = w.Write([]byte("second"))
+		flusher.Flush()
+
+		time.Sleep(chunkDelay)
+		_, _ = w.Write([]byte("third"))
+	}))
+	defer srv.Close()
+
+	target := config.TargetConfig{
+		Name:      "test-http-transfer-delay",
+		Address:   srv.URL,
+		ProbeType: config.ProbeTypeHTTP,
+		Timeout:   5 * time.Second,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
+	defer cancel()
+
+	prober := NewHTTPProber(false, true, "")
+	result := prober.Probe(ctx, target)
+
+	assertHTTPProbeSuccess(t, result)
+	assertHTTPPhaseAtLeast(t, result, PhaseTransfer, expectedTransferDelay-timingTolerance)
+
+	if ttfb := result.Phases[PhaseTTFB]; ttfb >= expectedTransferDelay {
+		t.Fatalf("expected ttfb to stay below expected transfer delay, got %v", ttfb)
+	}
+	assertHTTPPhaseSumNearDuration(t, result, timingTolerance)
+}
+
+func assertHTTPProbeSuccess(t *testing.T, result ProbeResult) {
+	t.Helper()
+
+	if !result.Success {
+		t.Fatalf("expected Success=true, got false; error: %s", result.Error)
+	}
+	if result.Error != "" {
+		t.Fatalf("expected empty Error on success, got %q", result.Error)
+	}
+	if result.Phases == nil {
+		t.Fatal("expected Phases map to be non-nil")
+	}
+}
+
+func assertHTTPPhaseAtLeast(t *testing.T, result ProbeResult, phase string, wantMin time.Duration) {
+	t.Helper()
+
+	got, ok := result.Phases[phase]
+	if !ok {
+		t.Fatalf("expected Phases to contain key %q", phase)
+	}
+	if got < wantMin {
+		t.Fatalf("expected Phases[%q] >= %v, got %v", phase, wantMin, got)
+	}
+}
+
+func assertHTTPPhaseSumNearDuration(t *testing.T, result ProbeResult, tolerance time.Duration) {
+	t.Helper()
+
+	phaseSum := result.Phases[PhaseDNSResolve] +
+		result.Phases[PhaseTCPConnect] +
+		result.Phases[PhaseTLSHandshake] +
+		result.Phases[PhaseTTFB] +
+		result.Phases[PhaseTransfer]
+
+	diff := result.Duration - phaseSum
+	if diff < 0 {
+		diff = -diff
+	}
+	if diff > tolerance {
+		t.Fatalf("expected phase sum %v to be within %v of duration %v, diff %v",
+			phaseSum, tolerance, result.Duration, diff)
+	}
+}
+
 // TestHTTPProber_StatusCodeRecording verifies that the result.StatusCode
 // matches the actual HTTP response status code for various codes.
 func TestHTTPProber_StatusCodeRecording(t *testing.T) {

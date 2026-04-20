@@ -14,6 +14,13 @@ NetSonar's metric surface is intentionally Prometheus-native and borrows from ex
 
 The MTU probe is custom: Blackbox Exporter and Telegraf do not provide a directly comparable MTU/PMTUD exporter. MTU metrics therefore follow NetSonar's probe contract plus general Prometheus conventions: keep aggregations safe, make degraded state visible through `probe_success`, and avoid exporting low-value internal retry counters.
 
+## Metric Validation
+
+Metric definitions and metric validation are documented separately. This
+reference describes the metric surface and semantics; [metrics-validation.md](metrics-validation.md)
+describes how those semantics are checked against independent tools such as
+Prometheus Blackbox Exporter, `curl`, `dig`, `openssl`, and `ping`.
+
 ## Fixed Labels
 
 These labels are hardcoded in the agent binary and applied to every metric automatically. They cannot be removed or renamed via configuration.

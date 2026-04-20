@@ -4,13 +4,9 @@ on:
   push:
     branches-ignore:
       - main
-    paths-ignore:
-      - '**.md'
   pull_request:
     branches:
       - main
-    paths-ignore:
-      - '**.md'
 
 env:
   GO_VERSION: "1.26"
@@ -24,6 +20,17 @@ jobs:
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
           go-version: ${{ env.GO_VERSION }}
+
+      - name: Format Check
+        run: |
+          files="$(gofmt -l .)"
+          if [ -n "$files" ]; then
+            echo "$files"
+            exit 1
+          fi
+
+      - name: Module Tidy Check
+        run: go mod tidy -diff
 
       - name: Lint
         uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9

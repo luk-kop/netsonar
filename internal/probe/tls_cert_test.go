@@ -3,8 +3,14 @@ package probe
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +20,11 @@ import (
 
 	"netsonar/internal/config"
 )
+
+type testCertificateAuthority struct {
+	cert *x509.Certificate
+	key  *rsa.PrivateKey
+}
 
 func mockTunnelingProxy(t *testing.T, backendAddr string) (string, <-chan string, func()) {
 	t.Helper()
@@ -76,6 +87,157 @@ func mockTunnelingProxy(t *testing.T, backendAddr string) (string, <-chan string
 	}()
 
 	return ln.Addr().String(), captured, func() { _ = ln.Close() }
+}
+
+func newTestPrivateKey(t *testing.T) *rsa.PrivateKey {
+	t.Helper()
+
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("failed to generate private key: %v", err)
+	}
+	return key
+}
+
+func newTestSerial(t *testing.T) *big.Int {
+	t.Helper()
+
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		t.Fatalf("failed to generate certificate serial: %v", err)
+	}
+	return serial
+}
+
+func newTestCA(t *testing.T, commonName string, notAfter time.Time) testCertificateAuthority {
+	t.Helper()
+
+	key := newTestPrivateKey(t)
+	template := &x509.Certificate{
+		SerialNumber:          newTestSerial(t),
+		Subject:               pkix.Name{CommonName: commonName},
+		NotBefore:             time.Now().UTC().Add(-time.Hour),
+		NotAfter:              notAfter,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("failed to create CA certificate: %v", err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatalf("failed to parse CA certificate: %v", err)
+	}
+
+	return testCertificateAuthority{cert: cert, key: key}
+}
+
+func newTestIntermediateCA(
+	t *testing.T,
+	commonName string,
+	notAfter time.Time,
+	parent testCertificateAuthority,
+) (testCertificateAuthority, []byte) {
+	t.Helper()
+
+	key := newTestPrivateKey(t)
+	template := &x509.Certificate{
+		SerialNumber:          newTestSerial(t),
+		Subject:               pkix.Name{CommonName: commonName},
+		NotBefore:             time.Now().UTC().Add(-time.Hour),
+		NotAfter:              notAfter,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+
+	der, err := x509.CreateCertificate(rand.Reader, template, parent.cert, &key.PublicKey, parent.key)
+	if err != nil {
+		t.Fatalf("failed to create intermediate certificate: %v", err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatalf("failed to parse intermediate certificate: %v", err)
+	}
+
+	return testCertificateAuthority{cert: cert, key: key}, der
+}
+
+func newTestLeafCertificate(
+	t *testing.T,
+	commonName string,
+	notAfter time.Time,
+	parent testCertificateAuthority,
+) (*x509.Certificate, []byte, *rsa.PrivateKey) {
+	t.Helper()
+
+	key := newTestPrivateKey(t)
+	template := &x509.Certificate{
+		SerialNumber:          newTestSerial(t),
+		Subject:               pkix.Name{CommonName: commonName},
+		NotBefore:             time.Now().UTC().Add(-time.Hour),
+		NotAfter:              notAfter,
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+	}
+
+	der, err := x509.CreateCertificate(rand.Reader, template, parent.cert, &key.PublicKey, parent.key)
+	if err != nil {
+		t.Fatalf("failed to create leaf certificate: %v", err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatalf("failed to parse leaf certificate: %v", err)
+	}
+
+	return cert, der, key
+}
+
+func newControlledTLSServer(t *testing.T, certificate tls.Certificate) *httptest.Server {
+	t.Helper()
+
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	srv.TLS = &tls.Config{Certificates: []tls.Certificate{certificate}}
+	srv.StartTLS()
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func probeTLSCertTestServer(t *testing.T, srv *httptest.Server) ProbeResult {
+	t.Helper()
+
+	target := config.TargetConfig{
+		Name:      "test-controlled-tls-cert",
+		Address:   srv.Listener.Addr().String(),
+		ProbeType: config.ProbeTypeTLSCert,
+		Timeout:   5 * time.Second,
+		ProbeOpts: config.ProbeOptions{
+			TLSSkipVerify: true,
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
+	defer cancel()
+
+	prober := &TLSCertProber{}
+	return prober.Probe(ctx, target)
+}
+
+func assertTLSCertProbeSuccess(t *testing.T, result ProbeResult) {
+	t.Helper()
+
+	if !result.Success {
+		t.Fatalf("expected Success=true, got false; error: %s", result.Error)
+	}
+	if result.Error != "" {
+		t.Fatalf("expected empty Error on success, got %q", result.Error)
+	}
 }
 
 func mockCapturingProxy(t *testing.T, statusCode int) (string, <-chan string, func()) {
@@ -158,6 +320,107 @@ func TestTLSCertProber_Success(t *testing.T) {
 	}
 	if !result.CertExpiry.After(time.Now()) {
 		t.Fatalf("expected CertExpiry to be in the future, got %v", result.CertExpiry)
+	}
+}
+
+func TestTLSCertProber_ControlledSingleCertExpiry(t *testing.T) {
+	notAfter := time.Now().UTC().Truncate(time.Second).Add(30 * 24 * time.Hour)
+	ca := newTestCA(t, "test-single-cert-ca", notAfter.Add(365*24*time.Hour))
+	leaf, leafDER, leafKey := newTestLeafCertificate(t, "test-single-cert-leaf", notAfter, ca)
+
+	srv := newControlledTLSServer(t, tls.Certificate{
+		Certificate: [][]byte{leafDER},
+		PrivateKey:  leafKey,
+		Leaf:        leaf,
+	})
+
+	result := probeTLSCertTestServer(t, srv)
+	assertTLSCertProbeSuccess(t, result)
+
+	if !result.CertExpiry.Equal(notAfter) {
+		t.Fatalf("expected CertExpiry %v, got %v", notAfter, result.CertExpiry)
+	}
+	if len(result.TLSCertificates) != 1 {
+		t.Fatalf("expected 1 peer certificate, got %d", len(result.TLSCertificates))
+	}
+	if result.TLSCertificates[0].Subject.CommonName != "test-single-cert-leaf" {
+		t.Fatalf("expected leaf certificate first, got common name %q", result.TLSCertificates[0].Subject.CommonName)
+	}
+}
+
+func TestTLSCertProber_ChainExpiryIntermediateEarliest(t *testing.T) {
+	base := time.Now().UTC().Truncate(time.Second)
+	caNotAfter := base.Add(365 * 24 * time.Hour)
+	intermediateNotAfter := base.Add(15 * 24 * time.Hour)
+	leafNotAfter := base.Add(30 * 24 * time.Hour)
+
+	ca := newTestCA(t, "test-chain-ca", caNotAfter)
+	intermediate, intermediateDER := newTestIntermediateCA(t, "test-chain-intermediate", intermediateNotAfter, ca)
+	leaf, leafDER, leafKey := newTestLeafCertificate(t, "test-chain-leaf", leafNotAfter, intermediate)
+
+	srv := newControlledTLSServer(t, tls.Certificate{
+		Certificate: [][]byte{leafDER, intermediateDER, ca.cert.Raw},
+		PrivateKey:  leafKey,
+		Leaf:        leaf,
+	})
+
+	result := probeTLSCertTestServer(t, srv)
+	assertTLSCertProbeSuccess(t, result)
+
+	if !result.CertExpiry.Equal(intermediateNotAfter) {
+		t.Fatalf("expected CertExpiry %v, got %v", intermediateNotAfter, result.CertExpiry)
+	}
+	assertPeerCertificateChain(t, result.TLSCertificates, []string{
+		"test-chain-leaf",
+		"test-chain-intermediate",
+		"test-chain-ca",
+	})
+}
+
+func TestTLSCertProber_ChainExpiryLeafEarliest(t *testing.T) {
+	base := time.Now().UTC().Truncate(time.Second)
+	caNotAfter := base.Add(365 * 24 * time.Hour)
+	intermediateNotAfter := base.Add(60 * 24 * time.Hour)
+	leafNotAfter := base.Add(10 * 24 * time.Hour)
+
+	ca := newTestCA(t, "test-leaf-earliest-ca", caNotAfter)
+	intermediate, intermediateDER := newTestIntermediateCA(
+		t,
+		"test-leaf-earliest-intermediate",
+		intermediateNotAfter,
+		ca,
+	)
+	leaf, leafDER, leafKey := newTestLeafCertificate(t, "test-leaf-earliest-leaf", leafNotAfter, intermediate)
+
+	srv := newControlledTLSServer(t, tls.Certificate{
+		Certificate: [][]byte{leafDER, intermediateDER, ca.cert.Raw},
+		PrivateKey:  leafKey,
+		Leaf:        leaf,
+	})
+
+	result := probeTLSCertTestServer(t, srv)
+	assertTLSCertProbeSuccess(t, result)
+
+	if !result.CertExpiry.Equal(leafNotAfter) {
+		t.Fatalf("expected CertExpiry %v, got %v", leafNotAfter, result.CertExpiry)
+	}
+	assertPeerCertificateChain(t, result.TLSCertificates, []string{
+		"test-leaf-earliest-leaf",
+		"test-leaf-earliest-intermediate",
+		"test-leaf-earliest-ca",
+	})
+}
+
+func assertPeerCertificateChain(t *testing.T, certs []*x509.Certificate, wantCommonNames []string) {
+	t.Helper()
+
+	if len(certs) != len(wantCommonNames) {
+		t.Fatalf("expected %d peer certificates, got %d", len(wantCommonNames), len(certs))
+	}
+	for i, want := range wantCommonNames {
+		if got := certs[i].Subject.CommonName; got != want {
+			t.Fatalf("certificate %d common name: got %q, want %q", i, got, want)
+		}
 	}
 }
 

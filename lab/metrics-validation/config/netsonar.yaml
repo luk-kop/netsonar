@@ -1,0 +1,43 @@
+agent:
+  listen_addr: ":9275"
+  metrics_path: "/metrics"
+  default_interval: 5s
+  default_timeout: 2s
+  log_level: info
+  allowed_tag_keys:
+    - service
+    - scope
+    - impact
+    - target_region
+    - target_partition
+    - target_account
+
+targets:
+  - name: http-ok
+    address: "http://fake-targets:8080/ok"
+    probe_type: http
+    probe_opts:
+      method: GET
+      expected_status_codes: [200]
+    tags:
+      service: fake-http
+      scope: same-region
+      impact: critical
+      target_region: local
+      target_partition: validation
+      target_account: metrics-validation
+
+  - name: https-ok
+    address: "https://fake-targets:9443/ok"
+    probe_type: http
+    probe_opts:
+      method: GET
+      expected_status_codes: [200]
+      tls_skip_verify: true
+    tags:
+      service: fake-https
+      scope: same-region
+      impact: critical
+      target_region: local
+      target_partition: validation
+      target_account: metrics-validation

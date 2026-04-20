@@ -14,7 +14,7 @@ LDFLAGS  := -s -w \
 	-X 'main.commit=$(COMMIT)' \
 	-X 'main.date=$(DATE)'
 
-.PHONY: all build test test-short test-race test-pbt lab-e2e lab-dev lab-dev-internet lab-dev-reload lab-dev-down lint fmt vet clean
+.PHONY: all build test test-short test-race test-pbt lab-e2e lab-dev lab-dev-internet lab-dev-reload lab-dev-down lab-mv lab-mv-down lab-metrics-validation lab-metrics-validation-down lint fmt vet clean
 
 all: fmt vet lint test build
 
@@ -49,6 +49,16 @@ lab-dev-reload:
 
 lab-dev-down:
 	docker compose -f lab/dev-stack/docker-compose.yml down -v
+
+lab-mv:
+	docker compose -f lab/metrics-validation/docker-compose.yml up --build --force-recreate -d
+
+lab-mv-down:
+	docker compose -f lab/metrics-validation/docker-compose.yml down -v
+
+lab-metrics-validation: lab-mv
+
+lab-metrics-validation-down: lab-mv-down
 
 lint:
 	golangci-lint run
