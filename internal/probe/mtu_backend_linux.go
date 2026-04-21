@@ -91,6 +91,7 @@ func probePingSocket(ctx context.Context, dst *net.IPAddr, payloadSize int, seq 
 		return result
 	}
 
+	sendTime := time.Now()
 	if _, err := unix.Write(fd, wire); err != nil {
 		if errors.Is(err, syscall.EMSGSIZE) {
 			_, _ = drainMTUErrorQueue(fd, seq)
@@ -162,6 +163,7 @@ func probePingSocket(ctx context.Context, dst *net.IPAddr, payloadSize int, seq 
 		}
 		if echoReplyMatchesSequence(readBuf[:readN], seq) {
 			result.status = mtuPayloadSuccess
+			result.rtt = time.Since(sendTime)
 			return result
 		}
 	}

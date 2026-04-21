@@ -130,6 +130,7 @@ func (p *HTTPProber) Probe(ctx context.Context, target config.TargetConfig) Prob
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	result.HTTPResponseReceived = true
 	result.StatusCode = resp.StatusCode
 	if resp.TLS != nil && len(resp.TLS.PeerCertificates) > 0 {
 		setTLSCertificateResult(&result, resp.TLS.PeerCertificates)
@@ -153,6 +154,7 @@ func (p *HTTPProber) Probe(ctx context.Context, target config.TargetConfig) Prob
 			tlsStart, tlsEnd, gotFirstByte, transferEnd)
 		return result
 	}
+	result.HTTPTruncationEvaluated = true
 	if bytesRead > effectiveLimit {
 		result.HTTPResponseTruncated = true
 	}
@@ -178,7 +180,7 @@ func (p *HTTPProber) Probe(ctx context.Context, target config.TargetConfig) Prob
 }
 
 // buildPhases constructs the phase duration map from the recorded timestamps.
-// Zero-valued start/end pairs produce a zero duration for that phase.
+// Unobserved phases are omitted rather than exported as zero placeholders.
 //
 // TTFB is anchored at the later of connectEnd and tlsEnd so that for HTTPS
 // the TLS handshake is not double-counted in both tls_handshake and ttfb.
@@ -190,13 +192,12 @@ func buildPhases(
 	tlsStart, tlsEnd,
 	gotFirstByte, transferEnd time.Time,
 ) map[string]time.Duration {
-	phases := map[string]time.Duration{
-		PhaseDNSResolve:   safeSub(dnsEnd, dnsStart),
-		PhaseTCPConnect:   safeSub(connectEnd, connectStart),
-		PhaseTLSHandshake: safeSub(tlsEnd, tlsStart),
-		PhaseTTFB:         safeSub(gotFirstByte, laterOf(tlsEnd, connectEnd)),
-		PhaseTransfer:     safeSub(transferEnd, gotFirstByte),
-	}
+	phases := make(map[string]time.Duration, 5)
+	addObservedPhase(phases, PhaseDNSResolve, dnsEnd, dnsStart)
+	addObservedPhase(phases, PhaseTCPConnect, connectEnd, connectStart)
+	addObservedPhase(phases, PhaseTLSHandshake, tlsEnd, tlsStart)
+	addObservedPhase(phases, PhaseTTFB, gotFirstByte, laterOf(tlsEnd, connectEnd))
+	addObservedPhase(phases, PhaseTransfer, transferEnd, gotFirstByte)
 	return phases
 }
 
@@ -210,14 +211,18 @@ func laterOf(a, b time.Time) time.Time {
 	return b
 }
 
-// safeSub returns end - start if both are non-zero, otherwise zero.
+// safeSub returns a non-negative end - start duration.
 func safeSub(end, start time.Time) time.Duration {
-	if start.IsZero() || end.IsZero() {
-		return 0
-	}
 	d := end.Sub(start)
 	if d < 0 {
 		return 0
 	}
 	return d
+}
+
+func addObservedPhase(phases map[string]time.Duration, phase string, end, start time.Time) {
+	if start.IsZero() || end.IsZero() {
+		return
+	}
+	phases[phase] = safeSub(end, start)
 }

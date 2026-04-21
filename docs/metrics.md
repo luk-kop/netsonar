@@ -56,6 +56,41 @@ targets:
 
 The agent registers three dynamic labels: `service`, `scope`, `impact`. The `bastion-cn` target gets `impact=""` because it does not define that key.
 
+## Metric Naming Convention
+
+Probe metric names follow the pattern `probe_<domain>_<measurement>_<unit>`, where `<domain>` identifies **what is being measured**, not which probe type emits the metric.
+
+- **`probe_http_*`** — metrics about the HTTP protocol layer (status code, body match, response truncation).
+- **`probe_tls_*`** — metrics about TLS certificates. Emitted by both `http` and `tls_cert` probe types, because both observe TLS certificates during their operation.
+- **`probe_icmp_*`** — metrics about ICMP echo behaviour (RTT, packet loss). Emitted by both `icmp` and `mtu` probe types, because MTU probes use ICMP echo requests internally.
+- **`probe_mtu_*`** — metrics specific to path MTU discovery (discovered MTU bytes, state).
+- **`probe_dns_*`** — metrics about DNS resolution (resolve time, result match).
+
+The `probe_type` label distinguishes which probe produced the observation. For example, `probe_icmp_avg_rtt_seconds{probe_type="icmp"}` is RTT from a dedicated ICMP probe, while `probe_icmp_avg_rtt_seconds{probe_type="mtu"}` is RTT from the ICMP echo requests that the MTU probe sends as part of its PMTUD algorithm.
+
+Generic metrics without a domain prefix (`probe_success`, `probe_duration_seconds`, `probe_phase_duration_seconds`) are emitted by all or multiple probe types.
+
+The following table shows which probe types emit each metric:
+
+| Metric | Domain | Emitted by |
+|---|---|---|
+| `probe_success` | — | all |
+| `probe_duration_seconds` | — | all |
+| `probe_phase_duration_seconds` | — | http, proxy |
+| `probe_http_status_code` | `http_` | http |
+| `probe_http_response_truncated` | `http_` | http |
+| `probe_http_body_match` | `http_` | http_body |
+| `probe_tls_cert_expiry_timestamp_seconds` | `tls_` | http, tls_cert |
+| `probe_tls_cert_chain_expiry_timestamp_seconds` | `tls_` | http, tls_cert |
+| `probe_icmp_packet_loss_ratio` | `icmp_` | icmp |
+| `probe_icmp_avg_rtt_seconds` | `icmp_` | icmp, mtu |
+| `probe_icmp_stddev_rtt_seconds` | `icmp_` | icmp |
+| `probe_mtu_bytes` | `mtu_` | mtu |
+| `probe_mtu_state` | `mtu_` | mtu |
+| `probe_dns_resolve_seconds` | `dns_` | dns |
+| `probe_dns_result_match` | `dns_` | dns |
+| `probe_skipped_overlap_total` | — | all |
+
 ## Probe Metrics
 
 | Metric                              | Type  | Labels          | Description                                    |
@@ -68,7 +103,7 @@ The agent registers three dynamic labels: `service`, `scope`, `impact`. The `bas
 | `probe_tls_cert_chain_expiry_timestamp_seconds` | Gauge | common + `cert_index`, `cert_role` | Unix timestamp of each peer certificate expiry |
 | `probe_http_response_truncated`     | Gauge | common          | 1 if HTTP response body exceeded transfer limit, 0 otherwise |
 | `probe_icmp_packet_loss_ratio`      | Gauge | common          | Packet loss ratio 0.0-1.0                      |
-| `probe_icmp_avg_rtt_seconds`        | Gauge | common          | Average ICMP echo round-trip time              |
+| `probe_icmp_avg_rtt_seconds`        | Gauge | common          | Average ICMP echo round-trip time (ICMP and MTU probes) |
 | `probe_icmp_stddev_rtt_seconds`     | Gauge | common          | Population standard deviation of ICMP echo RTT |
 | `probe_mtu_bytes`                   | Gauge | common          | Largest confirmed MTU in bytes                 |
 | `probe_mtu_state`                   | Gauge | common + `state`, `detail` | MTU state info metric, value is always 1 |
@@ -85,6 +120,13 @@ The agent registers three dynamic labels: `service`, `scope`, `impact`. The `bas
 | `agent_config_info`                 | Gauge | `hash`      | Short SHA256 hash of the effective configuration (always 1) |
 | `agent_targets_total`               | Gauge | -           | Total number of configured targets                       |
 | `agent_config_reload_timestamp_seconds` | Gauge | -        | Unix timestamp of last config reload                     |
+
+### `agent_config_reload_timestamp_seconds`
+
+The timestamp is set both at **startup** (initial config load) and after
+every successful **SIGHUP reload**. Because the initial load also sets the
+gauge, `time() - agent_config_reload_timestamp_seconds` effectively tracks
+agent uptime when no reloads have occurred.
 
 ### `agent_config_info`
 
@@ -131,17 +173,67 @@ This matches the W3C Navigation Timing API (`responseStart − requestStart`) an
 
 Direct `tls_cert` probes expose certificate metrics but do not currently emit phase timing. `tls_cert` probes through a proxy emit the proxy tunnel phases plus `tls_handshake` for the target TLS handshake.
 
-## Current-Observation Semantics
+## Conditional Metric Semantics
 
-Type-specific metrics follow **current-observation** semantics: they reflect only what was observed in the latest probe result. If a metric was present in a previous successful probe but is absent in the current result, the corresponding Prometheus series is deleted rather than retaining the stale value.
+Some probe metrics are meaningful for every probe result, while others are meaningful only when a specific observation was made during the latest probe run.
 
-This applies to:
+NetSonar therefore distinguishes between:
 
-- **`probe_phase_duration_seconds`**: before recording phases from a new result, all known phase series for the target are deleted. Only phases present in the current result are emitted. If a probe fails before reaching TLS handshake, the `tls_handshake` phase disappears from `/metrics` rather than showing the value from the last successful probe.
-- **`probe_tls_cert_expiry_timestamp_seconds`** and **`probe_tls_cert_chain_expiry_timestamp_seconds`**: if the current probe result has no certificate (e.g. connection refused, TLS handshake failed), the cert expiry series are deleted. Dashboards querying `(probe_tls_cert_expiry_timestamp_seconds - time()) / 86400` will show no row for targets where the latest probe did not retrieve a certificate.
-- **`probe_dns_result_match`**: emitted only when `dns_expected` is configured and the resolver returned a response that could be compared. Resolver failures delete the series; evaluated mismatches emit `0`.
+- **always-emitted metrics** such as `probe_success` and `probe_duration_seconds`
+- **conditionally emitted metrics** such as RTT, HTTP status, certificate expiry, DNS match result, and per-phase timings
 
-This design prevents stale metrics from misleading dashboards and alerts. A missing series means "not observed in the last probe" — dashboards should treat absent series as a signal, not as an error.
+Conditionally emitted metrics follow **current-observation semantics**: they reflect only what was observed in the latest probe result. If the latest probe did not produce the underlying observation, the corresponding Prometheus series is deleted rather than retaining a stale value or exporting a placeholder zero.
+
+This applies when zero would be misleading as an in-band sentinel. For example:
+
+- ICMP average RTT is meaningful only when at least one echo reply was received
+- ICMP RTT standard deviation is meaningful only when at least two echo replies were received
+- HTTP status code is meaningful only when an HTTP response was received
+- TLS certificate expiry is meaningful only when a certificate was observed
+- DNS match result is meaningful only when the comparison was actually evaluated
+
+The RTT rules above apply to both ICMP and MTU probe paths, since MTU probing uses ICMP echo internally.
+
+As a rule, NetSonar emits `0` only when it is a valid value for the metric itself, not as a stand-in for "not observed", "unknown", or "not applicable".
+
+Emission of conditional metrics is based on the semantics of the probe result, not on incidental Go zero-values. Probe implementations and metric recording should use explicit observation state such as "reply observed", "response received", or "match evaluated" when deciding whether a metric should be emitted.
+
+A missing conditional series means **"not observed in the latest probe result"**, not "zero" and not "exporter broken". Dashboards and alerts should interpret such cases together with `probe_success` and probe-specific diagnostic metrics.
+
+`probe_icmp_packet_loss_ratio` is a deliberate exception to the conditional rule: on total ICMP failure, NetSonar emits `1.0` as a clear "nothing got through" signal.
+
+### Alerting Guidance
+
+For conditionally emitted value metrics, alerts should usually key off `probe_success` or probe-specific state metrics rather than `absent()` on the value metric itself.
+
+Use `absent()` or `absent_over_time()` primarily to detect cases where metrics are missing unexpectedly, such as:
+
+- the scrape target disappearing
+- the exporter failing to expose metrics
+- ingestion or scrape pipeline failures
+
+Do not treat absence of a conditional value metric as a generic probe failure signal when that metric is documented as conditionally emitted by design.
+
+### Emission Summary
+
+| Metric | Semantics | Emitted when | Absence means |
+|---|---|---|---|
+| `probe_success` | always | every probe result | unexpected for an active target |
+| `probe_duration_seconds` | always | every probe result | unexpected for an active target |
+| `probe_phase_duration_seconds` | conditional | the phase was observed in the latest probe result | the phase was not reached or not observed in the latest probe result |
+| `probe_http_status_code` | conditional | an HTTP response was received in the latest probe result | no HTTP response was received in the latest probe result |
+| `probe_http_response_truncated` | conditional | truncation evaluation was performed in the latest probe result | truncation was not evaluable in the latest probe result |
+| `probe_http_body_match` | conditional | body evaluation was performed in the latest probe result | body evaluation was not performed in the latest probe result |
+| `probe_tls_cert_expiry_timestamp_seconds` | conditional | a certificate was observed in the latest probe result | no certificate was observed in the latest probe result |
+| `probe_tls_cert_chain_expiry_timestamp_seconds` | conditional | peer certificates were observed in the latest probe result | no peer certificates were observed in the latest probe result |
+| `probe_icmp_packet_loss_ratio` | always (ICMP probes) | every ICMP probe result | unexpected for an active ICMP target |
+| `probe_icmp_avg_rtt_seconds` | conditional | at least one ICMP echo reply was observed in the latest probe result | no RTT was observed in the latest probe result |
+| `probe_icmp_stddev_rtt_seconds` | conditional | at least two ICMP echo replies were observed in the latest probe result | RTT variation was not observable in the latest probe result |
+| `probe_mtu_bytes` | conditional | at least one MTU size was confirmed in the latest probe result | no MTU size was confirmed in the latest probe result |
+| `probe_mtu_state` | always | every MTU probe result | unexpected for an active MTU target |
+| `probe_dns_resolve_seconds` | always | every DNS probe result | unexpected for an active DNS target |
+| `probe_dns_result_match` | conditional | DNS result comparison was evaluated in the latest probe result | DNS result comparison was not evaluated in the latest probe result |
+| `probe_skipped_overlap_total` | always | exported for active targets; increments when a stale tick is dropped | unexpected for an active target |
 
 ## Dashboard Interpretation
 
@@ -163,9 +255,15 @@ An empty panel means all probes complete within their configured interval — th
 
 ### ICMP Panels
 
-The ICMP section shows packet loss ratio, average RTT, and RTT standard deviation. RTT metrics are only meaningful when the ICMP probe successfully receives at least one echo reply. When all pings time out, packet loss is 1.0 and RTT metrics remain at zero.
+The ICMP section shows packet loss ratio, average RTT, and RTT standard deviation. Average RTT is meaningful only when the probe observed at least one echo reply. RTT standard deviation is meaningful only when the probe observed at least two echo replies.
+
+MTU probes also emit `probe_icmp_avg_rtt_seconds`, computed as the average RTT across all successful ICMP echo replies during the probe (sanity echo and step-down payloads). This allows dashboards to show network latency for MTU targets without relying on `probe_duration_seconds`, which reflects the full PMTUD algorithm duration.
+
+If no ICMP echo replies were observed, RTT metrics are absent rather than exported as zero.
 
 Packet loss is calculated as `(sent - received) / sent`, where `sent` counts echo requests after a successful socket write. If the probe context expires before all pings are sent, unsent pings are not counted as lost.
+
+`probe_icmp_stddev_rtt_seconds` near zero is normal — it means all echo replies in the sequence had nearly identical round-trip times, indicating a stable network path. Non-zero values indicate jitter, which can be caused by network congestion, route changes, or asymmetric paths. The metric uses population standard deviation (not sample), consistent with `ping(8)` mdev semantics.
 
 Common causes of 100% packet loss with a working `ping` command:
 
@@ -207,7 +305,6 @@ probe_duration_seconds{impact="critical",network_path="direct",probe_type="http"
 # TYPE probe_phase_duration_seconds gauge
 probe_phase_duration_seconds{impact="critical",network_path="direct",phase="dns_resolve",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.000777178
 probe_phase_duration_seconds{impact="critical",network_path="direct",phase="tcp_connect",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.000253737
-probe_phase_duration_seconds{impact="critical",network_path="direct",phase="tls_handshake",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0
 probe_phase_duration_seconds{impact="critical",network_path="direct",phase="ttfb",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.006660328
 probe_phase_duration_seconds{impact="critical",network_path="direct",phase="transfer",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.000389704
 

@@ -119,6 +119,7 @@ func (p *HTTPBodyProber) Probe(ctx context.Context, target config.TargetConfig) 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxHTTPBodyBytes+1))
 	_ = resp.Body.Close()
 	result.Duration = time.Since(start)
+	result.HTTPResponseReceived = true
 	result.StatusCode = resp.StatusCode
 
 	if err != nil {
@@ -131,6 +132,7 @@ func (p *HTTPBodyProber) Probe(ctx context.Context, target config.TargetConfig) 
 		return result
 	}
 
+	result.HTTPBodyEvaluated = true
 	result.BodyMatch = matchBody(string(body), target.ProbeOpts, p.compiledBodyMatchRegex)
 	statusMatch := len(target.ProbeOpts.ExpectedStatusCodes) == 0 ||
 		slices.Contains(target.ProbeOpts.ExpectedStatusCodes, resp.StatusCode)

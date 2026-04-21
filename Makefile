@@ -14,13 +14,18 @@ LDFLAGS  := -s -w \
 	-X 'main.commit=$(COMMIT)' \
 	-X 'main.date=$(DATE)'
 
-.PHONY: all build test test-short test-race test-pbt lab-e2e lab-dev lab-dev-internet lab-dev-reload lab-dev-down lab-mv lab-mv-down lab-metrics-validation lab-metrics-validation-down lint fmt vet clean
+.PHONY: all build build-release test test-short test-race test-pbt lab-e2e lab-dev lab-dev-internet lab-dev-reload lab-dev-down lab-mv lab-mv-down lab-metrics-validation lab-metrics-validation-down lint fmt vet clean
 
 all: fmt vet lint test build
 
 build:
 	mkdir -p $(BINDIR)
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BINDIR)/$(BINARY) $(PKG)
+
+build-release:
+	mkdir -p $(BINDIR)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(BINDIR)/$(BINARY)-linux-amd64 $(PKG)
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o $(BINDIR)/$(BINARY)-linux-arm64 $(PKG)
 
 test:
 	go test ./...

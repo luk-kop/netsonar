@@ -75,9 +75,16 @@ type ProbeResult struct {
 	// StatusCode is the HTTP response status code (HTTP probes only).
 	StatusCode int
 
+	// HTTPResponseReceived is true when an HTTP response was received and
+	// response metadata such as status code became observable.
+	HTTPResponseReceived bool
+
 	// CertExpiry is the earliest TLS certificate NotAfter timestamp in the
 	// peer certificate chain (TLS and HTTPS probes only).
 	CertExpiry time.Time
+
+	// CertObserved is true when at least one peer certificate was observed.
+	CertObserved bool
 
 	// TLSCertificates is the peer certificate chain observed during TLS
 	// probes. The metrics package exposes bounded per-cert expiry series
@@ -99,8 +106,13 @@ type ProbeResult struct {
 	// (ICMP probes only).
 	PacketLoss float64
 
+	// ICMPRepliesObserved is the number of successful ICMP echo replies
+	// observed during the probe. For MTU probes this includes the sanity echo
+	// and any successful payload probes.
+	ICMPRepliesObserved int
+
 	// ICMPAvgRTT is the average round-trip time across successful ICMP echo
-	// replies (ICMP probes only). Zero when no replies were received.
+	// replies (ICMP and MTU probes). Zero when no replies were received.
 	ICMPAvgRTT time.Duration
 
 	// ICMPStddevRTT is the population standard deviation of ICMP echo RTTs
@@ -123,9 +135,17 @@ type ProbeResult struct {
 	// itself and is only used by probe_type=http.
 	HTTPResponseTruncated bool
 
+	// HTTPTruncationEvaluated is true when the HTTP probe received a response
+	// and read the body far enough to evaluate whether truncation occurred.
+	HTTPTruncationEvaluated bool
+
 	// BodyMatch is the result of body content validation
 	// (HTTP body probes only).
 	BodyMatch bool
+
+	// HTTPBodyEvaluated is true when an HTTP body probe received a response
+	// body and completed body-match evaluation.
+	HTTPBodyEvaluated bool
 
 	// Error contains a descriptive message when Success is false.
 	// Empty when Success is true.

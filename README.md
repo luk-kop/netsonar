@@ -46,6 +46,7 @@ The binary is written to `bin/netsonar`.
 | Target      | Description                                              |
 |-------------|----------------------------------------------------------|
 | `build`     | Static binary with `CGO_ENABLED=0` and version injection |
+| `build-release` | Cross-compile for `linux/amd64` and `linux/arm64`    |
 | `test`      | Run all tests (`go test ./...`)                          |
 | `test-short`| Run tests in short mode (`go test -short ./...`)         |
 | `test-race` | Run tests with race detector                             |

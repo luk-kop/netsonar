@@ -143,6 +143,7 @@ func probeResultForType(pt config.ProbeType) probe.ProbeResult {
 	switch pt {
 	case config.ProbeTypeHTTP:
 		base.StatusCode = 200
+		base.HTTPResponseReceived = true
 		base.Phases = map[string]time.Duration{
 			probe.PhaseDNSResolve:   5 * time.Millisecond,
 			probe.PhaseTCPConnect:   10 * time.Millisecond,
@@ -152,6 +153,7 @@ func probeResultForType(pt config.ProbeType) probe.ProbeResult {
 		}
 	case config.ProbeTypeICMP:
 		base.PacketLoss = 0.0
+		base.ICMPRepliesObserved = 1
 		base.ICMPAvgRTT = 5 * time.Millisecond
 	case config.ProbeTypeMTU:
 		base.PathMTU = 1500
@@ -159,8 +161,11 @@ func probeResultForType(pt config.ProbeType) probe.ProbeResult {
 		base.DNSResolveTime = 8 * time.Millisecond
 	case config.ProbeTypeHTTPBody:
 		base.StatusCode = 200
+		base.HTTPResponseReceived = true
+		base.HTTPBodyEvaluated = true
 		base.BodyMatch = true
 	case config.ProbeTypeTLSCert:
+		base.CertObserved = true
 		base.CertExpiry = time.Date(2028, 1, 1, 0, 0, 0, 0, time.UTC)
 	}
 	return base

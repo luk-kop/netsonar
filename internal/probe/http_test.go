@@ -13,10 +13,10 @@ import (
 	"netsonar/internal/config"
 )
 
-// expectedHTTPPhaseKeys lists the five phase keys that every HTTP probe result
-// must contain, regardless of whether the target is HTTP or HTTPS.
-var expectedHTTPPhaseKeys = []string{
-	"dns_resolve",
+// expectedHTTPSPhaseKeys lists the phase keys expected for successful HTTPS
+// probes against local test servers. DNS resolution is not guaranteed when
+// the server URL uses a literal IP address.
+var expectedHTTPSPhaseKeys = []string{
 	"tcp_connect",
 	"tls_handshake",
 	"ttfb",
@@ -24,8 +24,8 @@ var expectedHTTPPhaseKeys = []string{
 }
 
 // TestHTTPProber_PhaseBreakdownPresence verifies that probing a plain HTTP
-// server produces a Phases map with all 5 expected keys and that tcp_connect,
-// ttfb, and transfer are > 0 (tls_handshake should be zero for plain HTTP).
+// server produces a Phases map without tls_handshake and that tcp_connect,
+// ttfb, and transfer are > 0.
 func TestHTTPProber_PhaseBreakdownPresence(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -53,28 +53,29 @@ func TestHTTPProber_PhaseBreakdownPresence(t *testing.T) {
 		t.Fatal("expected Phases map to be non-nil")
 	}
 
-	for _, key := range expectedHTTPPhaseKeys {
+	for _, key := range []string{"tcp_connect", "ttfb", "transfer"} {
 		if _, ok := result.Phases[key]; !ok {
 			t.Fatalf("expected Phases to contain key %q", key)
 		}
 	}
 
 	// For plain HTTP against a local server, tcp_connect, ttfb, and transfer
-	// should be positive. dns_resolve may be zero for 127.0.0.1 addresses.
+	// should be positive. dns_resolve may be absent when the server URL uses
+	// a literal IP address.
 	for _, key := range []string{"tcp_connect", "ttfb", "transfer"} {
 		if result.Phases[key] <= 0 {
 			t.Fatalf("expected Phases[%q] > 0, got %v", key, result.Phases[key])
 		}
 	}
 
-	// tls_handshake must be zero for plain HTTP.
-	if result.Phases["tls_handshake"] != 0 {
-		t.Fatalf("expected Phases[tls_handshake] == 0 for plain HTTP, got %v", result.Phases["tls_handshake"])
+	// tls_handshake must be absent for plain HTTP.
+	if _, ok := result.Phases["tls_handshake"]; ok {
+		t.Fatalf("did not expect tls_handshake phase for plain HTTP, got %v", result.Phases["tls_handshake"])
 	}
 }
 
 // TestHTTPProber_PhaseBreakdownHTTPS verifies that probing an HTTPS server
-// produces all 5 phase keys with non-zero values including tls_handshake.
+// produces the observed phase keys including tls_handshake.
 func TestHTTPProber_PhaseBreakdownHTTPS(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -105,7 +106,7 @@ func TestHTTPProber_PhaseBreakdownHTTPS(t *testing.T) {
 		t.Fatal("expected Phases map to be non-nil")
 	}
 
-	for _, key := range expectedHTTPPhaseKeys {
+	for _, key := range expectedHTTPSPhaseKeys {
 		if _, ok := result.Phases[key]; !ok {
 			t.Fatalf("expected Phases to contain key %q", key)
 		}

@@ -53,6 +53,16 @@ targets:
       service: fake-http
       suite: e2e
 
+  - name: http-no-response
+    address: "http://fake-targets:9001/"
+    probe_type: http
+    probe_opts:
+      method: GET
+      expected_status_codes: [200]
+    tags:
+      service: fake-http
+      suite: e2e
+
   - name: http-body-ok
     address: "http://fake-targets:8080/ok"
     probe_type: http_body
@@ -125,6 +135,15 @@ targets:
       service: fake-proxy
       suite: e2e
 
+  - name: tls-cert-connect-fail
+    address: "fake-targets:9001"
+    probe_type: tls_cert
+    probe_opts:
+      tls_skip_verify: true
+    tags:
+      service: fake-proxy
+      suite: e2e
+
   - name: dns-fake-targets
     address: "fake-targets"
     probe_type: dns
@@ -169,8 +188,34 @@ targets:
       service: fake-icmp
       suite: e2e
 
+  - name: icmp-single-reply
+    address: "fake-targets"
+    probe_type: icmp
+    interval: 10s
+    timeout: 3s
+    probe_opts:
+      ping_count: 1
+      ping_interval: 0.1
+    tags:
+      service: fake-icmp
+      suite: e2e
+
   - name: mtu-fake-targets
     address: "fake-targets"
+    probe_type: mtu
+    interval: 15s
+    timeout: 8s
+    probe_opts:
+      icmp_payload_sizes: [1472, 1392, 1372, 1272, 1172]
+      expected_min_mtu: 1172
+      mtu_retries: 1
+      mtu_per_attempt_timeout: 500ms
+    tags:
+      service: fake-mtu
+      suite: e2e
+
+  - name: mtu-no-resolve
+    address: "this.host.does.not.exist.invalid"
     probe_type: mtu
     interval: 15s
     timeout: 8s

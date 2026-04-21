@@ -278,21 +278,30 @@ func (m *MetricsExporter) Record(target config.TargetConfig, result probe.ProbeR
 	// Probe-type-specific metrics.
 	switch target.ProbeType {
 	case config.ProbeTypeHTTP:
-		m.httpStatusCode.With(labels).Set(float64(result.StatusCode))
-		m.recordTLSResult(result, labels)
-		truncatedVal := 0.0
-		if result.HTTPResponseTruncated {
-			truncatedVal = 1.0
+		if result.HTTPResponseReceived {
+			m.httpStatusCode.With(labels).Set(float64(result.StatusCode))
+		} else {
+			m.httpStatusCode.Delete(labels)
 		}
-		m.httpResponseTruncated.With(labels).Set(truncatedVal)
+		m.recordTLSResult(result, labels)
+		if result.HTTPTruncationEvaluated {
+			truncatedVal := 0.0
+			if result.HTTPResponseTruncated {
+				truncatedVal = 1.0
+			}
+			m.httpResponseTruncated.With(labels).Set(truncatedVal)
+		} else {
+			m.httpResponseTruncated.Delete(labels)
+		}
 
 	case config.ProbeTypeICMP:
 		m.icmpPacketLoss.With(labels).Set(result.PacketLoss)
-		m.icmpAvgRTT.With(labels).Set(result.ICMPAvgRTT.Seconds())
-		m.icmpStddevRTT.With(labels).Set(result.ICMPStddevRTT.Seconds())
+		recordICMPAvgRTT(result, labels, m.icmpAvgRTT)
+		recordICMPStddevRTT(result, labels, m.icmpStddevRTT)
 
 	case config.ProbeTypeMTU:
 		m.recordMTUResult(result, labels)
+		recordICMPAvgRTT(result, labels, m.icmpAvgRTT)
 
 	case config.ProbeTypeDNS:
 		m.dnsResolveTime.With(labels).Set(result.DNSResolveTime.Seconds())
@@ -310,12 +319,20 @@ func (m *MetricsExporter) Record(target config.TargetConfig, result probe.ProbeR
 		m.recordTLSResult(result, labels)
 
 	case config.ProbeTypeHTTPBody:
-		bodyVal := 0.0
-		if result.BodyMatch {
-			bodyVal = 1.0
+		if result.HTTPBodyEvaluated {
+			bodyVal := 0.0
+			if result.BodyMatch {
+				bodyVal = 1.0
+			}
+			m.httpBodyMatch.With(labels).Set(bodyVal)
+		} else {
+			m.httpBodyMatch.Delete(labels)
 		}
-		m.httpBodyMatch.With(labels).Set(bodyVal)
-		m.httpStatusCode.With(labels).Set(float64(result.StatusCode))
+		if result.HTTPResponseReceived {
+			m.httpStatusCode.With(labels).Set(float64(result.StatusCode))
+		} else {
+			m.httpStatusCode.Delete(labels)
+		}
 
 	case config.ProbeTypeTCP, config.ProbeTypeProxy:
 		// No type-specific metrics; phases are handled generically above.
@@ -325,7 +342,7 @@ func (m *MetricsExporter) Record(target config.TargetConfig, result probe.ProbeR
 func (m *MetricsExporter) recordTLSResult(result probe.ProbeResult, labels prometheus.Labels) {
 	m.tlsCertChainExpiry.DeletePartialMatch(labels)
 
-	if !result.CertExpiry.IsZero() {
+	if result.CertObserved {
 		m.tlsCertExpiry.With(labels).Set(float64(result.CertExpiry.Unix()))
 	} else {
 		m.tlsCertExpiry.Delete(labels)
@@ -372,6 +389,22 @@ func mtuStateDetail(result probe.ProbeResult) (string, string) {
 	return result.MTUState, result.MTUDetail
 }
 
+func recordICMPAvgRTT(result probe.ProbeResult, labels prometheus.Labels, avgVec *prometheus.GaugeVec) {
+	if result.ICMPRepliesObserved >= 1 {
+		avgVec.With(labels).Set(result.ICMPAvgRTT.Seconds())
+	} else {
+		avgVec.Delete(labels)
+	}
+}
+
+func recordICMPStddevRTT(result probe.ProbeResult, labels prometheus.Labels, stddevVec *prometheus.GaugeVec) {
+	if result.ICMPRepliesObserved >= 2 {
+		stddevVec.With(labels).Set(result.ICMPStddevRTT.Seconds())
+	} else {
+		stddevVec.Delete(labels)
+	}
+}
+
 // knownPhases are all phase label values used by probe_phase_duration_seconds.
 // Record and DeleteTarget use this list for bounded exact deletes so stale
 // current-observation phase series do not survive later results. Sourced from
@@ -405,6 +438,13 @@ func (m *MetricsExporter) DeleteTarget(target config.TargetConfig) {
 		phaseLabels["phase"] = phase
 		m.probePhaseDuration.Delete(phaseLabels)
 	}
+}
+
+// EnsureTarget pre-initializes event-driven counters that should exist for
+// active targets even before the first increment occurs.
+func (m *MetricsExporter) EnsureTarget(target config.TargetConfig) {
+	labels := m.buildLabels(target)
+	m.probeSkippedOverlapTotal.With(labels)
 }
 
 // IncrSkippedOverlap increments the probe_skipped_overlap_total counter

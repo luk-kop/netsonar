@@ -17,7 +17,15 @@ updates:
     open-pull-requests-limit: 5
 
   - package-ecosystem: "docker"
-    directory: "/"
+    directory: "/lab/e2e"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore"
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "docker"
+    directory: "/lab/dev-stack"
     schedule:
       interval: "weekly"
     commit-message:
