@@ -54,7 +54,7 @@ Controls how `probe_success` is determined from the HTTP response:
 | `expected_status_codes: [200]` | Success only if the response status code is exactly 200. Any other code sets `probe_success=0`. |
 | `expected_status_codes: [200, 201, 204]` | Success if the response code matches any value in the list. |
 
-The actual status code is always recorded in the `probe_http_status_code` metric regardless of this setting, so you can see what the target returned even when the probe reports failure. Having both metrics is valuable: `probe_success` drives alerting (is the probe healthy?), while `probe_http_status_code` provides the diagnostic detail (what exactly did the target return?). When a probe starts failing, the status code tells you whether the target returned 403 (auth issue), 502 (upstream down), 503 (overloaded), or something else — without this, you only know it broke but not why.
+When an HTTP response is received, the actual status code is recorded in `probe_http_status_code` regardless of this setting, so you can see what the target returned even when the probe reports failure. Having both metrics is valuable: `probe_success` drives alerting (is the probe healthy?), while `probe_http_status_code` provides the diagnostic detail (what exactly did the target return?). When a probe starts failing after a response is received, the status code tells you whether the target returned 403 (auth issue), 502 (upstream down), 503 (overloaded), or something else — without this, you only know it broke but not why. If no HTTP response is received at all (for example on DNS, TCP, TLS, or timeout failure), `probe_http_status_code` is absent.
 
 Examples:
 - AWS service endpoints return 403 without SigV4 signing — use `[]` to test reachability without caring about the status code.
@@ -155,9 +155,10 @@ MTU metrics expose the status contract:
 ```text
 probe_mtu_state{state="ok|degraded|unreachable|error", detail="..."} 1
 probe_mtu_bytes
+probe_icmp_avg_rtt_seconds
 ```
 
-`probe_mtu_bytes` is absent when no size was confirmed, and `probe_mtu_state` carries the reason.
+`probe_mtu_bytes` is absent when no size was confirmed, and `probe_mtu_state` carries the reason. `probe_icmp_avg_rtt_seconds` is the average round-trip time across all successful ICMP echo replies during the probe (sanity echo and step-down payloads).
 
 For a detailed explanation of PMTUD, ICMP Destination Unreachable codes, PMTUD black holes, and how the MTU probe interprets results, see [mtu-pmtud.md](mtu-pmtud.md).
 
@@ -259,7 +260,7 @@ The reported expiry is based on the certificate chain observed by NetSonar from 
 
 ## HTTP Body Validation
 
-HTTP request with regex or substring match on the response body. The probe succeeds (`probe_success=1`) when **both** conditions are met: the response body matches the configured pattern, and the response status code satisfies the `expected_status_codes` rule (empty list accepts any status; non-empty list requires the status code to be present). The match result is also reported separately via `probe_http_body_match` for diagnostic visibility. The agent reads at most 1 MiB of response body; larger responses fail the probe. Supports optional proxy routing via `proxy_url`.
+HTTP request with regex or substring match on the response body. The probe succeeds (`probe_success=1`) when **both** conditions are met: the response body matches the configured pattern, and the response status code satisfies the `expected_status_codes` rule (empty list accepts any status; non-empty list requires the status code to be present). When body evaluation completes, the match result is also reported separately via `probe_http_body_match` for diagnostic visibility. If no HTTP response is received or the body cannot be evaluated, `probe_http_body_match` is absent. The agent reads at most 1 MiB of response body; larger responses fail the probe. Supports optional proxy routing via `proxy_url`.
 
 At least one of `body_match_regex` or `body_match_string` must be set — a target without either is rejected at config load time. `body_match_regex` must be a valid Go regular expression. It is validated when the config is loaded and compiled once when the target prober is created. If both `body_match_regex` and `body_match_string` are set, the regex takes precedence.
 

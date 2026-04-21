@@ -50,7 +50,7 @@
       },
       "id": 1,
       "options": {
-        "colorMode": "background_solid",
+        "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
@@ -105,7 +105,7 @@
       },
       "id": 2,
       "options": {
-        "colorMode": "background_solid",
+        "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
@@ -164,7 +164,7 @@
       },
       "id": 3,
       "options": {
-        "colorMode": "background_solid",
+        "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
@@ -221,7 +221,7 @@
       },
       "id": 4,
       "options": {
-        "colorMode": "background_solid",
+        "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
@@ -276,7 +276,7 @@
       },
       "id": 5,
       "options": {
-        "colorMode": "background_solid",
+        "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
@@ -314,7 +314,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "semi-dark-blue",
+                "color": "blue",
                 "value": null
               }
             ]
@@ -331,7 +331,7 @@
       },
       "id": 6,
       "options": {
-        "colorMode": "background_solid",
+        "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
@@ -339,19 +339,30 @@
           "calcs": [
             "lastNotNull"
           ],
-          "fields": "",
+          "fields": "/Agent Version/",
           "values": false
         },
-        "textMode": "name"
+        "textMode": "value_and_name"
       },
       "title": "",
       "type": "stat",
       "targets": [
         {
           "expr": "agent_info{job=~\"$job\"}",
-          "legendFormat": "Agent Version {{version}}",
+          "legendFormat": "Agent Version",
           "refId": "A",
-          "instant": true
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "renameByName": {
+              "version": "Agent Version"
+            }
+          }
         }
       ]
     },
@@ -369,7 +380,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "semi-dark-blue",
+                "color": "blue",
                 "value": null
               }
             ]
@@ -386,7 +397,7 @@
       },
       "id": 8,
       "options": {
-        "colorMode": "background_solid",
+        "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
@@ -394,19 +405,30 @@
           "calcs": [
             "lastNotNull"
           ],
-          "fields": "",
+          "fields": "/Config/",
           "values": false
         },
-        "textMode": "name"
+        "textMode": "value_and_name"
       },
       "title": "",
       "type": "stat",
       "targets": [
         {
           "expr": "topk(1, last_over_time(agent_config_info{job=~\"$job\"}[30s]))",
-          "legendFormat": "Config {{hash}}",
+          "legendFormat": "Config",
           "refId": "A",
-          "instant": true
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "renameByName": {
+              "hash": "Config"
+            }
+          }
         }
       ]
     },
@@ -451,7 +473,7 @@
       },
       "id": 9,
       "options": {
-        "colorMode": "background_solid",
+        "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
@@ -795,7 +817,7 @@
           "show": false
         }
       },
-      "title": "All Probes — Status Table",
+      "title": "All Probes \u2014 Status Table",
       "description": "Current status of every configured probe target. Status OK (green) = probe succeeded, FAIL (red) = probe failed. Sorted by status so failures appear first.",
       "type": "table",
       "transformations": [
@@ -914,7 +936,7 @@
           "format": "table"
         },
         {
-          "expr": "probe_duration_seconds{job=~\"$job\"}",
+          "expr": "probe_icmp_avg_rtt_seconds{job=~\"$job\"} or probe_duration_seconds{job=~\"$job\", probe_type!~\"icmp|mtu\"} or (probe_duration_seconds{job=~\"$job\", probe_type=~\"icmp|mtu\"} unless probe_icmp_avg_rtt_seconds{job=~\"$job\"})",
           "legendFormat": "",
           "refId": "B",
           "instant": true,
@@ -996,7 +1018,7 @@
           "mode": "multi"
         }
       },
-      "title": "TCP Duration — Same Region",
+      "title": "TCP Duration \u2014 Same Region",
       "type": "timeseries",
       "targets": [
         {
@@ -1068,7 +1090,7 @@
           "mode": "multi"
         }
       },
-      "title": "TCP Duration — Cross Region",
+      "title": "TCP Duration \u2014 Cross Region",
       "type": "timeseries",
       "targets": [
         {
@@ -1140,7 +1162,7 @@
           "mode": "multi"
         }
       },
-      "title": "TCP Duration — AWS Regional Endpoints",
+      "title": "TCP Duration \u2014 AWS Regional Endpoints",
       "type": "timeseries",
       "targets": [
         {
@@ -1488,6 +1510,7 @@
         }
       },
       "title": "HTTP Status Codes (Direct)",
+      "description": "HTTP response status codes for direct-path HTTP probes. The series is present only when an HTTP response was received; connection, DNS, TLS, or timeout failures appear as no status-code sample.",
       "type": "timeseries",
       "targets": [
         {
@@ -1555,7 +1578,7 @@
         }
       },
       "title": "HTTP Response Truncated",
-      "description": "1 means the HTTP response body exceeded the effective transfer limit. Truncation does not fail normal HTTP probes by itself.",
+      "description": "1 means the HTTP response body exceeded the effective transfer limit. Truncation does not fail normal HTTP probes by itself. The series is present only when truncation could actually be evaluated from a received HTTP response.",
       "type": "timeseries",
       "targets": [
         {
@@ -1708,7 +1731,7 @@
         ]
       },
       "title": "HTTP Phase Breakdown (current)",
-      "description": "Instant snapshot of all HTTP phase durations pivoted by target. Cell colours: green <50 ms, yellow 50–200 ms, red >200 ms. Identifies which phase is slow for each target.",
+      "description": "Instant snapshot of all HTTP phase durations pivoted by target. Cell colours: green <50 ms, yellow 50\u2013200 ms, red >200 ms. Identifies which phase is slow for each target.",
       "type": "table",
       "targets": [
         {
@@ -1805,7 +1828,7 @@
         "showUnfilled": true
       },
       "title": "HTTP Total Duration (last)",
-      "description": "Horizontal bar gauge of total HTTP probe duration per target. Thresholds match the phase breakdown table: green <50 ms, yellow 50–200 ms, red >200 ms.",
+      "description": "Horizontal bar gauge of total HTTP probe duration per target. Thresholds match the phase breakdown table: green <50 ms, yellow 50\u2013200 ms, red >200 ms.",
       "type": "bargauge",
       "targets": [
         {
@@ -2103,7 +2126,7 @@
         }
       },
       "title": "ICMP Avg RTT",
-      "description": "Average ICMP echo round-trip time per target. Only populated when at least one echo reply is received. Zero or absent means 100% packet loss.",
+      "description": "Average ICMP echo round-trip time per target. The series is present only when at least one ICMP echo reply was observed during the latest probe result.",
       "type": "timeseries",
       "targets": [
         {
@@ -2235,7 +2258,7 @@
         }
       },
       "title": "ICMP RTT Stddev",
-      "description": "Population standard deviation of ICMP echo RTT. High stddev with normal average RTT indicates an unstable path.",
+      "description": "Population standard deviation of ICMP echo RTT. Values near zero are normal and indicate a stable network path. High stddev with normal average RTT indicates jitter or an unstable path.",
       "type": "timeseries",
       "targets": [
         {
@@ -2826,7 +2849,7 @@
         }
       },
       "title": "Probes Exceeding Interval (skipped cycles)",
-      "description": "Counts how often a probe was still running when the next scheduled cycle fired. Non-zero values mean the probe duration exceeds the configured interval — consider increasing the interval or timeout for affected targets.",
+      "description": "Counts how often a probe was still running when the next scheduled cycle fired. Non-zero values mean the probe duration exceeds the configured interval \u2014 consider increasing the interval or timeout for affected targets.",
       "type": "timeseries",
       "targets": [
         {
@@ -3049,22 +3072,6 @@
               {
                 "id": "decimals",
                 "value": 0
-              },
-              {
-                "id": "custom.width",
-                "value": 150
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Target"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 400
               }
             ]
           },
@@ -3074,10 +3081,6 @@
               "options": "Path"
             },
             "properties": [
-              {
-                "id": "custom.width",
-                "value": 90
-              },
               {
                 "id": "mappings",
                 "value": [
@@ -3112,66 +3115,22 @@
               {
                 "id": "custom.align",
                 "value": "center"
+              },
+              {
+                "id": "custom.width",
+                "value": 70
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "Service"
+              "options": "Target"
             },
             "properties": [
               {
                 "id": "custom.width",
-                "value": 180
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Name"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 300
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Scope"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 130
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Region"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 130
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Account"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 160
+                "value": 400
               }
             ]
           },
@@ -3183,7 +3142,7 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 90
+                "value": 80
               }
             ]
           }
@@ -3191,7 +3150,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 24,
         "x": 0,
         "y": 135
       },
@@ -3208,7 +3167,7 @@
           "show": false
         }
       },
-      "title": "TLS Certificate Expiry — Earliest",
+      "title": "TLS Certificate Expiry \u2014 Earliest",
       "description": "Days until the earliest TLS peer certificate expiry observed in the latest probe result. Targets where the latest probe failed without retrieving a certificate do not appear in this table.",
       "type": "table",
       "transformations": [
@@ -3332,14 +3291,74 @@
                 "value": 0
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Target"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 350
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Path"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 70
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Chain Depth"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Chain Role"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Impact"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
           }
         ]
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 135
+        "w": 24,
+        "x": 0,
+        "y": 143
       },
       "id": 61,
       "options": {
@@ -3354,7 +3373,7 @@
           "show": false
         }
       },
-      "title": "TLS Certificate Expiry — Chain",
+      "title": "TLS Certificate Expiry \u2014 Chain",
       "description": "Days until each certificate in the peer chain expires, including cert_index and cert_role labels from the latest probe result.",
       "type": "table",
       "transformations": [
@@ -3379,8 +3398,8 @@
               "target_name": "Name",
               "target": "Target",
               "network_path": "Path",
-              "cert_index": "Cert #",
-              "cert_role": "Role",
+              "cert_index": "Chain Depth",
+              "cert_role": "Chain Role",
               "service": "Service",
               "impact": "Impact",
               "scope": "Scope",
@@ -3453,7 +3472,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 144
+        "y": 152
       },
       "id": 73,
       "options": {
@@ -3508,7 +3527,7 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 144
+        "y": 152
       },
       "id": 74,
       "options": {
@@ -3530,7 +3549,7 @@
       "targets": [
         {
           "expr": "count(probe_http_body_match{job=~\"$job\", probe_type=\"http_body\"} == 1)",
-          "legendFormat": "Body Matched",
+          "legendFormat": "Body Matched (Evaluated)",
           "refId": "A",
           "instant": true
         }
@@ -3567,7 +3586,7 @@
         "h": 4,
         "w": 6,
         "x": 12,
-        "y": 144
+        "y": 152
       },
       "id": 75,
       "options": {
@@ -3589,7 +3608,7 @@
       "targets": [
         {
           "expr": "count(probe_http_body_match{job=~\"$job\", probe_type=\"http_body\"} == 0) OR on() vector(0)",
-          "legendFormat": "Body Mismatch",
+          "legendFormat": "Body Mismatch (Evaluated)",
           "refId": "A",
           "instant": true
         }
@@ -3624,7 +3643,7 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 144
+        "y": 152
       },
       "id": 76,
       "options": {
@@ -3694,7 +3713,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 148
+        "y": 156
       },
       "id": 70,
       "options": {
@@ -3710,7 +3729,7 @@
         }
       },
       "title": "HTTP Body Match",
-      "description": "Shows whether the HTTP response body matches the configured pattern (body_match_string or body_match_regex). 1 = match, 0 = mismatch.",
+      "description": "Shows whether the HTTP response body matches the configured pattern (body_match_string or body_match_regex). 1 = match, 0 = mismatch. The series is present only when body evaluation actually completed; request/response failures appear as no sample.",
       "type": "timeseries",
       "targets": [
         {
@@ -3749,7 +3768,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 148
+        "y": 156
       },
       "id": 71,
       "options": {
@@ -3765,6 +3784,7 @@
         }
       },
       "title": "HTTP Body Status Codes",
+      "description": "HTTP status codes for HTTP body probes. The series is present only when an HTTP response was received; request, DNS, TLS, or timeout failures appear as no status-code sample.",
       "type": "timeseries",
       "targets": [
         {
@@ -3802,7 +3822,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 148
+        "y": 156
       },
       "id": 78,
       "options": {
@@ -3835,7 +3855,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 156
+        "y": 164
       },
       "id": 108,
       "title": "Proxy-Path HTTP Probes",
@@ -3868,7 +3888,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 157
+        "y": 165
       },
       "id": 79,
       "options": {
@@ -3923,7 +3943,7 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 157
+        "y": 165
       },
       "id": 80,
       "options": {
@@ -3982,7 +4002,7 @@
         "h": 4,
         "w": 6,
         "x": 12,
-        "y": 157
+        "y": 165
       },
       "id": 81,
       "options": {
@@ -4039,7 +4059,7 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 157
+        "y": 165
       },
       "id": 82,
       "options": {
@@ -4095,7 +4115,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 161
+        "y": 169
       },
       "id": 83,
       "options": {
@@ -4128,7 +4148,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 169
+        "y": 177
       },
       "id": 109,
       "title": "Proxy CONNECT Probes",
@@ -4161,7 +4181,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 170
+        "y": 178
       },
       "id": 84,
       "options": {
@@ -4216,7 +4236,7 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 170
+        "y": 178
       },
       "id": 85,
       "options": {
@@ -4275,7 +4295,7 @@
         "h": 4,
         "w": 6,
         "x": 12,
-        "y": 170
+        "y": 178
       },
       "id": 86,
       "options": {
@@ -4332,7 +4352,7 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 170
+        "y": 178
       },
       "id": 87,
       "options": {
@@ -4388,7 +4408,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 174
+        "y": 182
       },
       "id": 88,
       "options": {
@@ -4548,7 +4568,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 182
+        "y": 190
       },
       "id": 89,
       "options": {
@@ -4693,7 +4713,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 174
+        "y": 182
       },
       "id": 77,
       "options": {
@@ -4716,7 +4736,7 @@
       "targets": [
         {
           "expr": "probe_phase_duration_seconds{job=~\"$job\", probe_type=\"proxy\"}",
-          "legendFormat": "{{target_name}} — {{phase}}",
+          "legendFormat": "{{target_name}} \u2014 {{phase}}",
           "refId": "A"
         }
       ]

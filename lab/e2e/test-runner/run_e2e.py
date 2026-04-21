@@ -17,6 +17,7 @@ EXPECTATIONS = [
     ("probe_http_status_code", {"target_name": "http-500-expected-200"}, 500.0),
     ("probe_success", {"target_name": "http-500-any-status"}, 1.0),
     ("probe_http_status_code", {"target_name": "http-500-any-status"}, 500.0),
+    ("probe_success", {"target_name": "http-no-response"}, 0.0),
     ("probe_success", {"target_name": "http-body-ok"}, 1.0),
     ("probe_http_body_match", {"target_name": "http-body-ok"}, 1.0),
     ("probe_http_status_code", {"target_name": "http-body-ok"}, 200.0),
@@ -31,6 +32,7 @@ EXPECTATIONS = [
     ("probe_success", {"target_name": "proxy-connect-ok"}, 1.0),
     ("probe_success", {"target_name": "proxy-connect-denied"}, 0.0),
     ("probe_success", {"target_name": "tls-cert-via-proxy"}, 1.0),
+    ("probe_success", {"target_name": "tls-cert-connect-fail"}, 0.0),
     ("probe_success", {"target_name": "dns-fake-targets"}, 1.0),
     ("probe_success", {"target_name": "dns-localhost-match"}, 1.0),
     ("probe_dns_result_match", {"target_name": "dns-localhost-match"}, 1.0),
@@ -38,7 +40,10 @@ EXPECTATIONS = [
     ("probe_dns_result_match", {"target_name": "dns-localhost-mismatch"}, 0.0),
     ("probe_success", {"target_name": "icmp-fake-targets"}, 1.0),
     ("probe_icmp_packet_loss_ratio", {"target_name": "icmp-fake-targets"}, 0.0),
+    ("probe_success", {"target_name": "icmp-single-reply"}, 1.0),
+    ("probe_icmp_packet_loss_ratio", {"target_name": "icmp-single-reply"}, 0.0),
     ("probe_success", {"target_name": "mtu-fake-targets"}, 1.0),
+    ("probe_success", {"target_name": "mtu-no-resolve"}, 0.0),
     ("agent_info", {"version": "e2e"}, 1.0),
 ]
 
@@ -47,6 +52,8 @@ RANGE_EXPECTATIONS = [
     ("probe_duration_seconds", {"target_name": "icmp-fake-targets"}, 0.0, 3.0),
     ("probe_icmp_avg_rtt_seconds", {"target_name": "icmp-fake-targets"}, 0.0, 3.0),
     ("probe_icmp_stddev_rtt_seconds", {"target_name": "icmp-fake-targets"}, 0.0, 3.0),
+    ("probe_duration_seconds", {"target_name": "icmp-single-reply"}, 0.0, 3.0),
+    ("probe_icmp_avg_rtt_seconds", {"target_name": "icmp-single-reply"}, 0.0, 3.0),
     ("probe_duration_seconds", {"target_name": "mtu-fake-targets"}, 0.0, 8.0),
     ("probe_mtu_bytes", {"target_name": "mtu-fake-targets"}, 1200.0, 10000.0),
     ("probe_tls_cert_expiry_timestamp_seconds", {"target_name": "tls-cert-via-proxy"}, 1700000000.0, 2300000000.0),
@@ -54,6 +61,17 @@ RANGE_EXPECTATIONS = [
 
 STATE_EXPECTATIONS = [
     ("probe_mtu_state", {"target_name": "mtu-fake-targets", "state": "ok"}, 1.0),
+    ("probe_mtu_state", {"target_name": "mtu-no-resolve", "state": "error", "detail": "resolve_error"}, 1.0),
+]
+
+ABSENT_EXPECTATIONS = [
+    ("probe_http_status_code", {"target_name": "http-no-response"}),
+    ("probe_http_response_truncated", {"target_name": "http-no-response"}),
+    ("probe_tls_cert_expiry_timestamp_seconds", {"target_name": "tls-cert-connect-fail"}),
+    ("probe_dns_result_match", {"target_name": "dns-fake-targets"}),
+    ("probe_icmp_stddev_rtt_seconds", {"target_name": "icmp-single-reply"}),
+    ("probe_mtu_bytes", {"target_name": "mtu-no-resolve"}),
+    ("probe_icmp_avg_rtt_seconds", {"target_name": "mtu-no-resolve"}),
 ]
 
 
@@ -122,6 +140,11 @@ def check(metrics):
             continue
         if got != want:
             failures.append(f"{name}{labels} = {got}, want {want}")
+
+    for name, labels in ABSENT_EXPECTATIONS:
+        got = metric_value(metrics, name, labels)
+        if got is not None:
+            failures.append(f"{name}{labels} present, want absent")
 
     return failures
 

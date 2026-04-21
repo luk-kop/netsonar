@@ -131,6 +131,7 @@ func runICMPEchoSequence(
 		return result
 	}
 
+	result.ICMPRepliesObserved = received
 	result.Success = true
 	result.ICMPAvgRTT = totalRTT / time.Duration(received)
 	if received >= 2 {

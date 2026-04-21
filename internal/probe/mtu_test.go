@@ -3,12 +3,26 @@ package probe
 import (
 	"context"
 	"errors"
+	"net"
 	"os"
 	"testing"
 	"time"
 
 	"netsonar/internal/config"
 )
+
+type fakeMTUBackend struct {
+	sanityFn  func(ctx context.Context, payloadSize, seq int) mtuPayloadResult
+	payloadFn func(ctx context.Context, payloadSize, seq int) mtuPayloadResult
+}
+
+func (f *fakeMTUBackend) probeSmallEcho(ctx context.Context, _ *net.IPAddr, payloadSize, seq int) mtuPayloadResult {
+	return f.sanityFn(ctx, payloadSize, seq)
+}
+
+func (f *fakeMTUBackend) probePayloadWithDF(ctx context.Context, _ *net.IPAddr, payloadSize, seq int) mtuPayloadResult {
+	return f.payloadFn(ctx, payloadSize, seq)
+}
 
 func TestClassifyPayloadAttempts(t *testing.T) {
 	errBoom := errors.New("boom")
@@ -788,5 +802,118 @@ func TestMTUProber_ResultInvariant_FailureImpliesPathMTUNegOne(t *testing.T) {
 
 	if result.PathMTU != -1 {
 		t.Fatalf("Success=false but PathMTU=%d (expected -1)", result.PathMTU)
+	}
+}
+
+// TestMTUProber_InconclusiveBeforeNextIteration_PreservesSanityRTT verifies
+// that when the context is cancelled between loop iterations (mtu.go top-of-loop
+// check), the sanity-echo RTT already observed is reported in ICMPRepliesObserved
+// and ICMPAvgRTT. Regression for probe_icmp_avg_rtt_seconds disappearing on
+// inconclusive MTU runs.
+func TestMTUProber_InconclusiveBeforeNextIteration_PreservesSanityRTT(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const sanityRTT = 5 * time.Millisecond
+	fake := &fakeMTUBackend{
+		sanityFn: func(context.Context, int, int) mtuPayloadResult {
+			return mtuPayloadResult{status: mtuPayloadSuccess, rtt: sanityRTT}
+		},
+		payloadFn: func(_ context.Context, size, _ int) mtuPayloadResult {
+			// Return a skip status (TooLarge triggers `continue` in the main
+			// loop) and cancel ctx so the next iteration's top-of-loop check
+			// fires setMTUInconclusive.
+			cancel()
+			return mtuPayloadResult{status: mtuPayloadTooLarge, payloadSize: size}
+		},
+	}
+
+	target := config.TargetConfig{
+		Name:      "test-mtu-inconclusive-before-iter",
+		Address:   "127.0.0.1",
+		ProbeType: config.ProbeTypeMTU,
+		ProbeOpts: config.ProbeOptions{
+			ICMPPayloadSizes:     []int{1472, 1372, 1272},
+			MTURetries:           1,
+			MTUPerAttemptTimeout: 100 * time.Millisecond,
+		},
+	}
+
+	prober := &MTUProber{backend: fake}
+	result := prober.Probe(ctx, target)
+
+	if result.MTUDetail != MTUDetailInconclusive {
+		t.Fatalf("MTUDetail = %q, want %q", result.MTUDetail, MTUDetailInconclusive)
+	}
+	if result.ICMPRepliesObserved != 1 {
+		t.Fatalf("ICMPRepliesObserved = %d, want 1", result.ICMPRepliesObserved)
+	}
+	if result.ICMPAvgRTT != sanityRTT {
+		t.Fatalf("ICMPAvgRTT = %v, want %v", result.ICMPAvgRTT, sanityRTT)
+	}
+}
+
+// TestMTUProber_InconclusiveAfterPayloadAttempt_PreservesSanityRTT verifies
+// that when the context is cancelled during a payload attempt that then reports
+// Timeout (mtu.go post-attempt check), the sanity-echo RTT is still preserved
+// in ICMPRepliesObserved and ICMPAvgRTT.
+func TestMTUProber_InconclusiveAfterPayloadAttempt_PreservesSanityRTT(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const sanityRTT = 7 * time.Millisecond
+	fake := &fakeMTUBackend{
+		sanityFn: func(context.Context, int, int) mtuPayloadResult {
+			return mtuPayloadResult{status: mtuPayloadSuccess, rtt: sanityRTT}
+		},
+		payloadFn: func(_ context.Context, size, _ int) mtuPayloadResult {
+			cancel()
+			return mtuPayloadResult{status: mtuPayloadTimeout, payloadSize: size}
+		},
+	}
+
+	target := config.TargetConfig{
+		Name:      "test-mtu-inconclusive-after-attempt",
+		Address:   "127.0.0.1",
+		ProbeType: config.ProbeTypeMTU,
+		ProbeOpts: config.ProbeOptions{
+			ICMPPayloadSizes:     []int{1472, 1372, 1272},
+			MTURetries:           1,
+			MTUPerAttemptTimeout: 100 * time.Millisecond,
+		},
+	}
+
+	prober := &MTUProber{backend: fake}
+	result := prober.Probe(ctx, target)
+
+	if result.MTUDetail != MTUDetailInconclusive {
+		t.Fatalf("MTUDetail = %q, want %q", result.MTUDetail, MTUDetailInconclusive)
+	}
+	if result.ICMPRepliesObserved != 1 {
+		t.Fatalf("ICMPRepliesObserved = %d, want 1", result.ICMPRepliesObserved)
+	}
+	if result.ICMPAvgRTT != sanityRTT {
+		t.Fatalf("ICMPAvgRTT = %v, want %v", result.ICMPAvgRTT, sanityRTT)
+	}
+}
+
+func TestAvgRTT(t *testing.T) {
+	tests := []struct {
+		name    string
+		samples []time.Duration
+		want    time.Duration
+	}{
+		{"empty", nil, 0},
+		{"single", []time.Duration{10 * time.Millisecond}, 10 * time.Millisecond},
+		{"two", []time.Duration{10 * time.Millisecond, 20 * time.Millisecond}, 15 * time.Millisecond},
+		{"three", []time.Duration{100 * time.Millisecond, 200 * time.Millisecond, 300 * time.Millisecond}, 200 * time.Millisecond},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := avgRTT(tt.samples)
+			if got != tt.want {
+				t.Errorf("avgRTT(%v) = %v, want %v", tt.samples, got, tt.want)
+			}
+		})
 	}
 }

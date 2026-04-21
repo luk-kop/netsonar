@@ -458,6 +458,23 @@ use debug logs for that level of detail rather than Prometheus counters.
 
 The confirmed MTU is only as granular as the configured payload list. With the default list, the agent can distinguish 1500, 1420, 1400, 1300, 1200, and 1100 byte paths. It does not binary-search every possible MTU value.
 
+### Metric Values by MTU State
+
+The following table summarises which metric values are emitted for each MTU state category:
+
+| State | `probe_success` | `probe_mtu_bytes` | `probe_mtu_state` | `probe_icmp_avg_rtt_seconds` | `probe_duration_seconds` |
+|---|---|---|---|---|---|
+| `ok` | 1 | confirmed MTU (e.g. 1500) | `{state="ok", detail="..."}` = 1 | avg RTT from successful ICMP echoes | full probe duration |
+| `degraded` (below `expected_min_mtu`) | 0 | confirmed MTU (e.g. 1400) | `{state="degraded", detail="..."}` = 1 | avg RTT from successful ICMP echoes | full probe duration |
+| `degraded` (no size confirmed) | 0 | absent | `{state="degraded", detail="..."}` = 1 | avg RTT from sanity echo (if successful) | full probe duration |
+| `unreachable` | 0 | absent | `{state="unreachable", detail="..."}` = 1 | absent (no successful echoes) | full probe duration |
+| `error` | 0 | absent | `{state="error", detail="..."}` = 1 | absent (no successful echoes) | full probe duration |
+
+Key points:
+- `probe_mtu_bytes` is only present when at least one payload size was confirmed. Use `probe_mtu_state` to diagnose why it is absent.
+- `probe_icmp_avg_rtt_seconds` is the average RTT across all successful ICMP echo replies (sanity echo and step-down payloads). It is absent when no echo reply was received.
+- `probe_success=0` with `state="degraded"` and a non-absent `probe_mtu_bytes` means the path works but MTU is below `expected_min_mtu`.
+
 [Back to Table of Contents](#table-of-contents)
 
 ## Configuration Examples
@@ -495,6 +512,24 @@ targets:
 ```
 
 Payload sizes must be sorted in descending order. `expected_min_mtu` must not be larger than the largest tested MTU (`max(icmp_payload_sizes) + 28`). The agent stops at the first successful size.
+
+### Choosing `expected_min_mtu`
+
+Without `expected_min_mtu`, the probe reports `probe_success=1` as long as any payload size succeeds — even if path MTU drops from 1500 to 1100. Set `expected_min_mtu` to get alerted when MTU degrades below the expected value for a given network path:
+
+| Network path | Recommended `expected_min_mtu` | Reason |
+|---|---|---|
+| Same-region (direct) | 1500 | Standard Ethernet MTU |
+| Cross-region via WireGuard | 1420 | WireGuard overhead (80 bytes) |
+| Cross-region via IPsec/GRE | 1400 | Typical tunnel overhead |
+| Internet / unknown path | omit or 1200 | Conservative; avoids false alerts |
+
+Common scenarios where `expected_min_mtu` catches real problems:
+- Routing change pushes traffic through a tunnel with lower MTU
+- VPN/overlay misconfiguration reduces path MTU
+- Cloud provider underlay change affects encapsulation overhead
+
+Setting `expected_min_mtu` too high for a tunnelled path will cause persistent false alerts. Match the value to the expected MTU of the specific network path.
 
 `mtu_per_attempt_timeout` bounds each individual sanity or MTU attempt. The target `timeout` remains the global deadline for the whole probe.
 

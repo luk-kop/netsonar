@@ -149,9 +149,11 @@ func (p *TLSCertProber) probeViaProxy(ctx context.Context, rawProxyURL, addr str
 func setTLSCertificateResult(result *ProbeResult, certs []*x509.Certificate) {
 	result.TLSCertificates = certs
 	if len(certs) == 0 {
+		result.CertObserved = false
 		result.CertExpiry = time.Time{}
 		return
 	}
+	result.CertObserved = true
 	earliest := certs[0].NotAfter
 	for _, cert := range certs[1:] {
 		if cert.NotAfter.Before(earliest) {

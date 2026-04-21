@@ -166,6 +166,7 @@ func (s *Scheduler) startTarget(ctx context.Context, t config.TargetConfig, init
 	probeCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	s.probes[t.Name] = &probeEntry{target: t, cancel: cancel, done: done}
+	s.metrics.EnsureTarget(t)
 
 	prober := s.proberFn(t)
 

@@ -92,9 +92,11 @@ func TestNewMetricsExporter_HTTPMetricsRegistered(t *testing.T) {
 		"service": "web",
 	})
 	result := probe.ProbeResult{
-		Success:    true,
-		Duration:   100 * time.Millisecond,
-		StatusCode: 200,
+		Success:                 true,
+		Duration:                100 * time.Millisecond,
+		StatusCode:              200,
+		HTTPResponseReceived:    true,
+		HTTPTruncationEvaluated: true,
 		Phases: map[string]time.Duration{
 			"dns_resolve":   10 * time.Millisecond,
 			"tcp_connect":   20 * time.Millisecond,
@@ -102,7 +104,8 @@ func TestNewMetricsExporter_HTTPMetricsRegistered(t *testing.T) {
 			"ttfb":          25 * time.Millisecond,
 			"transfer":      15 * time.Millisecond,
 		},
-		CertExpiry: time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
+		CertObserved: true,
+		CertExpiry:   time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
 	}
 	m.Record(target, result)
 
@@ -126,11 +129,12 @@ func TestNewMetricsExporter_ICMPMetricsRegistered(t *testing.T) {
 
 	target := makeTarget("icmp-reg", "10.0.0.1", config.ProbeTypeICMP, nil)
 	m.Record(target, probe.ProbeResult{
-		Success:       true,
-		Duration:      50 * time.Millisecond,
-		ICMPAvgRTT:    12 * time.Millisecond,
-		ICMPStddevRTT: 3 * time.Millisecond,
-		PacketLoss:    0.2,
+		Success:             true,
+		Duration:            50 * time.Millisecond,
+		ICMPRepliesObserved: 3,
+		ICMPAvgRTT:          12 * time.Millisecond,
+		ICMPStddevRTT:       3 * time.Millisecond,
+		PacketLoss:          0.2,
 	})
 
 	families := gatherMetrics(t, m)
@@ -183,10 +187,12 @@ func TestNewMetricsExporter_HTTPBodyMetricRegistered(t *testing.T) {
 
 	target := makeTarget("body-reg", "https://example.com", config.ProbeTypeHTTPBody, nil)
 	m.Record(target, probe.ProbeResult{
-		Success:    true,
-		Duration:   50 * time.Millisecond,
-		StatusCode: 200,
-		BodyMatch:  true,
+		Success:              true,
+		Duration:             50 * time.Millisecond,
+		StatusCode:           200,
+		HTTPResponseReceived: true,
+		HTTPBodyEvaluated:    true,
+		BodyMatch:            true,
 	})
 
 	families := gatherMetrics(t, m)
@@ -376,10 +382,11 @@ func TestRecord_HTTPPhaseLabels(t *testing.T) {
 		"transfer":      8 * time.Millisecond,
 	}
 	m.Record(target, probe.ProbeResult{
-		Success:    true,
-		Duration:   58 * time.Millisecond,
-		StatusCode: 200,
-		Phases:     phases,
+		Success:              true,
+		Duration:             58 * time.Millisecond,
+		StatusCode:           200,
+		HTTPResponseReceived: true,
+		Phases:               phases,
 	})
 
 	families := gatherMetrics(t, m)
@@ -527,11 +534,12 @@ func TestRecord_ICMPValues(t *testing.T) {
 	target := makeTarget("val-icmp", "10.0.0.1", config.ProbeTypeICMP, nil)
 
 	m.Record(target, probe.ProbeResult{
-		Success:       true,
-		Duration:      50 * time.Millisecond,
-		ICMPAvgRTT:    8 * time.Millisecond,
-		ICMPStddevRTT: 2 * time.Millisecond,
-		PacketLoss:    0.4,
+		Success:             true,
+		Duration:            50 * time.Millisecond,
+		ICMPRepliesObserved: 3,
+		ICMPAvgRTT:          8 * time.Millisecond,
+		ICMPStddevRTT:       2 * time.Millisecond,
+		PacketLoss:          0.4,
 	})
 
 	families := gatherMetrics(t, m)
@@ -551,7 +559,7 @@ func TestRecord_ICMPValues(t *testing.T) {
 	}
 }
 
-func TestRecord_ICMPAvgRTTZeroOnFailure(t *testing.T) {
+func TestRecord_ICMPRTTAbsentOnFailure(t *testing.T) {
 	m := NewMetricsExporter(testTagKeys)
 	target := makeTarget("fail-icmp", "10.0.0.1", config.ProbeTypeICMP, nil)
 
@@ -563,9 +571,34 @@ func TestRecord_ICMPAvgRTTZeroOnFailure(t *testing.T) {
 	})
 
 	families := gatherMetrics(t, m)
+	if fam, ok := families["probe_icmp_avg_rtt_seconds"]; ok && len(fam.GetMetric()) > 0 {
+		t.Fatal("probe_icmp_avg_rtt_seconds should be absent on failure with no replies")
+	}
+	if fam, ok := families["probe_icmp_stddev_rtt_seconds"]; ok && len(fam.GetMetric()) > 0 {
+		t.Fatal("probe_icmp_stddev_rtt_seconds should be absent on failure with no replies")
+	}
+}
+
+func TestRecord_ICMPStddevAbsentWithSingleReply(t *testing.T) {
+	m := NewMetricsExporter(testTagKeys)
+	target := makeTarget("single-reply-icmp", "10.0.0.1", config.ProbeTypeICMP, nil)
+
+	m.Record(target, probe.ProbeResult{
+		Success:             true,
+		Duration:            50 * time.Millisecond,
+		ICMPRepliesObserved: 1,
+		ICMPAvgRTT:          8 * time.Millisecond,
+		PacketLoss:          2.0 / 3.0,
+	})
+
+	families := gatherMetrics(t, m)
+
 	avgRTT := families["probe_icmp_avg_rtt_seconds"].GetMetric()[0].GetGauge().GetValue()
-	if avgRTT != 0 {
-		t.Errorf("avg_rtt on failure: got %f, want 0", avgRTT)
+	if avgRTT != 0.008 {
+		t.Errorf("avg_rtt: got %f, want 0.008", avgRTT)
+	}
+	if fam, ok := families["probe_icmp_stddev_rtt_seconds"]; ok && len(fam.GetMetric()) > 0 {
+		t.Fatal("probe_icmp_stddev_rtt_seconds should be absent with a single reply")
 	}
 }
 
@@ -593,6 +626,31 @@ func TestRecord_MTUValue(t *testing.T) {
 	}
 	if got := labelValue(stateMetric, "detail"); got != probe.MTUDetailLargestSizeConfirmed {
 		t.Errorf("detail label: got %q, want %q", got, probe.MTUDetailLargestSizeConfirmed)
+	}
+}
+
+func TestRecord_MTUEmitsICMPAvgRTT(t *testing.T) {
+	m := NewMetricsExporter(testTagKeys)
+	target := makeTarget("mtu-rtt", "10.0.0.1", config.ProbeTypeMTU, nil)
+
+	m.Record(target, probe.ProbeResult{
+		Success:             true,
+		Duration:            1 * time.Second,
+		PathMTU:             1500,
+		MTUState:            probe.MTUStateOK,
+		MTUDetail:           probe.MTUDetailLargestSizeConfirmed,
+		ICMPRepliesObserved: 2,
+		ICMPAvgRTT:          12 * time.Millisecond,
+	})
+
+	families := gatherMetrics(t, m)
+	fam, ok := families["probe_icmp_avg_rtt_seconds"]
+	if !ok {
+		t.Fatal("expected probe_icmp_avg_rtt_seconds to be emitted for MTU probe")
+	}
+	got := fam.GetMetric()[0].GetGauge().GetValue()
+	if got != 0.012 {
+		t.Errorf("probe_icmp_avg_rtt_seconds = %f, want 0.012", got)
 	}
 }
 
@@ -738,7 +796,7 @@ func TestRecord_TLSCertExpiry(t *testing.T) {
 	target := makeTarget("val-tls", "example.com:443", config.ProbeTypeTLSCert, nil)
 
 	expiry := time.Date(2027, 6, 15, 12, 0, 0, 0, time.UTC)
-	m.Record(target, probe.ProbeResult{Success: true, Duration: 100 * time.Millisecond, CertExpiry: expiry})
+	m.Record(target, probe.ProbeResult{Success: true, Duration: 100 * time.Millisecond, CertObserved: true, CertExpiry: expiry})
 
 	families := gatherMetrics(t, m)
 	val := families["probe_tls_cert_expiry_timestamp_seconds"].GetMetric()[0].GetGauge().GetValue()
@@ -763,6 +821,7 @@ func TestRecord_TLSCertChainExpiry(t *testing.T) {
 	m.Record(target, probe.ProbeResult{
 		Success:         true,
 		Duration:        100 * time.Millisecond,
+		CertObserved:    true,
 		CertExpiry:      intermediateExpiry,
 		TLSCertificates: certs,
 	})
@@ -792,9 +851,10 @@ func TestRecord_TLSCertChainExpiryClearedOnShorterChain(t *testing.T) {
 
 	firstExpiry := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
 	m.Record(target, probe.ProbeResult{
-		Success:    true,
-		Duration:   100 * time.Millisecond,
-		CertExpiry: firstExpiry,
+		Success:      true,
+		Duration:     100 * time.Millisecond,
+		CertObserved: true,
+		CertExpiry:   firstExpiry,
 		TLSCertificates: []*x509.Certificate{
 			{NotAfter: firstExpiry, RawIssuer: []byte("intermediate"), RawSubject: []byte("leaf")},
 			{NotAfter: time.Date(2028, 1, 1, 0, 0, 0, 0, time.UTC), RawIssuer: []byte("root"), RawSubject: []byte("intermediate")},
@@ -803,9 +863,10 @@ func TestRecord_TLSCertChainExpiryClearedOnShorterChain(t *testing.T) {
 
 	secondExpiry := time.Date(2029, 1, 1, 0, 0, 0, 0, time.UTC)
 	m.Record(target, probe.ProbeResult{
-		Success:    true,
-		Duration:   100 * time.Millisecond,
-		CertExpiry: secondExpiry,
+		Success:      true,
+		Duration:     100 * time.Millisecond,
+		CertObserved: true,
+		CertExpiry:   secondExpiry,
 		TLSCertificates: []*x509.Certificate{
 			{NotAfter: secondExpiry, RawIssuer: []byte("intermediate"), RawSubject: []byte("leaf")},
 		},
@@ -826,10 +887,12 @@ func TestRecord_HTTPResponseTruncated(t *testing.T) {
 	target := makeTarget("val-http-truncated", "https://example.com", config.ProbeTypeHTTP, nil)
 
 	m.Record(target, probe.ProbeResult{
-		Success:               true,
-		Duration:              100 * time.Millisecond,
-		StatusCode:            200,
-		HTTPResponseTruncated: true,
+		Success:                 true,
+		Duration:                100 * time.Millisecond,
+		StatusCode:              200,
+		HTTPResponseReceived:    true,
+		HTTPTruncationEvaluated: true,
+		HTTPResponseTruncated:   true,
 	})
 
 	families := gatherMetrics(t, m)
@@ -840,9 +903,8 @@ func TestRecord_HTTPResponseTruncated(t *testing.T) {
 
 	m.Record(target, probe.ProbeResult{Success: false, Duration: 10 * time.Millisecond})
 	families = gatherMetrics(t, m)
-	val = families["probe_http_response_truncated"].GetMetric()[0].GetGauge().GetValue()
-	if val != 0.0 {
-		t.Errorf("probe_http_response_truncated after non-body failure = %f, want 0", val)
+	if fam, ok := families["probe_http_response_truncated"]; ok && len(fam.GetMetric()) > 0 {
+		t.Fatal("probe_http_response_truncated should be absent when truncation was not evaluated")
 	}
 }
 
@@ -851,7 +913,7 @@ func TestRecord_HTTPBodyMatchValues(t *testing.T) {
 	target := makeTarget("val-body", "https://example.com", config.ProbeTypeHTTPBody, nil)
 
 	// Match = true.
-	m.Record(target, probe.ProbeResult{Success: true, Duration: 50 * time.Millisecond, StatusCode: 200, BodyMatch: true})
+	m.Record(target, probe.ProbeResult{Success: true, Duration: 50 * time.Millisecond, StatusCode: 200, HTTPResponseReceived: true, HTTPBodyEvaluated: true, BodyMatch: true})
 	families := gatherMetrics(t, m)
 	val := families["probe_http_body_match"].GetMetric()[0].GetGauge().GetValue()
 	if val != 1.0 {
@@ -859,11 +921,17 @@ func TestRecord_HTTPBodyMatchValues(t *testing.T) {
 	}
 
 	// Match = false.
-	m.Record(target, probe.ProbeResult{Success: false, Duration: 50 * time.Millisecond, StatusCode: 200, BodyMatch: false})
+	m.Record(target, probe.ProbeResult{Success: false, Duration: 50 * time.Millisecond, StatusCode: 200, HTTPResponseReceived: true, HTTPBodyEvaluated: true, BodyMatch: false})
 	families = gatherMetrics(t, m)
 	val = families["probe_http_body_match"].GetMetric()[0].GetGauge().GetValue()
 	if val != 0.0 {
 		t.Errorf("body_match false: got %f, want 0.0", val)
+	}
+
+	m.Record(target, probe.ProbeResult{Success: false, Duration: 50 * time.Millisecond})
+	families = gatherMetrics(t, m)
+	if fam, ok := families["probe_http_body_match"]; ok && len(fam.GetMetric()) > 0 {
+		t.Fatal("probe_http_body_match should be absent when body evaluation did not happen")
 	}
 }
 
@@ -1011,11 +1079,11 @@ func TestRecord_ConcurrentSafety(t *testing.T) {
 
 	results := []probe.ProbeResult{
 		{Success: true, Duration: 10 * time.Millisecond},
-		{Success: true, Duration: 100 * time.Millisecond, StatusCode: 200, Phases: map[string]time.Duration{
+		{Success: true, Duration: 100 * time.Millisecond, StatusCode: 200, HTTPResponseReceived: true, Phases: map[string]time.Duration{
 			"dns_resolve": 5 * time.Millisecond, "tcp_connect": 10 * time.Millisecond,
 			"tls_handshake": 15 * time.Millisecond, "ttfb": 20 * time.Millisecond, "transfer": 5 * time.Millisecond,
 		}},
-		{Success: true, Duration: 50 * time.Millisecond, PacketLoss: 0.0, ICMPAvgRTT: 5 * time.Millisecond},
+		{Success: true, Duration: 50 * time.Millisecond, PacketLoss: 0.0, ICMPRepliesObserved: 1, ICMPAvgRTT: 5 * time.Millisecond},
 		{Success: true, Duration: 1 * time.Second, PathMTU: 1472, MTUState: probe.MTUStateOK, MTUDetail: probe.MTUDetailLargestSizeConfirmed},
 		{Success: true, Duration: 12 * time.Millisecond, DNSResolveTime: 10 * time.Millisecond},
 	}
@@ -1143,9 +1211,10 @@ func TestRecord_StalePhasesCleared(t *testing.T) {
 
 	// First record: success with all 5 phases.
 	m.Record(target, probe.ProbeResult{
-		Success:    true,
-		Duration:   100 * time.Millisecond,
-		StatusCode: 200,
+		Success:              true,
+		Duration:             100 * time.Millisecond,
+		StatusCode:           200,
+		HTTPResponseReceived: true,
 		Phases: map[string]time.Duration{
 			"dns_resolve":   5 * time.Millisecond,
 			"tcp_connect":   10 * time.Millisecond,
@@ -1201,9 +1270,10 @@ func TestRecord_NoPhasesCleared(t *testing.T) {
 
 	// First record: success with all phases.
 	m.Record(target, probe.ProbeResult{
-		Success:    true,
-		Duration:   100 * time.Millisecond,
-		StatusCode: 200,
+		Success:              true,
+		Duration:             100 * time.Millisecond,
+		StatusCode:           200,
+		HTTPResponseReceived: true,
 		Phases: map[string]time.Duration{
 			"dns_resolve":   5 * time.Millisecond,
 			"tcp_connect":   10 * time.Millisecond,
@@ -1240,10 +1310,12 @@ func TestRecord_StaleCertExpiryCleared_HTTP(t *testing.T) {
 
 	// First: success with cert.
 	m.Record(target, probe.ProbeResult{
-		Success:    true,
-		Duration:   100 * time.Millisecond,
-		StatusCode: 200,
-		CertExpiry: time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
+		Success:              true,
+		Duration:             100 * time.Millisecond,
+		StatusCode:           200,
+		HTTPResponseReceived: true,
+		CertObserved:         true,
+		CertExpiry:           time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
 	})
 
 	families := gatherMetrics(t, m)
@@ -1275,9 +1347,10 @@ func TestRecord_StaleCertExpiryCleared_TLSCert(t *testing.T) {
 
 	// First: success with cert.
 	m.Record(target, probe.ProbeResult{
-		Success:    true,
-		Duration:   100 * time.Millisecond,
-		CertExpiry: time.Date(2027, 6, 15, 0, 0, 0, 0, time.UTC),
+		Success:      true,
+		Duration:     100 * time.Millisecond,
+		CertObserved: true,
+		CertExpiry:   time.Date(2027, 6, 15, 0, 0, 0, 0, time.UTC),
 	})
 
 	families := gatherMetrics(t, m)
@@ -1325,10 +1398,11 @@ func TestDeleteTarget_RemovesAllSeries(t *testing.T) {
 		"service": "web",
 	})
 	result := probe.ProbeResult{
-		Success:    true,
-		Duration:   42 * time.Millisecond,
-		ICMPAvgRTT: 5 * time.Millisecond,
-		PacketLoss: 0,
+		Success:             true,
+		Duration:            42 * time.Millisecond,
+		ICMPRepliesObserved: 1,
+		ICMPAvgRTT:          5 * time.Millisecond,
+		PacketLoss:          0,
 	}
 	m.Record(target, result)
 
@@ -1411,6 +1485,7 @@ func TestDeleteTarget_RemovesMTUSeries(t *testing.T) {
 func TestIncrSkippedOverlap(t *testing.T) {
 	m := NewMetricsExporter(testTagKeys)
 	target := makeTarget("slow-mtu", "10.0.0.1", config.ProbeTypeMTU, nil)
+	m.EnsureTarget(target)
 
 	m.IncrSkippedOverlap(target)
 	m.IncrSkippedOverlap(target)
@@ -1436,6 +1511,31 @@ func TestIncrSkippedOverlap(t *testing.T) {
 	}
 }
 
+func TestEnsureTarget_PreinitializesSkippedOverlapCounter(t *testing.T) {
+	m := NewMetricsExporter(testTagKeys)
+	target := makeTarget("preinit-skip", "10.0.0.2", config.ProbeTypeTCP, nil)
+
+	m.EnsureTarget(target)
+
+	families := gatherMetrics(t, m)
+	fam, ok := families["probe_skipped_overlap_total"]
+	if !ok || len(fam.GetMetric()) == 0 {
+		t.Fatal("expected probe_skipped_overlap_total to exist after EnsureTarget")
+	}
+	found := false
+	for _, metric := range fam.GetMetric() {
+		if labelValue(metric, "target_name") == "preinit-skip" {
+			found = true
+			if got := metric.GetCounter().GetValue(); got != 0 {
+				t.Errorf("preinitialized probe_skipped_overlap_total = %f, want 0", got)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected probe_skipped_overlap_total series for preinit-skip")
+	}
+}
+
 func TestDeleteTarget_HTTPPhasesRemoved(t *testing.T) {
 	m := NewMetricsExporter(testTagKeys)
 
@@ -1443,9 +1543,10 @@ func TestDeleteTarget_HTTPPhasesRemoved(t *testing.T) {
 		"service": "api",
 	})
 	result := probe.ProbeResult{
-		Success:    true,
-		Duration:   100 * time.Millisecond,
-		StatusCode: 200,
+		Success:              true,
+		Duration:             100 * time.Millisecond,
+		StatusCode:           200,
+		HTTPResponseReceived: true,
 		Phases: map[string]time.Duration{
 			"dns_resolve":   10 * time.Millisecond,
 			"tcp_connect":   20 * time.Millisecond,
@@ -1508,9 +1609,10 @@ func TestRecord_NetworkPathProxyWhenProxyURLSet(t *testing.T) {
 	target.ProbeOpts.ProxyURL = "http://proxy.example.com:3128"
 
 	m.Record(target, probe.ProbeResult{
-		Success:    true,
-		Duration:   100 * time.Millisecond,
-		StatusCode: 200,
+		Success:              true,
+		Duration:             100 * time.Millisecond,
+		StatusCode:           200,
+		HTTPResponseReceived: true,
 	})
 
 	families := gatherMetrics(t, m)
@@ -1534,9 +1636,10 @@ func TestRecord_NetworkPathDirectWhenNoProxyURL(t *testing.T) {
 	// No ProxyURL set.
 
 	m.Record(target, probe.ProbeResult{
-		Success:    true,
-		Duration:   100 * time.Millisecond,
-		StatusCode: 200,
+		Success:              true,
+		Duration:             100 * time.Millisecond,
+		StatusCode:           200,
+		HTTPResponseReceived: true,
 	})
 
 	families := gatherMetrics(t, m)

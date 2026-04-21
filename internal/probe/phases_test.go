@@ -2,8 +2,10 @@ package probe
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"testing"
 	"time"
@@ -29,7 +31,7 @@ func TestAllPhasesCoversEmittedPhases(t *testing.T) {
 
 	httpsTarget := config.TargetConfig{
 		Name:      "phases-http",
-		Address:   httpsSrv.URL,
+		Address:   localHostURL(t, httpsSrv.URL),
 		ProbeType: config.ProbeTypeHTTP,
 		Timeout:   5 * time.Second,
 	}
@@ -86,4 +88,19 @@ func TestAllPhasesCoversEmittedPhases(t *testing.T) {
 			t.Errorf("AllPhases entry %q was not observed in any prober output", phase)
 		}
 	}
+}
+
+func localHostURL(t *testing.T, raw string) string {
+	t.Helper()
+
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatalf("parse test server URL: %v", err)
+	}
+	_, port, err := net.SplitHostPort(u.Host)
+	if err != nil {
+		t.Fatalf("split host/port for %q: %v", u.Host, err)
+	}
+	u.Host = net.JoinHostPort("localhost", port)
+	return u.String()
 }

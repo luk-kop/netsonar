@@ -251,7 +251,7 @@
       "targets": [
         {
           "expr": "probe_http_status_code{job=~\"$job\", probe_type=\"http\", target_name=\"$target_name\"}",
-          "legendFormat": "status {{status_code}}",
+          "legendFormat": "{{target_name}}",
           "refId": "A"
         }
       ]

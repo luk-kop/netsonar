@@ -16,6 +16,10 @@ The lab is meant to catch application-level regressions: wrong `probe_success`
 values, missing or renamed metrics, incorrect labels, status-code/body-match
 logic errors, and broken container ping-socket setup for ICMP/MTU.
 
+It also checks conditional metric semantics for selected edge cases, so metrics
+that should be absent when a signal was not observed do not regress back to
+zero-value placeholders.
+
 Run:
 
 ```sh
@@ -27,12 +31,14 @@ Covered in the basic harness:
 
 - `tcp`: open and closed local ports
 - `http`: expected status match, expected status mismatch, and accept-any status
+- `http`: connection-refused case where HTTP response-derived metrics must stay absent
 - `http_body`: body match, body mismatch, and body match with unexpected status
 - `http` with `proxy_url`: regular HTTP forwarded through the fake proxy
 - `proxy`: CONNECT accepted and denied
-- `dns`: resolution, expected-result match, and expected-result mismatch
-- `icmp`: echo success against the fake target container
-- `mtu`: PMTUD success against the fake target container
+- `dns`: resolution, expected-result match, expected-result mismatch, and no-expected absence semantics
+- `icmp`: echo success against the fake target container, including a single-reply case where stddev must stay absent
+- `mtu`: PMTUD success against the fake target container plus a resolve-failure case where `probe_mtu_bytes` and ICMP RTT stay absent
+- `tls_cert`: proxy tunnel success plus connect-failure absence semantics for expiry metrics
 
 The agent image runs as the non-root `netsonar` user. The compose service sets
 `net.ipv4.ping_group_range` so ICMP and MTU probes can use Linux unprivileged
@@ -83,6 +89,19 @@ The DNS result-match cases are intentionally paired:
   for the mismatch case
 
 This keeps the `probe_dns_result_match` metric covered by the e2e harness.
+
+The harness also checks absence semantics for selected edge cases:
+
+- `http-no-response` must not emit `probe_http_status_code` or
+  `probe_http_response_truncated`
+- `tls-cert-connect-fail` must not emit
+  `probe_tls_cert_expiry_timestamp_seconds`
+- `dns-fake-targets` must not emit `probe_dns_result_match` because no
+  `dns_expected` values are configured
+- `icmp-single-reply` must emit `probe_icmp_avg_rtt_seconds` but not
+  `probe_icmp_stddev_rtt_seconds`
+- `mtu-no-resolve` must not emit `probe_mtu_bytes` or
+  `probe_icmp_avg_rtt_seconds`
 
 ## Relation to Production
 
