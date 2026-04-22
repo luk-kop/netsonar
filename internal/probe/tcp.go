@@ -3,7 +3,6 @@ package probe
 
 import (
 	"context"
-	"net"
 	"time"
 
 	"netsonar/internal/config"
@@ -29,16 +28,20 @@ func (p *TCPProber) Probe(ctx context.Context, target config.TargetConfig) Probe
 	var result ProbeResult
 
 	start := time.Now()
-
-	var d net.Dialer
-	conn, err := d.DialContext(ctx, "tcp", target.Address)
+	dialResult, err := dialTCPWithSplitPhases(ctx, target.Address)
 	result.Duration = time.Since(start)
+	phases := make(map[string]time.Duration, 2)
+	addObservedPhase(phases, PhaseDNSResolve, dialResult.dnsEnd, dialResult.dnsStart)
+	addObservedPhase(phases, PhaseTCPConnect, dialResult.tcpEnd, dialResult.tcpStart)
+	if len(phases) > 0 {
+		result.Phases = phases
+	}
 
 	if err != nil {
 		result.Error = err.Error()
 		return result
 	}
-	_ = conn.Close()
+	_ = dialResult.conn.Close()
 
 	result.Success = true
 

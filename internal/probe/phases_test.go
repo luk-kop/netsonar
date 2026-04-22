@@ -46,6 +46,61 @@ func TestAllPhasesCoversEmittedPhases(t *testing.T) {
 		emitted[phase] = struct{}{}
 	}
 
+	// Direct TCP listener — exercises TCPProber's tcp_connect phase.
+	tcpLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("start TCP listener: %v", err)
+	}
+	defer func() { _ = tcpLn.Close() }()
+	go func() {
+		for {
+			conn, err := tcpLn.Accept()
+			if err != nil {
+				return
+			}
+			_ = conn.Close()
+		}
+	}()
+
+	tcpTarget := config.TargetConfig{
+		Name:      "phases-tcp",
+		Address:   tcpLn.Addr().String(),
+		ProbeType: config.ProbeTypeTCP,
+		Timeout:   5 * time.Second,
+	}
+	tcpCtx, tcpCancel := context.WithTimeout(context.Background(), tcpTarget.Timeout)
+	defer tcpCancel()
+
+	tcpResult := (&TCPProber{}).Probe(tcpCtx, tcpTarget)
+	if !tcpResult.Success {
+		t.Fatalf("TCP probe failed: %s", tcpResult.Error)
+	}
+	for phase := range tcpResult.Phases {
+		emitted[phase] = struct{}{}
+	}
+
+	// Direct TLS certificate probe — exercises tls_cert phase emission for
+	// tcp_connect and tls_handshake outside the HTTP path.
+	tlsTarget := config.TargetConfig{
+		Name:      "phases-tls-cert",
+		Address:   httpsSrv.Listener.Addr().String(),
+		ProbeType: config.ProbeTypeTLSCert,
+		Timeout:   5 * time.Second,
+		ProbeOpts: config.ProbeOptions{
+			TLSSkipVerify: true,
+		},
+	}
+	tlsCtx, tlsCancel := context.WithTimeout(context.Background(), tlsTarget.Timeout)
+	defer tlsCancel()
+
+	tlsResult := (&TLSCertProber{}).Probe(tlsCtx, tlsTarget)
+	if !tlsResult.Success {
+		t.Fatalf("direct TLS cert probe failed: %s", tlsResult.Error)
+	}
+	for phase := range tlsResult.Phases {
+		emitted[phase] = struct{}{}
+	}
+
 	// HTTP CONNECT proxy — exercises ProxyProber's proxy_dial and
 	// proxy_connect (proxy_tls is HTTPS-proxy-only and is covered by
 	// TestProxyProber_PreservesPhasesOnHTTPSProxyTLSFailure; we add it here

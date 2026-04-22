@@ -124,6 +124,38 @@ func TestNewMetricsExporter_HTTPMetricsRegistered(t *testing.T) {
 	}
 }
 
+func TestNewMetricsExporter_ProbePhaseDurationHelpMentionsCurrentEmitters(t *testing.T) {
+	m := NewMetricsExporter(testTagKeys)
+
+	target := makeTarget("phase-help", "127.0.0.1:443", config.ProbeTypeTLSCert, nil)
+	m.Record(target, probe.ProbeResult{
+		Duration: 50 * time.Millisecond,
+		Phases: map[string]time.Duration{
+			probe.PhaseTCPConnect:   10 * time.Millisecond,
+			probe.PhaseTLSHandshake: 20 * time.Millisecond,
+		},
+	})
+
+	families := gatherMetrics(t, m)
+	fam, ok := families["probe_phase_duration_seconds"]
+	if !ok {
+		t.Fatal("probe_phase_duration_seconds not registered")
+	}
+
+	wantSnippets := []string{
+		"TCP: dns_resolve for hostname targets, tcp_connect",
+		"HTTP: dns_resolve, tcp_connect, tls_handshake, ttfb, transfer",
+		"TLS cert direct: dns_resolve for hostname targets, tcp_connect, tls_handshake",
+		"proxy and TLS cert via proxy: proxy_dial, proxy_tls, proxy_connect",
+		"TLS cert via proxy also adds tls_handshake",
+	}
+	for _, snippet := range wantSnippets {
+		if !strings.Contains(fam.GetHelp(), snippet) {
+			t.Fatalf("probe_phase_duration_seconds help %q does not contain %q", fam.GetHelp(), snippet)
+		}
+	}
+}
+
 func TestNewMetricsExporter_ICMPMetricsRegistered(t *testing.T) {
 	m := NewMetricsExporter(testTagKeys)
 

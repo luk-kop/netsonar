@@ -7,7 +7,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -ldflags "-s -w -X 'main.version=e2e'" -o /out/netsonar ./cmd/agent
 
-FROM alpine:3.22
+FROM alpine:3.23
 
 RUN adduser -D -H -u 10001 netsonar
 COPY --from=build /out/netsonar /usr/local/bin/netsonar

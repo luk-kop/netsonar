@@ -18,7 +18,7 @@ services:
       - validation
 
   blackbox-exporter:
-    image: prom/blackbox-exporter:v0.27.0
+    image: prom/blackbox-exporter:v0.28.0
     volumes:
       - ./config/blackbox.yml:/etc/blackbox_exporter/config.yml:ro
     command:

@@ -210,19 +210,3 @@ func laterOf(a, b time.Time) time.Time {
 	}
 	return b
 }
-
-// safeSub returns a non-negative end - start duration.
-func safeSub(end, start time.Time) time.Duration {
-	d := end.Sub(start)
-	if d < 0 {
-		return 0
-	}
-	return d
-}
-
-func addObservedPhase(phases map[string]time.Duration, phase string, end, start time.Time) {
-	if start.IsZero() || end.IsZero() {
-		return
-	}
-	phases[phase] = safeSub(end, start)
-}
