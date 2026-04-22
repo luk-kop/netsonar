@@ -84,7 +84,7 @@ Two Grafana dashboards are provisioned from `grafana/dashboards/shared/`:
   `netsonar-http-details`) — per-target HTTP drill-down with duration stats,
   stacked phase timing, status codes, and success rate.
 
-Navigation: click a `target_name` cell in the phase breakdown table (B2) on the
-main dashboard to jump to the details dashboard with that target pre-selected
-and the time range preserved. The details dashboard has a "← Back to Overview"
-link in the top bar.
+Navigation: click a `target_name` cell in the **HTTP Phase Breakdown (current)**
+panel on the main dashboard to jump to the details dashboard with that target
+pre-selected and the time range preserved. The details dashboard has a
+"← Back to Overview" link in the top bar.

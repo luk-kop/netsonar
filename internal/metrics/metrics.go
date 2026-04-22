@@ -95,7 +95,7 @@ func NewMetricsExporter(tagKeys []string) *MetricsExporter {
 
 		probePhaseDuration: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "probe_phase_duration_seconds",
-			Help: "Per-phase timing for probes that expose sub-phase breakdowns (HTTP: dns_resolve, tcp_connect, tls_handshake, ttfb, transfer; proxy: proxy_dial, proxy_tls, proxy_connect).",
+			Help: "Per-phase timing for probes that expose sub-phase breakdowns (TCP: dns_resolve for hostname targets, tcp_connect; HTTP: dns_resolve, tcp_connect, tls_handshake, ttfb, transfer; TLS cert direct: dns_resolve for hostname targets, tcp_connect, tls_handshake; proxy and TLS cert via proxy: proxy_dial, proxy_tls, proxy_connect; TLS cert via proxy also adds tls_handshake).",
 		}, append(commonLabels, "phase")),
 
 		httpStatusCode: prometheus.NewGaugeVec(prometheus.GaugeOpts{

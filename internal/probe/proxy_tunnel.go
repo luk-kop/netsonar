@@ -26,10 +26,10 @@ func dialProxyTunnel(ctx context.Context, proxyURL *url.URL, tunnelDest string) 
 	var d net.Dialer
 	proxyConn, err := d.DialContext(ctx, "tcp", proxyAddr)
 	proxyDialDone := time.Now()
+	addObservedPhase(phases, PhaseProxyDial, proxyDialDone, start)
 	if err != nil {
 		return nil, phases, fmt.Errorf("proxy dial: %s", err.Error())
 	}
-	phases[PhaseProxyDial] = proxyDialDone.Sub(start)
 
 	closeOnError := true
 	defer func() {
@@ -43,10 +43,12 @@ func dialProxyTunnel(ctx context.Context, proxyURL *url.URL, tunnelDest string) 
 		tlsCfg := &tls.Config{ServerName: host}
 		tlsConn := tls.Client(proxyConn, tlsCfg)
 		tlsStart := time.Now()
-		if err := tlsConn.HandshakeContext(ctx); err != nil {
+		err := tlsConn.HandshakeContext(ctx)
+		tlsEnd := time.Now()
+		addObservedPhase(phases, PhaseProxyTLS, tlsEnd, tlsStart)
+		if err != nil {
 			return nil, phases, fmt.Errorf("proxy tls handshake: %s", err.Error())
 		}
-		phases[PhaseProxyTLS] = time.Since(tlsStart)
 		proxyConn = tlsConn
 	}
 
@@ -73,12 +75,12 @@ func dialProxyTunnel(ctx context.Context, proxyURL *url.URL, tunnelDest string) 
 
 	connectStart := time.Now()
 	if err := connectReq.Write(proxyConn); err != nil {
-		phases[PhaseProxyConnect] = time.Since(connectStart)
+		addObservedPhase(phases, PhaseProxyConnect, time.Now(), connectStart)
 		return nil, phases, fmt.Errorf("writing CONNECT request: %s", err.Error())
 	}
 
 	resp, err := http.ReadResponse(bufio.NewReader(proxyConn), connectReq)
-	phases[PhaseProxyConnect] = time.Since(connectStart)
+	addObservedPhase(phases, PhaseProxyConnect, time.Now(), connectStart)
 	if err != nil {
 		return nil, phases, fmt.Errorf("reading CONNECT response: %s", err.Error())
 	}

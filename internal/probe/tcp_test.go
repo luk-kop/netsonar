@@ -3,6 +3,7 @@ package probe
 import (
 	"context"
 	"net"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -11,7 +12,7 @@ import (
 )
 
 // TestTCPProber_Success verifies that probing a reachable TCP listener
-// reports Success=true and Duration>0.
+// reports Success=true, Duration>0, and a tcp_connect phase timing.
 func TestTCPProber_Success(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -52,8 +53,8 @@ func TestTCPProber_Success(t *testing.T) {
 	if result.Error != "" {
 		t.Fatalf("expected empty Error on success, got %q", result.Error)
 	}
-	if result.Phases != nil {
-		t.Fatalf("expected no TCP phase timings, got %v", result.Phases)
+	if result.Phases[PhaseTCPConnect] <= 0 {
+		t.Fatalf("expected Phases[%q] > 0, got %v", PhaseTCPConnect, result.Phases)
 	}
 }
 
@@ -89,6 +90,9 @@ func TestTCPProber_ConnectionRefused(t *testing.T) {
 	}
 	if result.Duration <= 0 {
 		t.Fatalf("expected Duration > 0 even on failure, got %v", result.Duration)
+	}
+	if result.Phases[PhaseTCPConnect] <= 0 {
+		t.Fatalf("expected Phases[%q] > 0 on failure, got %v", PhaseTCPConnect, result.Phases)
 	}
 }
 
@@ -202,5 +206,79 @@ func TestTCPProber_ConnectionCleanup(t *testing.T) {
 
 	if !clientDisconnected.Load() {
 		t.Fatal("expected server to detect client disconnected (connection not cleaned up)")
+	}
+}
+
+func TestTCPProber_HostnameSeparatesDNSFromConnect(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to start listener: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			_ = conn.Close()
+		}
+	}()
+
+	_, port, err := net.SplitHostPort(ln.Addr().String())
+	if err != nil {
+		t.Fatalf("failed to split listener address: %v", err)
+	}
+
+	target := config.TargetConfig{
+		Name:      "test-tcp-hostname",
+		Address:   net.JoinHostPort("localhost", port),
+		ProbeType: config.ProbeTypeTCP,
+		Timeout:   2 * time.Second,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
+	defer cancel()
+
+	prober := &TCPProber{}
+	result := prober.Probe(ctx, target)
+
+	if !result.Success {
+		t.Fatalf("expected Success=true, got false; error: %s", result.Error)
+	}
+	if result.Phases[PhaseDNSResolve] <= 0 {
+		t.Fatalf("expected dns_resolve phase for hostname target, got %v", result.Phases)
+	}
+	if result.Phases[PhaseTCPConnect] <= 0 {
+		t.Fatalf("expected tcp_connect phase for hostname target, got %v", result.Phases)
+	}
+}
+
+func TestTCPProber_DNSFailureDoesNotReportTCPConnect(t *testing.T) {
+	target := config.TargetConfig{
+		Name:      "test-tcp-dns-failure",
+		Address:   "does-not-exist.invalid:5432",
+		ProbeType: config.ProbeTypeTCP,
+		Timeout:   2 * time.Second,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
+	defer cancel()
+
+	prober := &TCPProber{}
+	result := prober.Probe(ctx, target)
+
+	if result.Success {
+		t.Fatal("expected Success=false for DNS failure")
+	}
+	if !strings.Contains(result.Error, "dns resolve:") {
+		t.Fatalf("expected dns resolve error, got %q", result.Error)
+	}
+	if result.Phases[PhaseDNSResolve] <= 0 {
+		t.Fatalf("expected dns_resolve phase on DNS failure, got %v", result.Phases)
+	}
+	if _, ok := result.Phases[PhaseTCPConnect]; ok {
+		t.Fatalf("did not expect tcp_connect phase on DNS failure, got %v", result.Phases)
 	}
 }

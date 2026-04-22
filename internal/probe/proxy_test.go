@@ -295,8 +295,8 @@ func TestProxyProber_PreservesPhasesOnHTTPSProxyTLSFailure(t *testing.T) {
 	if result.Phases["proxy_dial"] <= 0 {
 		t.Fatalf("expected proxy_dial phase to be preserved, got %v", result.Phases)
 	}
-	if _, ok := result.Phases["proxy_tls"]; ok {
-		t.Fatalf("did not expect proxy_tls phase on failed handshake, got %v", result.Phases)
+	if result.Phases["proxy_tls"] <= 0 {
+		t.Fatalf("expected proxy_tls phase to be preserved on failed handshake, got %v", result.Phases)
 	}
 }
 

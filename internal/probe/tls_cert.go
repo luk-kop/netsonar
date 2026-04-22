@@ -63,19 +63,31 @@ func tlsCertHostPort(address string) (host, addr string) {
 func (p *TLSCertProber) probeDirect(ctx context.Context, addr string, tlsCfg *tls.Config) ProbeResult {
 	var result ProbeResult
 	start := time.Now()
+	phases := make(map[string]time.Duration, 3)
 
-	var d net.Dialer
-	conn, err := d.DialContext(ctx, "tcp", addr)
+	dialResult, err := dialTCPWithSplitPhases(ctx, addr)
+	addObservedPhase(phases, PhaseDNSResolve, dialResult.dnsEnd, dialResult.dnsStart)
+	addObservedPhase(phases, PhaseTCPConnect, dialResult.tcpEnd, dialResult.tcpStart)
+	if len(phases) > 0 {
+		result.Phases = phases
+	}
 	if err != nil {
 		result.Duration = time.Since(start)
 		result.Error = fmt.Sprintf("tcp dial: %s", err.Error())
 		return result
 	}
 
-	tlsConn := tls.Client(conn, tlsCfg)
+	tlsConn := tls.Client(dialResult.conn, tlsCfg)
 	defer func() { _ = tlsConn.Close() }()
 
-	if err := tlsConn.HandshakeContext(ctx); err != nil {
+	tlsStart := time.Now()
+	err = tlsConn.HandshakeContext(ctx)
+	tlsEnd := time.Now()
+	if result.Phases == nil {
+		result.Phases = make(map[string]time.Duration, 1)
+	}
+	addObservedPhase(result.Phases, PhaseTLSHandshake, tlsEnd, tlsStart)
+	if err != nil {
 		result.Duration = time.Since(start)
 		result.Error = fmt.Sprintf("tls handshake: %s", err.Error())
 		return result
@@ -119,19 +131,17 @@ func (p *TLSCertProber) probeViaProxy(ctx context.Context, rawProxyURL, addr str
 	defer func() { _ = tlsConn.Close() }()
 
 	tlsStart := time.Now()
-	if err := tlsConn.HandshakeContext(ctx); err != nil {
-		result.Duration = time.Since(start)
-		if result.Phases == nil {
-			result.Phases = make(map[string]time.Duration, 1)
-		}
-		result.Phases[PhaseTLSHandshake] = time.Since(tlsStart)
-		result.Error = fmt.Sprintf("tls handshake: %s", err.Error())
-		return result
-	}
 	if result.Phases == nil {
 		result.Phases = make(map[string]time.Duration, 1)
 	}
-	result.Phases[PhaseTLSHandshake] = time.Since(tlsStart)
+	err = tlsConn.HandshakeContext(ctx)
+	tlsEnd := time.Now()
+	addObservedPhase(result.Phases, PhaseTLSHandshake, tlsEnd, tlsStart)
+	if err != nil {
+		result.Duration = time.Since(start)
+		result.Error = fmt.Sprintf("tls handshake: %s", err.Error())
+		return result
+	}
 	result.Duration = time.Since(start)
 
 	state := tlsConn.ConnectionState()

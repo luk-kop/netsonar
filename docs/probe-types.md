@@ -15,6 +15,8 @@ Measures TCP connection establishment time.
 
 No `probe_opts` required.
 
+Emits `probe_phase_duration_seconds` with `phase="tcp_connect"`, plus `phase="dns_resolve"` for hostname targets.
+
 ## HTTP/HTTPS
 
 Full HTTP request with `httptrace` phase breakdown (DNS resolve, TCP connect, TLS handshake, TTFB, transfer). Extracts the earliest TLS certificate expiry from the peer chain for HTTPS targets. Supports optional proxy routing via `proxy_url`.
@@ -257,6 +259,8 @@ Performs a TLS handshake and extracts certificate expiry from the observed peer 
 ```
 
 The reported expiry is based on the certificate chain observed by NetSonar from that network path. With a normal CONNECT proxy this is the origin chain. With TLS inspection, the observed chain may be proxy-issued; this is useful when the operational question is what workloads behind that proxy actually see.
+
+Direct probes emit `probe_phase_duration_seconds` with `phase="tcp_connect"` and `phase="tls_handshake"`, plus `phase="dns_resolve"` for hostname targets. Proxy-path probes emit `proxy_dial`, optional `proxy_tls` (for `https://` proxies), `proxy_connect`, and `tls_handshake` for the target handshake through the tunnel.
 
 ## HTTP Body Validation
 

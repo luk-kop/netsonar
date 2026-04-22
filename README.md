@@ -107,7 +107,7 @@ Additional deep-dives:
 
 ## Metrics Reference
 
-All probe and agent metadata metrics with labels and types — see [docs/metrics.md](docs/metrics.md).
+All probe and agent metadata metrics with labels and types, including RTT vs primary-latency semantics — see [docs/metrics.md](docs/metrics.md).
 Metric validation against independent tools is documented in
 [docs/metrics-validation.md](docs/metrics-validation.md).
 

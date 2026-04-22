@@ -529,7 +529,80 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Duration (s)"
+              "options": "Primary Latency (s)"
+            },
+            "properties": [
+              {
+                "id": "noValue",
+                "value": "N/A"
+              },
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 3
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "gradient"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 0.3
+                    },
+                    {
+                      "color": "red",
+                      "value": 1.0
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 150
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Latency Signal"
+            },
+            "properties": [
+              {
+                "id": "noValue",
+                "value": "N/A"
+              },
+              {
+                "id": "custom.width",
+                "value": 140
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Total Probe Time (s)"
             },
             "properties": [
               {
@@ -575,7 +648,7 @@
               },
               {
                 "id": "custom.width",
-                "value": 120
+                "value": 150
               }
             ]
           },
@@ -818,7 +891,7 @@
         }
       },
       "title": "All Probes \u2014 Status Table",
-      "description": "Current status of every configured probe target. Status OK (green) = probe succeeded, FAIL (red) = probe failed. Sorted by status so failures appear first.",
+      "description": "Current status of every configured probe target. Status OK (green) = probe succeeded, FAIL (red) = probe failed. Primary Latency shows the probe-type-specific latency signal when one exists; Total Probe Time shows end-to-end probe duration. Sorted by status so failures appear first.",
       "type": "table",
       "transformations": [
         {
@@ -835,40 +908,60 @@
               "Time": true,
               "Time 1": true,
               "Time 2": true,
+              "Time 3": true,
               "__name__": true,
               "__name__ 1": true,
               "__name__ 2": true,
+              "__name__ 3": true,
               "job": true,
               "job 1": true,
               "job 2": true,
+              "job 3": true,
               "instance": true,
               "instance 1": true,
               "instance 2": true,
+              "instance 3": true,
               "url": true,
               "url 1": true,
               "url 2": true,
+              "url 3": true,
               "host 2": true,
+              "host 3": true,
               "monitor": true,
               "monitor 1": true,
               "monitor 2": true,
+              "monitor 3": true,
               "port 2": true,
+              "port 3": true,
               "visibility": true,
               "visibility 1": true,
               "visibility 2": true,
+              "visibility 3": true,
               "target_region 2": true,
+              "target_region 3": true,
               "target_partition 2": true,
+              "target_partition 3": true,
               "target_account 2": true,
+              "target_account 3": true,
               "scope 2": true,
+              "scope 3": true,
               "impact 2": true,
+              "impact 3": true,
               "service 2": true,
+              "service 3": true,
               "provider": true,
               "provider 1": true,
               "provider 2": true,
+              "provider 3": true,
               "probe_type 2": true,
+              "probe_type 3": true,
               "target 2": true,
+              "target 3": true,
               "target_name 1": true,
               "target_name 2": true,
-              "network_path 2": true
+              "target_name 3": true,
+              "network_path 2": true,
+              "network_path 3": true
             },
             "indexByName": {
               "Value #A": 0,
@@ -894,8 +987,10 @@
               "target_account": 11,
               "target_account 1": 11,
               "Value #B": 12,
-              "host": 13,
-              "host 1": 13
+              "phase": 13,
+              "Value #C": 14,
+              "host": 15,
+              "host 1": 15
             },
             "renameByName": {
               "target_name": "Name",
@@ -918,7 +1013,9 @@
               "port": "Port",
               "port 1": "Port",
               "Value #A": "Status",
-              "Value #B": "Duration (s)",
+              "Value #B": "Primary Latency (s)",
+              "phase": "Latency Signal",
+              "Value #C": "Total Probe Time (s)",
               "host": "Host",
               "host 1": "Host",
               "target_account": "Account",
@@ -936,9 +1033,16 @@
           "format": "table"
         },
         {
-          "expr": "probe_icmp_avg_rtt_seconds{job=~\"$job\"} or probe_duration_seconds{job=~\"$job\", probe_type!~\"icmp|mtu\"} or (probe_duration_seconds{job=~\"$job\", probe_type=~\"icmp|mtu\"} unless probe_icmp_avg_rtt_seconds{job=~\"$job\"})",
+          "expr": "label_replace(probe_icmp_avg_rtt_seconds{job=~\"$job\"}, \"phase\", \"icmp_rtt\", \"__name__\", \".*\") or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"tcp\", phase=\"tcp_connect\"} or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"ttfb\"} or (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"tls_handshake\"} unless on(target_name) probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"ttfb\"}) or (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"tcp_connect\"} unless on(target_name) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"ttfb\"} or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"tls_handshake\"})) or (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"dns_resolve\"} unless on(target_name) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"ttfb\"} or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"tls_handshake\"} or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"tcp_connect\"})) or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"tls_cert\", phase=\"tls_handshake\"} or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"proxy\", phase=\"proxy_connect\"} or label_replace(probe_dns_resolve_seconds{job=~\"$job\"}, \"phase\", \"dns_resolve\", \"__name__\", \".*\")",
           "legendFormat": "",
           "refId": "B",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "probe_duration_seconds{job=~\"$job\"}",
+          "legendFormat": "",
+          "refId": "C",
           "instant": true,
           "format": "table"
         }

@@ -315,6 +315,11 @@ func TestTLSCertProber_Success(t *testing.T) {
 	if result.Duration <= 0 {
 		t.Fatalf("expected Duration > 0, got %v", result.Duration)
 	}
+	for _, phase := range []string{PhaseTCPConnect, PhaseTLSHandshake} {
+		if result.Phases[phase] <= 0 {
+			t.Fatalf("expected Phases[%q] > 0, got %v", phase, result.Phases)
+		}
+	}
 	if result.CertExpiry.IsZero() {
 		t.Fatal("expected CertExpiry to be populated, got zero time")
 	}
@@ -467,6 +472,12 @@ func TestTLSCertProber_HandshakeFailure(t *testing.T) {
 	if result.Error == "" {
 		t.Fatal("expected non-empty Error for handshake failure")
 	}
+	if result.Phases[PhaseTCPConnect] <= 0 {
+		t.Fatalf("expected tcp_connect phase to be preserved, got %v", result.Phases)
+	}
+	if result.Phases[PhaseTLSHandshake] <= 0 {
+		t.Fatalf("expected tls_handshake phase to be preserved, got %v", result.Phases)
+	}
 }
 
 // TestTLSCertProber_ConnectionRefused verifies that probing a port with no
@@ -501,6 +512,87 @@ func TestTLSCertProber_ConnectionRefused(t *testing.T) {
 	}
 	if result.Duration <= 0 {
 		t.Fatalf("expected Duration > 0 even on failure, got %v", result.Duration)
+	}
+	if result.Phases[PhaseTCPConnect] <= 0 {
+		t.Fatalf("expected tcp_connect phase on dial failure, got %v", result.Phases)
+	}
+	if _, ok := result.Phases[PhaseTLSHandshake]; ok {
+		t.Fatalf("did not expect tls_handshake before successful dial, got %v", result.Phases)
+	}
+}
+
+func TestTLSCertProber_HostnameSeparatesDNSFromConnect(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	_, port, err := net.SplitHostPort(srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatalf("failed to split server address: %v", err)
+	}
+
+	target := config.TargetConfig{
+		Name:      "test-tls-hostname",
+		Address:   net.JoinHostPort("localhost", port),
+		ProbeType: config.ProbeTypeTLSCert,
+		Timeout:   5 * time.Second,
+		ProbeOpts: config.ProbeOptions{
+			TLSSkipVerify: true,
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
+	defer cancel()
+
+	prober := &TLSCertProber{}
+	result := prober.Probe(ctx, target)
+
+	if !result.Success {
+		t.Fatalf("expected Success=true, got false; error: %s", result.Error)
+	}
+	if result.Phases[PhaseDNSResolve] <= 0 {
+		t.Fatalf("expected dns_resolve phase for hostname target, got %v", result.Phases)
+	}
+	if result.Phases[PhaseTCPConnect] <= 0 {
+		t.Fatalf("expected tcp_connect phase for hostname target, got %v", result.Phases)
+	}
+	if result.Phases[PhaseTLSHandshake] <= 0 {
+		t.Fatalf("expected tls_handshake phase for hostname target, got %v", result.Phases)
+	}
+}
+
+func TestTLSCertProber_DNSFailureDoesNotReportTCPConnect(t *testing.T) {
+	target := config.TargetConfig{
+		Name:      "test-tls-dns-failure",
+		Address:   "does-not-exist.invalid:443",
+		ProbeType: config.ProbeTypeTLSCert,
+		Timeout:   2 * time.Second,
+		ProbeOpts: config.ProbeOptions{
+			TLSSkipVerify: true,
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
+	defer cancel()
+
+	prober := &TLSCertProber{}
+	result := prober.Probe(ctx, target)
+
+	if result.Success {
+		t.Fatal("expected Success=false for DNS failure")
+	}
+	if !strings.Contains(result.Error, "tcp dial: dns resolve:") {
+		t.Fatalf("expected wrapped dns resolve error, got %q", result.Error)
+	}
+	if result.Phases[PhaseDNSResolve] <= 0 {
+		t.Fatalf("expected dns_resolve phase on DNS failure, got %v", result.Phases)
+	}
+	if _, ok := result.Phases[PhaseTCPConnect]; ok {
+		t.Fatalf("did not expect tcp_connect phase on DNS failure, got %v", result.Phases)
+	}
+	if _, ok := result.Phases[PhaseTLSHandshake]; ok {
+		t.Fatalf("did not expect tls_handshake phase on DNS failure, got %v", result.Phases)
 	}
 }
 

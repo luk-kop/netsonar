@@ -76,7 +76,7 @@ The following table shows which probe types emit each metric:
 |---|---|---|
 | `probe_success` | — | all |
 | `probe_duration_seconds` | — | all |
-| `probe_phase_duration_seconds` | — | http, proxy |
+| `probe_phase_duration_seconds` | — | tcp, http, tls_cert, proxy |
 | `probe_http_status_code` | `http_` | http |
 | `probe_http_response_truncated` | `http_` | http |
 | `probe_http_body_match` | `http_` | http_body |
@@ -153,9 +153,9 @@ The `probe_phase_duration_seconds` metric uses a `phase` label with these values
 
 | Phase           | Probe Type | Description                          |
 |-----------------|------------|--------------------------------------|
-| `dns_resolve`   | HTTP       | DNS resolution time                  |
-| `tcp_connect`   | HTTP       | TCP connection establishment         |
-| `tls_handshake` | HTTPS, TLS cert via proxy | TLS handshake with the target |
+| `dns_resolve`   | TCP, HTTP, TLS cert | DNS resolution time for hostname targets |
+| `tcp_connect`   | TCP, HTTP, TLS cert | TCP connection establishment         |
+| `tls_handshake` | HTTPS, TLS cert | TLS handshake with the target |
 | `ttfb`          | HTTP       | Time to first byte — see note below  |
 | `transfer`      | HTTP       | Body read time up to the effective transfer limit |
 
@@ -171,7 +171,7 @@ This matches the W3C Navigation Timing API (`responseStart − requestStart`) an
 | `proxy_tls`     | Proxy, TLS cert via proxy | TLS handshake with the proxy         |
 | `proxy_connect` | Proxy, TLS cert via proxy | CONNECT request and response         |
 
-Direct `tls_cert` probes expose certificate metrics but do not currently emit phase timing. `tls_cert` probes through a proxy emit the proxy tunnel phases plus `tls_handshake` for the target TLS handshake.
+Direct `tls_cert` probes emit `dns_resolve` for hostname targets, plus `tcp_connect` and `tls_handshake`. Direct TCP probes emit `dns_resolve` for hostname targets plus `tcp_connect`. `tls_cert` probes through a proxy emit the proxy tunnel phases plus `tls_handshake` for the target TLS handshake.
 
 ## Conditional Metric Semantics
 
@@ -201,6 +201,8 @@ Emission of conditional metrics is based on the semantics of the probe result, n
 A missing conditional series means **"not observed in the latest probe result"**, not "zero" and not "exporter broken". Dashboards and alerts should interpret such cases together with `probe_success` and probe-specific diagnostic metrics.
 
 `probe_icmp_packet_loss_ratio` is a deliberate exception to the conditional rule: on total ICMP failure, NetSonar emits `1.0` as a clear "nothing got through" signal.
+
+For phase metrics specifically, a phase is emitted when it was started and measured, regardless of sub-operation success. A phase is absent when it was not reached.
 
 ### Alerting Guidance
 
@@ -234,6 +236,76 @@ Do not treat absence of a conditional value metric as a generic probe failure si
 | `probe_dns_resolve_seconds` | always | every DNS probe result | unexpected for an active DNS target |
 | `probe_dns_result_match` | conditional | DNS result comparison was evaluated in the latest probe result | DNS result comparison was not evaluated in the latest probe result |
 | `probe_skipped_overlap_total` | always | exported for active targets; increments when a stale tick is dropped | unexpected for an active target |
+
+## RTT and Primary Latency
+
+### Native RTT
+
+**RTT** (round-trip time) is the time required for a probe packet or request to travel to the remote endpoint and for the corresponding reply to return. RTT is not specific to ICMP as a networking concept, but in NetSonar only ICMP-derived metrics expose strict RTT directly.
+
+Native RTT metrics in NetSonar are:
+
+| Probe Type | Metric | Meaning |
+|---|---|---|
+| `icmp` | `probe_icmp_avg_rtt_seconds` | Average ICMP echo round-trip time across successful replies in the latest probe |
+| `icmp` | `probe_icmp_stddev_rtt_seconds` | Variation of ICMP echo RTT across successful replies in the latest probe |
+| `mtu` | `probe_icmp_avg_rtt_seconds` | Average ICMP echo round-trip time observed during PMTUD ICMP echo steps |
+
+`probe_duration_seconds` is **not** RTT. It measures the total wall-clock time of the whole probe execution.
+
+### Primary Latency Signals
+
+Some probe types do not expose strict RTT, but they do expose timings that are useful to operators as a primary latency signal.
+
+In dashboards and runbooks, NetSonar refers to this cross-probe value as **Primary Latency**. Technically, these timings are often **RTT-like** only in the loose operational sense that they help answer "where is the time going?" They are not strict RTT unless explicitly stated otherwise.
+
+| Probe Type | Metric / Phase | Operator interpretation | Strict RTT? |
+|---|---|---|---|
+| `icmp` | `probe_icmp_avg_rtt_seconds` | Network round-trip latency | Yes |
+| `mtu` | `probe_icmp_avg_rtt_seconds` | Network round-trip latency observed during MTU probing | Yes |
+| `tcp` | `probe_phase_duration_seconds{phase="tcp_connect"}` | TCP connect latency | No |
+| `dns` | `probe_dns_resolve_seconds` | DNS lookup latency | No |
+| `http` | `probe_phase_duration_seconds{phase="ttfb"}` | Request-to-first-byte latency | No |
+| `tls_cert` | `probe_phase_duration_seconds{phase="tls_handshake"}` | TLS handshake latency | No |
+| `proxy` | `probe_phase_duration_seconds{phase="proxy_connect"}` | Proxy CONNECT request/response latency | No |
+
+Per-metric interpretation notes:
+
+- `tcp_connect` measures TCP connection establishment time. It is often a good network-path indicator, but it is not pure RTT.
+- `probe_dns_resolve_seconds` measures DNS resolution time. It includes resolver behavior and lookup overhead, so it should not be treated as pure network RTT.
+- `tls_handshake` measures the TLS handshake phase. It is useful for diagnosing handshake slowness, but it is not RTT.
+- `ttfb` measures time from request-send readiness to first response byte. It includes server processing time and response-header travel time, so it must not be interpreted as RTT.
+- `proxy_connect` measures CONNECT request/response latency through the proxy tunnel. It is useful for proxy-path diagnosis, not RTT estimation.
+
+`probe_icmp_stddev_rtt_seconds` is intentionally not part of the primary-latency mapping. It tracks RTT variation, not latency itself.
+
+In the main Grafana status table:
+
+- **Primary Latency** is the numeric value shown for the target's main latency signal
+- **Latency Signal** identifies which metric or phase produced that value, such as `icmp_rtt`, `dns_resolve`, `tcp_connect`, `ttfb`, `tls_handshake`, or `proxy_connect`
+
+### Operator Guidance and Terminology
+
+When reading dashboards and alerts:
+
+- use `probe_icmp_avg_rtt_seconds` when you want true network RTT
+- use phase metrics when you want to identify which protocol stage is slow
+- use `probe_duration_seconds` when you want the total cost of the probe as an operation
+- do not assume that two timing metrics with the same unit have the same meaning
+
+A useful mental model is:
+
+- **RTT** answers: "how slow is the round trip on the path?"
+- **Phase timing** answers: "which part of the protocol interaction is slow?"
+- **Total probe duration** answers: "how long did the whole probe take?"
+
+For consistent naming in dashboards and runbooks:
+
+- reserve **RTT** for ICMP-derived round-trip metrics
+- use **Primary Latency** for the operator-facing cross-probe latency value shown in dashboards
+- use **Latency Signal** for the metric or phase label that explains where the Primary Latency value came from
+- use **RTT-like** only as a technical explanatory term in documentation for non-RTT timings such as `tcp_connect`, `dns_resolve`, `tls_handshake`, `ttfb`, or `proxy_connect`
+- use **Total Probe Time** or **Probe Duration** for `probe_duration_seconds`
 
 ## Dashboard Interpretation
 
@@ -301,7 +373,7 @@ probe_success{impact="low",network_path="direct",probe_type="dns",scope="same-re
 # TYPE probe_duration_seconds gauge
 probe_duration_seconds{impact="critical",network_path="direct",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.008137887
 
-# HELP probe_phase_duration_seconds Per-phase timing for probes that expose sub-phase breakdowns (HTTP: dns_resolve, tcp_connect, tls_handshake, ttfb, transfer; proxy: proxy_dial, proxy_tls, proxy_connect).
+# HELP probe_phase_duration_seconds Per-phase timing for probes that expose sub-phase breakdowns (TCP: dns_resolve for hostname targets, tcp_connect; HTTP: dns_resolve, tcp_connect, tls_handshake, ttfb, transfer; TLS cert direct: dns_resolve for hostname targets, tcp_connect, tls_handshake; proxy and TLS cert via proxy: proxy_dial, proxy_tls, proxy_connect; TLS cert via proxy also adds tls_handshake).
 # TYPE probe_phase_duration_seconds gauge
 probe_phase_duration_seconds{impact="critical",network_path="direct",phase="dns_resolve",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.000777178
 probe_phase_duration_seconds{impact="critical",network_path="direct",phase="tcp_connect",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.000253737
