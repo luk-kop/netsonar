@@ -315,6 +315,33 @@ For `probe_type="http"`, the response body is discarded and read only up to the 
 
 For `probe_type="http_body"`, oversized bodies remain probe failures (`probe_success=0`) under the HTTP body prober's validation semantics. `probe_http_response_truncated` is not emitted for `http_body`.
 
+### Total Probe Time in the Status Table
+
+The `Total Probe Time` column in the "All Probes — Status Table" shows `probe_duration_seconds`, which is the **wall-clock** duration of the full probe execution. Its typical range depends strongly on the probe type:
+
+| Probe type | Typical TPT (healthy target) | Drivers |
+|---|---|---|
+| `tcp` | tens of ms | Single connect attempt |
+| `http`, `http_body` | tens–hundreds of ms | DNS + connect + TLS + TTFB + transfer (capped) |
+| `tls_cert` | tens–hundreds of ms | DNS + connect + TLS handshake |
+| `dns` | tens of ms | Single resolver lookup |
+| `proxy` | tens–hundreds of ms | Proxy dial + TLS (optional) + CONNECT |
+| `icmp` | **seconds** | `ping_count × ping_interval` + per-echo RTTs (default `ping_interval = 1s`) |
+| `mtu` | **seconds** | Sanity echo + step-down across `icmp_payload_sizes`, each size with up to `mtu_retries` attempts and `mtu_per_attempt_timeout` each (defaults: 3 retries, 2s per attempt) |
+
+Because TPT for `icmp` and `mtu` is dominated by configured intervals and retry budgets — not by network speed — it will be in the seconds range even for perfectly healthy targets. This is why the column is **not color-coded**: a multi-second TPT on ICMP/MTU is normal, and flagging it as "bad" would be misleading.
+
+**Failure behavior.** On probe failure, TPT still reflects wall-clock time until the probe returned. Two distinct shapes:
+
+- **Full timeout** (target unreachable, no replies): TPT approaches the probe's configured `timeout` (the scheduler wraps each probe in `context.WithTimeout(ctx, target.Timeout)`). For ICMP, the context deadline is shared across all pings in the sequence, so TPT on a fully unreachable target converges to `target.Timeout`, not `ping_count × something`. For MTU, retries stop early once the shared deadline expires, so TPT is also bounded by `target.Timeout` — potentially less than the theoretical `len(icmp_payload_sizes) × mtu_retries × mtu_per_attempt_timeout` budget.
+- **Fast fail** (DNS resolve error, socket open error, config validation): TPT is near zero because the probe returns immediately — despite `Status = FAIL`.
+
+**Operator guidance.**
+
+- Treat `Status` and `Primary Latency` as the health signals for a target. TPT is diagnostic context, not a health indicator.
+- When alerting on slow probes, alert on `probe_duration_seconds` **per `probe_type`** with thresholds that match each probe's expected shape. Do not apply a single global threshold across probe types.
+- If `Status = FAIL` and `Primary Latency = N/A`, look at TPT to tell a full timeout (TPT near the timeout boundary) from a fast fail (TPT ≈ 0) without opening the details dashboard.
+
 ### Probes Exceeding Interval (skipped cycles)
 
 This panel tracks how often a probe was still running when the next scheduled tick fired. The scheduler enforces at-most-one-in-flight per target, so it drops the stale tick and increments `probe_skipped_overlap_total`.

@@ -529,7 +529,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Primary Latency (s)"
+              "options": "Primary Latency"
             },
             "properties": [
               {
@@ -602,7 +602,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Total Probe Time (s)"
+              "options": "Total Probe Time"
             },
             "properties": [
               {
@@ -612,39 +612,6 @@
               {
                 "id": "decimals",
                 "value": 3
-              },
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background",
-                  "mode": "gradient"
-                }
-              },
-              {
-                "id": "thresholds",
-                "value": {
-                  "mode": "absolute",
-                  "steps": [
-                    {
-                      "color": "green",
-                      "value": null
-                    },
-                    {
-                      "color": "yellow",
-                      "value": 0.3
-                    },
-                    {
-                      "color": "red",
-                      "value": 1.0
-                    }
-                  ]
-                }
-              },
-              {
-                "id": "color",
-                "value": {
-                  "mode": "thresholds"
-                }
               },
               {
                 "id": "custom.width",
@@ -891,7 +858,7 @@
         }
       },
       "title": "All Probes \u2014 Status Table",
-      "description": "Current status of every configured probe target. Status OK (green) = probe succeeded, FAIL (red) = probe failed. Primary Latency shows the probe-type-specific latency signal when one exists; Total Probe Time shows end-to-end probe duration. Sorted by status so failures appear first.",
+      "description": "Current status of every configured probe target. Sorted by Status so failures appear first.\n\nColumn legend:\n- Status: probe outcome from probe_success. OK = succeeded, FAIL = failed. On FAIL, compare Total Probe Time against the target timeout to distinguish a full timeout from a fast fail (DNS/socket error).\n- Name / Probe / Path: target identity. Path = YES means the probe goes through an HTTP proxy (network_path=proxy); blank = direct.\n- Primary Latency: probe-type-specific latency (ICMP/MTU RTT, TCP connect, HTTP TTFB, TLS handshake, proxy CONNECT, DNS resolve). See Latency Signal for which metric produced the value. N/A = no usable timing signal (e.g., 100% ICMP packet loss).\n- Latency Signal: which metric or phase produced Primary Latency: icmp_rtt, tcp_connect, ttfb, tls_handshake, proxy_connect, or dns_resolve.\n- Total Probe Time: wall-clock duration of the full probe (probe_duration_seconds). For ICMP/MTU this runs in seconds by design, driven by ping intervals and retry budgets, not network speed. Not a health signal on its own; use Status + Primary Latency for health.",
       "type": "table",
       "transformations": [
         {
@@ -966,31 +933,31 @@
             "indexByName": {
               "Value #A": 0,
               "target_name": 1,
-              "service": 2,
-              "service 1": 2,
-              "target": 3,
-              "target 1": 3,
-              "probe_type": 4,
-              "probe_type 1": 4,
-              "network_path": 5,
-              "network_path 1": 5,
-              "port": 6,
-              "port 1": 6,
-              "scope": 7,
-              "scope 1": 7,
-              "target_region": 8,
-              "target_region 1": 8,
-              "target_partition": 9,
-              "target_partition 1": 9,
-              "impact": 10,
-              "impact 1": 10,
-              "target_account": 11,
-              "target_account 1": 11,
-              "Value #B": 12,
-              "phase": 13,
-              "Value #C": 14,
-              "host": 15,
-              "host 1": 15
+              "probe_type": 2,
+              "probe_type 1": 2,
+              "network_path": 3,
+              "network_path 1": 3,
+              "Value #B": 4,
+              "phase": 5,
+              "Value #C": 6,
+              "service": 7,
+              "service 1": 7,
+              "target": 8,
+              "target 1": 8,
+              "host": 9,
+              "host 1": 9,
+              "port": 10,
+              "port 1": 10,
+              "scope": 11,
+              "scope 1": 11,
+              "target_region": 12,
+              "target_region 1": 12,
+              "target_partition": 13,
+              "target_partition 1": 13,
+              "target_account": 14,
+              "target_account 1": 14,
+              "impact": 15,
+              "impact 1": 15
             },
             "renameByName": {
               "target_name": "Name",
@@ -1013,9 +980,9 @@
               "port": "Port",
               "port 1": "Port",
               "Value #A": "Status",
-              "Value #B": "Primary Latency (s)",
+              "Value #B": "Primary Latency",
               "phase": "Latency Signal",
-              "Value #C": "Total Probe Time (s)",
+              "Value #C": "Total Probe Time",
               "host": "Host",
               "host 1": "Host",
               "target_account": "Account",
