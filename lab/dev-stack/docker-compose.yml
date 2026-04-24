@@ -32,7 +32,7 @@ services:
       - devstack
 
   grafana:
-    image: grafana/grafana:13.0.0
+    image: grafana/grafana:13.0
     volumes:
       - ./provisioning/datasources:/etc/grafana/provisioning/datasources:ro
       - ../../grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro

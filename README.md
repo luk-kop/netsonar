@@ -103,6 +103,7 @@ Each probe type with full YAML examples, options, and behaviour details — see 
 Additional deep-dives:
 
 - [MTU/PMTUD internals](docs/mtu-pmtud.md)
+- [MTU measurement options](docs/mtu-measurement-options.md)
 - [Proxy probing guide](docs/proxy-probing.md)
 
 ## Metrics Reference

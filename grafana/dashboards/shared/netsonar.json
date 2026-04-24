@@ -2553,6 +2553,68 @@
           {
             "matcher": {
               "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "1": {
+                        "color": "green",
+                        "text": "OK"
+                      },
+                      "0": {
+                        "color": "red",
+                        "text": "FAIL"
+                      }
+                    },
+                    "type": "value"
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "green",
+                      "value": 1
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 120
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
               "options": "State"
             },
             "properties": [
@@ -2612,7 +2674,7 @@
         "sortBy": [
           {
             "desc": false,
-            "displayName": "State"
+            "displayName": "Status"
           }
         ],
         "footer": {
@@ -2620,7 +2682,7 @@
         }
       },
       "title": "All MTU Probe States",
-      "description": "Current MTU probe state per target. State: ok = path MTU detected, degraded = below expected minimum, unreachable = all sizes failed, error = probe error. Detail explains the reason (e.g. fragmentation_needed, largest_size_confirmed).",
+      "description": "Current MTU probe result per target. Status is the binary probe outcome from probe_success: OK = probe passed, FAIL = probe failed. State is the MTU-specific diagnosis: ok = path MTU detected, degraded = below expected minimum, unreachable = all sizes failed, error = probe error. Detail explains the reason (e.g. fragmentation_needed, largest_size_confirmed).",
       "type": "table",
       "transformations": [
         {
@@ -2680,42 +2742,48 @@
               "target_account 1": true,
               "target_account 2": true,
               "target_name 1": true,
-              "target_name 2": true,
-              "service 2": true,
-              "scope 2": true,
-              "target_region 2": true,
-              "target 2": true,
-              "state 2": true,
-              "detail 2": true,
-              "Value #A": true
-            },
-            "indexByName": {
-              "target_name": 0,
-              "service 1": 1,
-              "scope 1": 2,
-              "target_region 1": 3,
-              "target 1": 4,
-              "state": 5,
-              "state 1": 5,
-              "detail": 6,
-              "detail 1": 6,
-              "Value #B": 7
-            },
-            "renameByName": {
-              "target_name": "Name",
-              "target 1": "Target",
-              "service 1": "Service",
-              "scope 1": "Scope",
-              "target_region 1": "Region",
-              "state": "State",
-              "state 1": "State",
-              "detail": "Detail",
-              "detail 1": "Detail",
-              "Value #B": "MTU (bytes)"
+                "target_name 2": true,
+                "service 2": true,
+                "scope 2": true,
+                "target_region 2": true,
+                "target 2": true,
+                "state 2": true,
+                "detail 2": true,
+                "Value #A": true
+              },
+              "indexByName": {
+                "target_name": 0,
+                "service": 1,
+                "service 1": 1,
+                "scope": 2,
+                "scope 1": 2,
+                "target_region": 3,
+                "target_region 1": 3,
+                "target": 4,
+                "target 1": 4,
+                "Value #B": 5,
+                "state": 6,
+                "detail": 7,
+                "Value #C": 8
+              },
+              "renameByName": {
+                "target_name": "Name",
+                "target": "Target",
+                "target 1": "Target",
+                "service": "Service",
+                "service 1": "Service",
+                "scope": "Scope",
+                "scope 1": "Scope",
+                "target_region": "Region",
+                "target_region 1": "Region",
+                "Value #B": "Status",
+                "state": "State",
+                "detail": "Detail",
+                "Value #C": "MTU (bytes)"
+              }
             }
           }
-        }
-      ],
+        ],
       "targets": [
         {
           "expr": "probe_mtu_state{job=~\"$job\"}",
@@ -2725,9 +2793,16 @@
           "format": "table"
         },
         {
-          "expr": "probe_mtu_bytes{job=~\"$job\"}",
+          "expr": "max by (target_name) (probe_success{job=~\"$job\", probe_type=\"mtu\"})",
           "legendFormat": "",
           "refId": "B",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "max by (target_name) (probe_mtu_bytes{job=~\"$job\"})",
+          "legendFormat": "",
+          "refId": "C",
           "instant": true,
           "format": "table"
         }
