@@ -19,15 +19,15 @@ Emits `probe_phase_duration_seconds` with `phase="tcp_connect"`, plus `phase="dn
 
 ## HTTP/HTTPS
 
-Full HTTP request with `httptrace` phase breakdown (DNS resolve, TCP connect, TLS handshake, TTFB, transfer). Extracts the earliest TLS certificate expiry from the peer chain for HTTPS targets. Supports optional proxy routing via `proxy_url`.
+Full HTTP request with `httptrace` phase breakdown (DNS resolve, TCP connect, TLS handshake, request write, TTFB, transfer). Extracts the earliest TLS certificate expiry from the peer chain for HTTPS targets. Supports optional proxy routing via `proxy_url`.
 
 The HTTP probe does not inspect response body content. It discards and reads at
-most the effective transfer limit: `probe_opts.max_transfer_bytes` when set,
+most the effective response body limit: `probe_opts.response_body_limit_bytes` when set,
 otherwise 1 MiB. Larger or streaming responses do not fail the probe because
 of size; `probe_success` is determined by request/transfer errors and
 `expected_status_codes`, while `probe_http_response_truncated` reports whether
 the limit was exceeded. The `transfer` phase measures time from first response
-byte until either the body ends or the effective transfer limit has been read.
+byte until either the body ends or the effective response body limit has been read.
 Use `http_body` when response content must be validated.
 
 ```yaml
@@ -42,9 +42,33 @@ Use `http_body` when response content must be validated.
     follow_redirects: false         # Follow HTTP redirects (default: false)
     tls_skip_verify: false          # Skip TLS certificate verification
     expected_status_codes: []       # Empty = accept any status code
-    max_transfer_bytes: 0           # 0/omitted = 1 MiB capped body read
+    response_body_limit_bytes: 0    # 0/omitted = 1 MiB capped body read
+    request_body_bytes: 0           # 0/omitted = no generated request body
     proxy_url: ""                   # Optional: route through HTTP proxy
 ```
+
+### request_body_bytes
+
+`request_body_bytes` generates an outbound HTTP request body of exactly the
+configured size. It is supported only by `probe_type: http`.
+
+Validation and behavior:
+
+- `0` or omitted sends no generated request body.
+- Positive values require explicit `method: POST`.
+- Positive values are capped at 16 MiB (`16777216` bytes).
+- The generated body is sent with `Content-Length`, not chunked transfer
+  encoding.
+- If no `Content-Type` header is configured, generated bodies use
+  `application/octet-stream`.
+
+Upload time appears in `probe_phase_duration_seconds{phase="request_write"}`.
+`ttfb` starts after request write completion, so large or slow uploads do not
+inflate the server response-time phase.
+
+Use this as an HTTP upload-path stress check, not as an exact MTU measurement.
+For the full operational guidance, see
+[http-request-payload-probe.md](http-request-payload-probe.md).
 
 ### expected_status_codes
 
@@ -352,8 +376,9 @@ When an HTTP probe uses `proxy_url`, the phase timing metrics reflect the full p
 |---|---|
 | `tcp_connect` | TCP dial to proxy + CONNECT tunnel establishment to target |
 | `tls_handshake` | TLS handshake with the target (through the tunnel) |
-| `ttfb` | Time from connection ready (after TLS for HTTPS) to first response byte — does not include TLS handshake |
-| `transfer` | Response body read up to the effective transfer limit (through the tunnel) |
+| `request_write` | Time from connection ready (after TLS for HTTPS) to request write completion |
+| `ttfb` | Time from request write completion to first response byte — does not include TLS handshake or request upload |
+| `transfer` | Response body read up to the effective response body limit (through the tunnel) |
 
 The `tcp_connect` phase is notably higher for proxy-path probes compared to direct ones because it includes both the connection to the proxy and the CONNECT handshake. This is expected and can be used to estimate proxy overhead by comparing `tcp_connect` of a proxy-path probe against a direct probe to the same target.
 

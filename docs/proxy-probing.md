@@ -142,8 +142,9 @@ When an HTTP probe uses `proxy_url`, the `probe_phase_duration_seconds` metric r
 |---|---|---|
 | `tcp_connect` | TCP handshake with target | TCP dial to proxy + CONNECT tunnel to target |
 | `tls_handshake` | TLS handshake with target | TLS handshake with target (through tunnel) |
-| `ttfb` | Time from connection ready (after TLS) to first response byte; excludes TLS handshake | Same, through tunnel |
-| `transfer` | Response body read up to the effective transfer limit | Response body read up to the effective transfer limit (through tunnel) |
+| `request_write` | Time from connection ready (after TLS) to request write completion | Same, through tunnel |
+| `ttfb` | Time from request write completion to first response byte; excludes TLS handshake and request upload | Same, through tunnel |
+| `transfer` | Response body read up to the effective response body limit | Response body read up to the effective response body limit (through tunnel) |
 
 The key difference is `tcp_connect`: for proxy-path probes it includes both the connection to the proxy server and the CONNECT handshake to establish the tunnel. This phase is notably higher for proxy-path probes and represents the proxy overhead.
 

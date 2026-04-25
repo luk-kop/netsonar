@@ -144,8 +144,10 @@ flowchart TD
 - `dns_query_type` must be one of: `A`, `AAAA`, `CNAME`
 - For `http` and `http_body`, `method` must be one of: `GET`, `HEAD`, `POST`; an empty value defaults to `GET`
 - For `http` and `http_body`, every `expected_status_codes` value must be a valid HTTP status code in the range `100`-`599`; an empty list accepts any response that completes according to the probe's body-read semantics
-- For `http`, `max_transfer_bytes` must be >= 0. `0` or omitted uses the 1 MiB default; positive values set the capped body read limit in bytes. Larger bodies do not fail the probe, and `probe_http_response_truncated` reports the truncation.
-- Large `max_transfer_bytes` values are legal but increase bandwidth usage and can lengthen `probe_duration_seconds` and `probe_phase_duration_seconds{phase="transfer"}` for large responses.
+- For `http`, `response_body_limit_bytes` must be >= 0. `0` or omitted uses the 1 MiB default; positive values set the capped response body read limit in bytes. Larger bodies do not fail the probe, and `probe_http_response_truncated` reports the truncation.
+- Large `response_body_limit_bytes` values are legal but increase bandwidth usage and can lengthen `probe_duration_seconds` and `probe_phase_duration_seconds{phase="transfer"}` for large responses.
+- For `http`, `request_body_bytes` must be >= 0 and <= 16777216 (16 MiB). `0` or omitted sends no generated request body; positive values require explicit `method: POST`.
+- `request_body_bytes` is rejected for `http_body` and all non-HTTP probe types.
 - For `http_body`, `body_match_regex` must be a valid Go regular expression
 - `proxy_url` is required when `probe_type` is `proxy`; optional for `http`, `http_body`, and `tls_cert`; rejected when non-empty for `tcp`, `icmp`, `mtu`, and `dns`
 - When set, `proxy_url` must be `http://[user:pass@]host[:port]` or `https://[user:pass@]host[:port]`; paths other than `/`, query strings, fragments, invalid ports, relative URLs, and non-HTTP schemes are rejected

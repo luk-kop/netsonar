@@ -84,6 +84,10 @@ const MaxTagsPerTarget = 20
 // is not configured.
 const MaxGlobalTagKeys = 30
 
+// MaxHTTPRequestBodyBytes caps generated HTTP request bodies. This prevents a
+// misconfigured probe from creating excessive background upload traffic.
+const MaxHTTPRequestBodyBytes int64 = 16 << 20 // 16 MiB
+
 // FixedLabels are the label names hardcoded in the agent binary.
 // Tag keys must not collide with these.
 var FixedLabels = map[string]bool{
@@ -139,12 +143,13 @@ type TargetConfig struct {
 // ProbeOptions holds probe-type-specific settings.
 type ProbeOptions struct {
 	// HTTP/HTTPS options
-	Method              string            `yaml:"method"`
-	Headers             map[string]string `yaml:"headers"`
-	ExpectedStatusCodes []int             `yaml:"expected_status_codes"`
-	FollowRedirects     bool              `yaml:"follow_redirects"`
-	TLSSkipVerify       bool              `yaml:"tls_skip_verify"`
-	MaxTransferBytes    int64             `yaml:"max_transfer_bytes"`
+	Method                 string            `yaml:"method"`
+	Headers                map[string]string `yaml:"headers"`
+	ExpectedStatusCodes    []int             `yaml:"expected_status_codes"`
+	FollowRedirects        bool              `yaml:"follow_redirects"`
+	TLSSkipVerify          bool              `yaml:"tls_skip_verify"`
+	ResponseBodyLimitBytes int64             `yaml:"response_body_limit_bytes"`
+	RequestBodyBytes       int64             `yaml:"request_body_bytes"`
 
 	// HTTP body validation
 	BodyMatchRegex  string `yaml:"body_match_regex"`
@@ -425,8 +430,17 @@ func validateLabelName(k string) error {
 
 // validateProbeOpts checks probe-type-specific option constraints.
 func validateProbeOpts(t TargetConfig) error {
-	if t.ProbeOpts.MaxTransferBytes < 0 {
-		return fmt.Errorf("target %q: max_transfer_bytes must be >= 0", t.Name)
+	if t.ProbeOpts.ResponseBodyLimitBytes < 0 {
+		return fmt.Errorf("target %q: response_body_limit_bytes must be >= 0 (0 or omitted uses the 1 MiB default; positive values set an explicit cap)", t.Name)
+	}
+	if t.ProbeOpts.RequestBodyBytes < 0 {
+		return fmt.Errorf("target %q: request_body_bytes must be >= 0", t.Name)
+	}
+	if t.ProbeOpts.RequestBodyBytes > MaxHTTPRequestBodyBytes {
+		return fmt.Errorf("target %q: request_body_bytes must be <= %d", t.Name, MaxHTTPRequestBodyBytes)
+	}
+	if t.ProbeOpts.RequestBodyBytes > 0 && t.ProbeType != ProbeTypeHTTP {
+		return fmt.Errorf("target %q: request_body_bytes is supported only for probe_type 'http'", t.Name)
 	}
 
 	switch t.ProbeType {
@@ -436,6 +450,9 @@ func validateProbeOpts(t TargetConfig) error {
 		}
 	case ProbeTypeHTTP, ProbeTypeHTTPBody:
 		if err := validateHTTPMethod(t); err != nil {
+			return err
+		}
+		if err := validateHTTPRequestBody(t); err != nil {
 			return err
 		}
 		if t.ProbeType == ProbeTypeHTTPBody {
@@ -543,6 +560,16 @@ func validateHTTPMethod(t TargetConfig) error {
 	}
 	if !validHTTPMethods[method] {
 		return fmt.Errorf("target %q: invalid method %q (valid: GET, HEAD, POST)", t.Name, method)
+	}
+	return nil
+}
+
+func validateHTTPRequestBody(t TargetConfig) error {
+	if t.ProbeOpts.RequestBodyBytes == 0 {
+		return nil
+	}
+	if t.ProbeOpts.Method != "POST" {
+		return fmt.Errorf("target %q: request_body_bytes requires explicit method: POST", t.Name)
 	}
 	return nil
 }

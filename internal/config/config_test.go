@@ -1810,26 +1810,26 @@ targets:
 	}
 }
 
-func TestLoadConfig_HTTPMaxTransferBytes(t *testing.T) {
+func TestLoadConfig_HTTPResponseBodyLimitBytes(t *testing.T) {
 	t.Run("negative rejected", func(t *testing.T) {
 		yaml := `
 agent:
   default_interval: 30s
 
 targets:
-  - name: "http-negative-transfer"
+  - name: "http-negative-response-body-limit"
     address: "https://example.com"
     probe_type: http
     timeout: 5s
     probe_opts:
-      max_transfer_bytes: -1
+      response_body_limit_bytes: -1
 `
 		_, err := LoadConfig(writeConfigFile(t, yaml))
 		if err == nil {
-			t.Fatal("expected error for negative max_transfer_bytes, got nil")
+			t.Fatal("expected error for negative response_body_limit_bytes, got nil")
 		}
-		if !strings.Contains(err.Error(), "max_transfer_bytes") {
-			t.Errorf("error = %q, want it to mention max_transfer_bytes", err.Error())
+		if !strings.Contains(err.Error(), "response_body_limit_bytes") {
+			t.Errorf("error = %q, want it to mention response_body_limit_bytes", err.Error())
 		}
 	})
 
@@ -1839,19 +1839,19 @@ agent:
   default_interval: 30s
 
 targets:
-  - name: "http-zero-transfer"
+  - name: "http-zero-response-body-limit"
     address: "https://example.com"
     probe_type: http
     timeout: 5s
     probe_opts:
-      max_transfer_bytes: 0
+      response_body_limit_bytes: 0
 `
 		cfg, err := LoadConfig(writeConfigFile(t, yaml))
 		if err != nil {
-			t.Fatalf("expected no error for zero max_transfer_bytes, got: %v", err)
+			t.Fatalf("expected no error for zero response_body_limit_bytes, got: %v", err)
 		}
-		if got := cfg.Targets[0].ProbeOpts.MaxTransferBytes; got != 0 {
-			t.Errorf("MaxTransferBytes = %d, want 0", got)
+		if got := cfg.Targets[0].ProbeOpts.ResponseBodyLimitBytes; got != 0 {
+			t.Errorf("ResponseBodyLimitBytes = %d, want 0", got)
 		}
 	})
 
@@ -1861,19 +1861,158 @@ agent:
   default_interval: 30s
 
 targets:
-  - name: "http-positive-transfer"
+  - name: "http-positive-response-body-limit"
     address: "https://example.com"
     probe_type: http
     timeout: 5s
     probe_opts:
-      max_transfer_bytes: 2097152
+      response_body_limit_bytes: 2097152
 `
 		cfg, err := LoadConfig(writeConfigFile(t, yaml))
 		if err != nil {
-			t.Fatalf("expected no error for positive max_transfer_bytes, got: %v", err)
+			t.Fatalf("expected no error for positive response_body_limit_bytes, got: %v", err)
 		}
-		if got := cfg.Targets[0].ProbeOpts.MaxTransferBytes; got != 2097152 {
-			t.Errorf("MaxTransferBytes = %d, want 2097152", got)
+		if got := cfg.Targets[0].ProbeOpts.ResponseBodyLimitBytes; got != 2097152 {
+			t.Errorf("ResponseBodyLimitBytes = %d, want 2097152", got)
+		}
+	})
+}
+
+func TestLoadConfig_HTTPRequestBodyBytes(t *testing.T) {
+	t.Run("negative rejected", func(t *testing.T) {
+		yaml := `
+agent:
+  default_interval: 30s
+
+targets:
+  - name: "http-negative-request-body"
+    address: "https://example.com"
+    probe_type: http
+    timeout: 5s
+    probe_opts:
+      method: POST
+      request_body_bytes: -1
+`
+		_, err := LoadConfig(writeConfigFile(t, yaml))
+		if err == nil {
+			t.Fatal("expected error for negative request_body_bytes, got nil")
+		}
+		if !strings.Contains(err.Error(), "request_body_bytes") {
+			t.Errorf("error = %q, want it to mention request_body_bytes", err.Error())
+		}
+	})
+
+	t.Run("over cap rejected", func(t *testing.T) {
+		yaml := fmt.Sprintf(`
+agent:
+  default_interval: 30s
+
+targets:
+  - name: "http-over-cap-request-body"
+    address: "https://example.com"
+    probe_type: http
+    timeout: 5s
+    probe_opts:
+      method: POST
+      request_body_bytes: %d
+`, MaxHTTPRequestBodyBytes+1)
+		_, err := LoadConfig(writeConfigFile(t, yaml))
+		if err == nil {
+			t.Fatal("expected error for over-cap request_body_bytes, got nil")
+		}
+		if !strings.Contains(err.Error(), "request_body_bytes") {
+			t.Errorf("error = %q, want it to mention request_body_bytes", err.Error())
+		}
+	})
+
+	t.Run("requires explicit POST", func(t *testing.T) {
+		yaml := `
+agent:
+  default_interval: 30s
+
+targets:
+  - name: "http-request-body-default-method"
+    address: "https://example.com"
+    probe_type: http
+    timeout: 5s
+    probe_opts:
+      request_body_bytes: 1024
+`
+		_, err := LoadConfig(writeConfigFile(t, yaml))
+		if err == nil {
+			t.Fatal("expected error for request_body_bytes without explicit POST, got nil")
+		}
+		if !strings.Contains(err.Error(), "method: POST") {
+			t.Errorf("error = %q, want it to mention method: POST", err.Error())
+		}
+	})
+
+	t.Run("http body rejected", func(t *testing.T) {
+		yaml := `
+agent:
+  default_interval: 30s
+
+targets:
+  - name: "http-body-request-body"
+    address: "https://example.com"
+    probe_type: http_body
+    timeout: 5s
+    probe_opts:
+      method: POST
+      request_body_bytes: 1024
+      body_match_string: ok
+`
+		_, err := LoadConfig(writeConfigFile(t, yaml))
+		if err == nil {
+			t.Fatal("expected error for request_body_bytes on http_body, got nil")
+		}
+		if !strings.Contains(err.Error(), "probe_type 'http'") {
+			t.Errorf("error = %q, want it to mention probe_type 'http'", err.Error())
+		}
+	})
+
+	t.Run("non-http rejected", func(t *testing.T) {
+		yaml := `
+agent:
+  default_interval: 30s
+
+targets:
+  - name: "tcp-request-body"
+    address: "example.com:443"
+    probe_type: tcp
+    timeout: 5s
+    probe_opts:
+      request_body_bytes: 1024
+`
+		_, err := LoadConfig(writeConfigFile(t, yaml))
+		if err == nil {
+			t.Fatal("expected error for request_body_bytes on tcp, got nil")
+		}
+		if !strings.Contains(err.Error(), "probe_type 'http'") {
+			t.Errorf("error = %q, want it to mention probe_type 'http'", err.Error())
+		}
+	})
+
+	t.Run("positive preserved", func(t *testing.T) {
+		yaml := `
+agent:
+  default_interval: 30s
+
+targets:
+  - name: "http-request-body"
+    address: "https://example.com"
+    probe_type: http
+    timeout: 5s
+    probe_opts:
+      method: POST
+      request_body_bytes: 65536
+`
+		cfg, err := LoadConfig(writeConfigFile(t, yaml))
+		if err != nil {
+			t.Fatalf("expected no error for positive request_body_bytes, got: %v", err)
+		}
+		if got := cfg.Targets[0].ProbeOpts.RequestBodyBytes; got != 65536 {
+			t.Errorf("RequestBodyBytes = %d, want 65536", got)
 		}
 	})
 }

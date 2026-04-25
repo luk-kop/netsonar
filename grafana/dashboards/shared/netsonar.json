@@ -1649,7 +1649,7 @@
         }
       },
       "title": "HTTP Response Truncated",
-      "description": "1 means the HTTP response body exceeded the effective transfer limit. Truncation does not fail normal HTTP probes by itself. The series is present only when truncation could actually be evaluated from a received HTTP response.",
+      "description": "1 means the HTTP response body exceeded the effective response body limit. Truncation does not fail normal HTTP probes by itself. The series is present only when truncation could actually be evaluated from a received HTTP response.",
       "type": "timeseries",
       "targets": [
         {
@@ -1752,6 +1752,7 @@
               }
             ]
           },
+          "noValue": "N/A",
           "unit": "s"
         },
         "overrides": [
@@ -1759,6 +1760,34 @@
             "matcher": {
               "id": "byName",
               "options": "target_name"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto"
+                }
+              },
+              {
+                "id": "unit",
+                "value": "string"
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Drill down: HTTP Details",
+                    "url": "/d/netsonar-http-details?var-job=$job&var-target_name=${__value.raw}&${__url_time_range}",
+                    "targetBlank": false
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Target"
             },
             "properties": [
               {
@@ -1802,7 +1831,7 @@
         ]
       },
       "title": "HTTP Phase Breakdown (current)",
-      "description": "Instant snapshot of all HTTP phase durations pivoted by target. Cell colours: green <50 ms, yellow 50\u2013200 ms, red >200 ms. Identifies which phase is slow for each target.",
+      "description": "Instant snapshot of HTTP phase durations pivoted by target.\n\nColumn legend:\n- Target: HTTP target name; click to drill down to HTTP Details.\n- dns_resolve: DNS lookup time for hostname targets. N/A means DNS was not observed, for example a literal IP target.\n- tcp_connect: TCP connection establishment time.\n- tls_handshake: Target TLS handshake time. N/A means TLS was not observed, for example plain HTTP.\n- request_write: Time from connection/TLS readiness to request write completion. Usually near-zero for GET/small requests; grows when request_body_bytes sends an upload payload.\n- ttfb: Time from request write completion to first response byte.\n- transfer: Response body read time up to response_body_limit_bytes.\n\nCell colours: green <50 ms, yellow 50\u2013200 ms, red >200 ms. N/A cells mean the phase was not observed or does not apply.",
       "type": "table",
       "targets": [
         {
@@ -1844,6 +1873,23 @@
             "columnField": "phase",
             "rowField": "target_name",
             "valueField": "Value"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "indexByName": {
+              "target_name\\phase": 0,
+              "dns_resolve": 1,
+              "tcp_connect": 2,
+              "tls_handshake": 3,
+              "request_write": 4,
+              "ttfb": 5,
+              "transfer": 6
+            },
+            "renameByName": {
+              "target_name\\phase": "Target"
+            }
           }
         }
       ]
@@ -2627,6 +2673,42 @@
           {
             "matcher": {
               "id": "byName",
+              "options": "Detail"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 220
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "MTU (bytes)"
+            },
+            "properties": [
+              {
+                "id": "noValue",
+                "value": "N/A"
+              },
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.width",
+                "value": 120
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
               "options": "Target"
             },
             "properties": [
@@ -2682,7 +2764,7 @@
         }
       },
       "title": "All MTU Probe States",
-      "description": "Current MTU probe result per target. Status is the binary probe outcome from probe_success: OK = probe passed, FAIL = probe failed. State is the MTU-specific diagnosis: ok = path MTU detected, degraded = below expected minimum, unreachable = all sizes failed, error = probe error. Detail explains the reason (e.g. fragmentation_needed, largest_size_confirmed).",
+      "description": "Current MTU probe result per target. Sorted by Status so failures appear first.\n\nColumn legend:\n- Name / Service / Scope / Region / Target: target identity and routing context from config labels.\n- Status: binary probe outcome from probe_success. OK = probe met its configured MTU policy, FAIL = it did not.\n- State: MTU-specific diagnosis. ok = acceptable MTU confirmed, degraded = MTU below expected minimum or result is inconclusive, unreachable = target/path did not provide a usable MTU confirmation, error = probe/setup error.\n- Detail: reason for the state, for example fragmentation_needed, largest_size_confirmed, larger_sizes_timed_out, all_sizes_timed_out, sanity_check_failed, or resolve_error.\n- MTU (bytes): largest confirmed path MTU. N/A means no MTU value was confirmed in the latest probe result.",
       "type": "table",
       "transformations": [
         {
@@ -4730,7 +4812,7 @@
         }
       },
       "title": "Proxy CONNECT Status per Target",
-      "description": "Current status of each proxy CONNECT target. OK = proxy accepted the tunnel, FAIL = proxy rejected or connection failed. Sorted by status so failures appear first.",
+      "description": "Current status of each proxy CONNECT target. Sorted by Status so failures appear first.\n\nColumn legend:\n- Status: binary probe outcome from probe_success. OK = proxy accepted the CONNECT tunnel, FAIL = proxy rejected the tunnel or connection failed.\n- Name / Service / Target / Scope / Region: target identity and routing context from config labels.\n- Duration (s): wall-clock time for the CONNECT probe, including TCP dial to proxy and CONNECT request/response. Use the Proxy CONNECT Phase Timing panel to see which stage is slow.",
       "type": "table",
       "transformations": [
         {
@@ -4877,7 +4959,7 @@
         }
       },
       "title": "Proxy CONNECT Phase Timing",
-      "description": "Phases observed in the latest CONNECT probe result: proxy_dial (TCP to proxy), proxy_tls (TLS with proxy, if HTTPS proxy), proxy_connect (CONNECT request/response). Shown for both successful and failed probes; missing phases mean the probe did not reach that phase.",
+      "description": "Phases observed in the latest CONNECT probe result. Shown for both successful and failed probes; missing phases mean the probe did not reach that phase.\n\nPhase legend:\n- proxy_dial: TCP connection to the proxy.\n- proxy_tls: TLS handshake with the proxy, only for HTTPS proxy URLs.\n- proxy_connect: CONNECT request/response with the proxy. High values usually point to proxy latency or upstream tunnel establishment delay.",
       "type": "timeseries",
       "targets": [
         {

@@ -45,6 +45,7 @@
         "textMode": "auto"
       },
       "title": "Current",
+      "description": "Latest total HTTP probe duration for the selected target. This is wall-clock probe time, including DNS, TCP, TLS, request write, TTFB, and capped response-body transfer.",
       "type": "stat",
       "targets": [
         {
@@ -80,6 +81,7 @@
         "textMode": "auto"
       },
       "title": "Mean (5m)",
+      "description": "Mean total HTTP probe duration over the last 5 minutes for the selected target. Use this to smooth short spikes and compare against the current value.",
       "type": "stat",
       "targets": [
         {
@@ -115,6 +117,7 @@
         "textMode": "auto"
       },
       "title": "p95 (5m)",
+      "description": "95th percentile total HTTP probe duration over the last 5 minutes. Higher than the mean indicates intermittent latency spikes.",
       "type": "stat",
       "targets": [
         {
@@ -150,6 +153,7 @@
         "textMode": "auto"
       },
       "title": "Max (5m)",
+      "description": "Maximum total HTTP probe duration over the last 5 minutes. Useful for spotting timeout-adjacent probes or isolated slow runs.",
       "type": "stat",
       "targets": [
         {
@@ -191,6 +195,10 @@
             "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } }]
           },
           {
+            "matcher": { "id": "byRegexp", "options": "/^request_write$/" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "cyan" } }]
+          },
+          {
             "matcher": { "id": "byRegexp", "options": "/^ttfb$/" },
             "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }]
           },
@@ -211,7 +219,7 @@
         "tooltip": { "mode": "multi" }
       },
       "title": "HTTP Phase Timing — $target_name",
-      "description": "Stacked phase durations. Phases are non-overlapping and sum ≈ probe_duration_seconds, so stack height reflects total probe latency. Colors: dns_resolve (blue), tcp_connect (green), tls_handshake (yellow, HTTPS only), ttfb (orange), transfer (purple).",
+      "description": "Stacked phase durations for the selected HTTP target. Phases are non-overlapping and sum ≈ probe_duration_seconds. Missing phases were not observed or do not apply.\n\nPhase legend:\n- dns_resolve: DNS lookup time for hostname targets.\n- tcp_connect: TCP connection establishment time.\n- tls_handshake: target TLS handshake time; absent for plain HTTP.\n- request_write: time from connection/TLS readiness to request write completion. Usually near-zero for GET/small requests; grows when request_body_bytes sends an upload payload.\n- ttfb: time from request write completion to first response byte.\n- transfer: response body read time up to response_body_limit_bytes.\n\nColors: dns_resolve (blue), tcp_connect (green), tls_handshake (yellow), request_write (cyan), ttfb (orange), transfer (purple).",
       "type": "timeseries",
       "targets": [
         {
@@ -247,6 +255,7 @@
         "tooltip": { "mode": "multi" }
       },
       "title": "HTTP Status Codes — $target_name",
+      "description": "HTTP response status code observed for the selected target. The series is present only when an HTTP response was received; DNS, TCP, TLS, request-write, or timeout failures can appear as no status-code sample.",
       "type": "timeseries",
       "targets": [
         {
@@ -291,6 +300,7 @@
         "tooltip": { "mode": "multi" }
       },
       "title": "Probe Success Rate — $target_name",
+      "description": "Five-minute average of probe_success for the selected target. 1.0 means all recent probes succeeded; 0.0 means all recent probes failed. Success is determined by request/transfer errors and expected_status_codes.",
       "type": "timeseries",
       "targets": [
         {

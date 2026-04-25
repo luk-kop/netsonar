@@ -3,6 +3,7 @@ package probe
 import (
 	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -19,13 +20,14 @@ import (
 var expectedHTTPSPhaseKeys = []string{
 	"tcp_connect",
 	"tls_handshake",
+	"request_write",
 	"ttfb",
 	"transfer",
 }
 
 // TestHTTPProber_PhaseBreakdownPresence verifies that probing a plain HTTP
 // server produces a Phases map without tls_handshake and that tcp_connect,
-// ttfb, and transfer are > 0.
+// request_write, ttfb, and transfer are observed.
 func TestHTTPProber_PhaseBreakdownPresence(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -53,7 +55,7 @@ func TestHTTPProber_PhaseBreakdownPresence(t *testing.T) {
 		t.Fatal("expected Phases map to be non-nil")
 	}
 
-	for _, key := range []string{"tcp_connect", "ttfb", "transfer"} {
+	for _, key := range []string{"tcp_connect", "request_write", "ttfb", "transfer"} {
 		if _, ok := result.Phases[key]; !ok {
 			t.Fatalf("expected Phases to contain key %q", key)
 		}
@@ -61,7 +63,8 @@ func TestHTTPProber_PhaseBreakdownPresence(t *testing.T) {
 
 	// For plain HTTP against a local server, tcp_connect, ttfb, and transfer
 	// should be positive. dns_resolve may be absent when the server URL uses
-	// a literal IP address.
+	// a literal IP address. request_write may be effectively zero for small
+	// header-only requests but should still be present.
 	for _, key := range []string{"tcp_connect", "ttfb", "transfer"} {
 		if result.Phases[key] <= 0 {
 			t.Fatalf("expected Phases[%q] > 0, got %v", key, result.Phases[key])
@@ -117,7 +120,8 @@ func TestHTTPProber_PhaseBreakdownHTTPS(t *testing.T) {
 		t.Fatalf("expected Phases[tls_handshake] > 0 for HTTPS, got %v", result.Phases["tls_handshake"])
 	}
 
-	// tcp_connect, ttfb, and transfer should also be positive.
+	// tcp_connect, ttfb, and transfer should also be positive. request_write
+	// is asserted for presence above and may be effectively zero.
 	for _, key := range []string{"tcp_connect", "ttfb", "transfer"} {
 		if result.Phases[key] <= 0 {
 			t.Fatalf("expected Phases[%q] > 0, got %v", key, result.Phases[key])
@@ -236,6 +240,7 @@ func assertHTTPPhaseSumNearDuration(t *testing.T, result ProbeResult, tolerance 
 	phaseSum := result.Phases[PhaseDNSResolve] +
 		result.Phases[PhaseTCPConnect] +
 		result.Phases[PhaseTLSHandshake] +
+		result.Phases[PhaseRequestWrite] +
 		result.Phases[PhaseTTFB] +
 		result.Phases[PhaseTransfer]
 
@@ -246,6 +251,33 @@ func assertHTTPPhaseSumNearDuration(t *testing.T, result ProbeResult, tolerance 
 	if diff > tolerance {
 		t.Fatalf("expected phase sum %v to be within %v of duration %v, diff %v",
 			phaseSum, tolerance, result.Duration, diff)
+	}
+}
+
+func TestBuildPhases_RequestWriteSeparatesTTFB(t *testing.T) {
+	base := time.Date(2026, 4, 24, 12, 0, 0, 0, time.UTC)
+	connectStart := base
+	connectEnd := connectStart.Add(10 * time.Millisecond)
+	wroteRequest := connectEnd.Add(75 * time.Millisecond)
+	gotFirstByte := wroteRequest.Add(25 * time.Millisecond)
+	transferEnd := gotFirstByte.Add(5 * time.Millisecond)
+
+	phases := buildPhases(
+		time.Time{}, time.Time{},
+		connectStart, connectEnd,
+		time.Time{}, time.Time{},
+		wroteRequest,
+		gotFirstByte, transferEnd,
+	)
+
+	if got := phases[PhaseRequestWrite]; got != 75*time.Millisecond {
+		t.Fatalf("request_write = %v, want 75ms", got)
+	}
+	if got := phases[PhaseTTFB]; got != 25*time.Millisecond {
+		t.Fatalf("ttfb = %v, want 25ms", got)
+	}
+	if got := phases[PhaseTransfer]; got != 5*time.Millisecond {
+		t.Fatalf("transfer = %v, want 5ms", got)
 	}
 }
 
@@ -499,11 +531,119 @@ func TestHTTPProber_BodyCleanup(t *testing.T) {
 	}
 }
 
+func TestHTTPProber_RequestBodyBytes(t *testing.T) {
+	const requestBodyBytes = 4096
+
+	var observed struct {
+		method           string
+		contentLength    int64
+		transferEncoding []string
+		contentType      string
+		bodyLen          int
+		bodyByte         byte
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read request body: %v", err)
+		}
+		observed.method = r.Method
+		observed.contentLength = r.ContentLength
+		observed.transferEncoding = append([]string{}, r.TransferEncoding...)
+		observed.contentType = r.Header.Get("Content-Type")
+		observed.bodyLen = len(body)
+		if len(body) > 0 {
+			observed.bodyByte = body[0]
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	target := config.TargetConfig{
+		Name:      "test-request-body",
+		Address:   srv.URL,
+		ProbeType: config.ProbeTypeHTTP,
+		Timeout:   5 * time.Second,
+		ProbeOpts: config.ProbeOptions{
+			Method:           http.MethodPost,
+			RequestBodyBytes: requestBodyBytes,
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
+	defer cancel()
+
+	prober := NewHTTPProber(false, true, "")
+	result := prober.Probe(ctx, target)
+
+	assertHTTPProbeSuccess(t, result)
+	if observed.method != http.MethodPost {
+		t.Fatalf("method = %q, want %q", observed.method, http.MethodPost)
+	}
+	if observed.contentLength != requestBodyBytes {
+		t.Fatalf("ContentLength = %d, want %d", observed.contentLength, requestBodyBytes)
+	}
+	if len(observed.transferEncoding) != 0 {
+		t.Fatalf("TransferEncoding = %v, want none", observed.transferEncoding)
+	}
+	if observed.contentType != "application/octet-stream" {
+		t.Fatalf("Content-Type = %q, want application/octet-stream", observed.contentType)
+	}
+	if observed.bodyLen != requestBodyBytes {
+		t.Fatalf("request body length = %d, want %d", observed.bodyLen, requestBodyBytes)
+	}
+	if observed.bodyByte != 'n' {
+		t.Fatalf("request body first byte = %q, want %q", observed.bodyByte, 'n')
+	}
+	if _, ok := result.Phases[PhaseRequestWrite]; !ok {
+		t.Fatal("expected request_write phase to be present")
+	}
+}
+
+func TestHTTPProber_RequestBodyPreservesContentType(t *testing.T) {
+	const contentType = "application/json"
+	var observedContentType string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		observedContentType = r.Header.Get("Content-Type")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	target := config.TargetConfig{
+		Name:      "test-request-body-content-type",
+		Address:   srv.URL,
+		ProbeType: config.ProbeTypeHTTP,
+		Timeout:   5 * time.Second,
+		ProbeOpts: config.ProbeOptions{
+			Method:           http.MethodPost,
+			RequestBodyBytes: 1024,
+			Headers: map[string]string{
+				"Content-Type": contentType,
+			},
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
+	defer cancel()
+
+	prober := NewHTTPProber(false, true, "")
+	result := prober.Probe(ctx, target)
+
+	assertHTTPProbeSuccess(t, result)
+	if observedContentType != contentType {
+		t.Fatalf("Content-Type = %q, want %q", observedContentType, contentType)
+	}
+}
+
 // TestHTTPProber_LargeBodyCapped verifies that a response body larger than
-// maxHTTPTransferBytes is silently capped — the probe succeeds and the
+// defaultResponseBodyLimit is silently capped — the probe succeeds and the
 // transfer phase reflects time spent reading up to the limit, not the full body.
 func TestHTTPProber_LargeBodyCapped(t *testing.T) {
-	// Serve 2 MiB, which is larger than maxHTTPTransferBytes (1 MiB).
+	// Serve 2 MiB, which is larger than defaultResponseBodyLimit (1 MiB).
 	bodySize := 2 * 1024 * 1024
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)

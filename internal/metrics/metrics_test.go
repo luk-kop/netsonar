@@ -101,6 +101,7 @@ func TestNewMetricsExporter_HTTPMetricsRegistered(t *testing.T) {
 			"dns_resolve":   10 * time.Millisecond,
 			"tcp_connect":   20 * time.Millisecond,
 			"tls_handshake": 30 * time.Millisecond,
+			"request_write": 5 * time.Millisecond,
 			"ttfb":          25 * time.Millisecond,
 			"transfer":      15 * time.Millisecond,
 		},
@@ -144,7 +145,7 @@ func TestNewMetricsExporter_ProbePhaseDurationHelpMentionsCurrentEmitters(t *tes
 
 	wantSnippets := []string{
 		"TCP: dns_resolve for hostname targets, tcp_connect",
-		"HTTP: dns_resolve, tcp_connect, tls_handshake, ttfb, transfer",
+		"HTTP: dns_resolve, tcp_connect, tls_handshake, request_write, ttfb, transfer",
 		"TLS cert direct: dns_resolve for hostname targets, tcp_connect, tls_handshake",
 		"proxy and TLS cert via proxy: proxy_dial, proxy_tls, proxy_connect",
 		"TLS cert via proxy also adds tls_handshake",

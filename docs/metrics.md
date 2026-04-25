@@ -101,7 +101,7 @@ The following table shows which probe types emit each metric:
 | `probe_http_status_code`            | Gauge | common          | HTTP response status code                      |
 | `probe_tls_cert_expiry_timestamp_seconds` | Gauge | common    | Unix timestamp of earliest TLS certificate expiry in the peer chain |
 | `probe_tls_cert_chain_expiry_timestamp_seconds` | Gauge | common + `cert_index`, `cert_role` | Unix timestamp of each peer certificate expiry |
-| `probe_http_response_truncated`     | Gauge | common          | 1 if HTTP response body exceeded transfer limit, 0 otherwise |
+| `probe_http_response_truncated`     | Gauge | common          | 1 if HTTP response body exceeded response body limit, 0 otherwise |
 | `probe_icmp_packet_loss_ratio`      | Gauge | common          | Packet loss ratio 0.0-1.0                      |
 | `probe_icmp_avg_rtt_seconds`        | Gauge | common          | Average ICMP echo round-trip time (ICMP and MTU probes) |
 | `probe_icmp_stddev_rtt_seconds`     | Gauge | common          | Population standard deviation of ICMP echo RTT |
@@ -156,14 +156,17 @@ The `probe_phase_duration_seconds` metric uses a `phase` label with these values
 | `dns_resolve`   | TCP, HTTP, TLS cert | DNS resolution time for hostname targets |
 | `tcp_connect`   | TCP, HTTP, TLS cert | TCP connection establishment         |
 | `tls_handshake` | HTTPS, TLS cert | TLS handshake with the target |
-| `ttfb`          | HTTP       | Time to first byte — see note below  |
-| `transfer`      | HTTP       | Body read time up to the effective transfer limit |
+| `request_write` | HTTP       | Request write time after connection/TLS readiness |
+| `ttfb`          | HTTP       | Time to first byte after request write — see note below |
+| `transfer`      | HTTP       | Body read time up to the effective response body limit |
 
 ### TTFB semantics
 
-`ttfb` is measured from the moment the connection is ready to send the HTTP request (after TCP for plain HTTP, after TLS handshake for HTTPS) until the first byte of the response is received. It captures server processing time plus response-header wire time, and does **not** overlap with `tls_handshake`.
+`request_write` is measured from the moment the connection is ready to send the HTTP request (after TCP for plain HTTP, after TLS handshake for HTTPS) until the request has been written. For large generated request bodies, upload time appears in this phase.
 
-This matches the W3C Navigation Timing API (`responseStart − requestStart`) and the Prometheus Blackbox Exporter `processing` phase, so NetSonar's phase breakdown is directly comparable to Chrome DevTools, k6, WebPageTest, and Blackbox. Phases are non-overlapping: `dns_resolve + tcp_connect + tls_handshake + ttfb + transfer ≈ probe_duration_seconds`.
+`ttfb` is measured from request write completion until the first byte of the response is received. It captures server processing time plus response-header wire time, and does **not** overlap with `tls_handshake` or `request_write`.
+
+Phases are non-overlapping: `dns_resolve + tcp_connect + tls_handshake + request_write + ttfb + transfer ≈ probe_duration_seconds`.
 
 | Phase           | Probe Type | Description                          |
 |-----------------|------------|--------------------------------------|
@@ -309,9 +312,9 @@ For consistent naming in dashboards and runbooks:
 
 ## Dashboard Interpretation
 
-### HTTP Transfer Limit
+### HTTP Response Body Limit
 
-For `probe_type="http"`, the response body is discarded and read only up to the effective transfer limit: `probe_opts.max_transfer_bytes` when set, otherwise 1 MiB. If the response exceeds that limit, `probe_http_response_truncated` is set to `1`; truncation does not fail the probe by itself. `probe_duration_seconds` and `probe_phase_duration_seconds{phase="transfer"}` measure the capped read, not full response download time.
+For `probe_type="http"`, the response body is discarded and read only up to the effective response body limit: `probe_opts.response_body_limit_bytes` when set, otherwise 1 MiB. If the response exceeds that limit, `probe_http_response_truncated` is set to `1`; truncation does not fail the probe by itself. `probe_duration_seconds` and `probe_phase_duration_seconds{phase="transfer"}` measure the capped read, not full response download time.
 
 For `probe_type="http_body"`, oversized bodies remain probe failures (`probe_success=0`) under the HTTP body prober's validation semantics. `probe_http_response_truncated` is not emitted for `http_body`.
 
@@ -322,7 +325,7 @@ The `Total Probe Time` column in the "All Probes — Status Table" shows `probe_
 | Probe type | Typical TPT (healthy target) | Drivers |
 |---|---|---|
 | `tcp` | tens of ms | Single connect attempt |
-| `http`, `http_body` | tens–hundreds of ms | DNS + connect + TLS + TTFB + transfer (capped) |
+| `http`, `http_body` | tens–hundreds of ms | DNS + connect + TLS + request write + TTFB + transfer (capped) |
 | `tls_cert` | tens–hundreds of ms | DNS + connect + TLS handshake |
 | `dns` | tens of ms | Single resolver lookup |
 | `proxy` | tens–hundreds of ms | Proxy dial + TLS (optional) + CONNECT |
@@ -400,7 +403,7 @@ probe_success{impact="low",network_path="direct",probe_type="dns",scope="same-re
 # TYPE probe_duration_seconds gauge
 probe_duration_seconds{impact="critical",network_path="direct",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.008137887
 
-# HELP probe_phase_duration_seconds Per-phase timing for probes that expose sub-phase breakdowns (TCP: dns_resolve for hostname targets, tcp_connect; HTTP: dns_resolve, tcp_connect, tls_handshake, ttfb, transfer; TLS cert direct: dns_resolve for hostname targets, tcp_connect, tls_handshake; proxy and TLS cert via proxy: proxy_dial, proxy_tls, proxy_connect; TLS cert via proxy also adds tls_handshake).
+# HELP probe_phase_duration_seconds Per-phase timing for probes that expose sub-phase breakdowns (TCP: dns_resolve for hostname targets, tcp_connect; HTTP: dns_resolve, tcp_connect, tls_handshake, request_write, ttfb, transfer; TLS cert direct: dns_resolve for hostname targets, tcp_connect, tls_handshake; proxy and TLS cert via proxy: proxy_dial, proxy_tls, proxy_connect; TLS cert via proxy also adds tls_handshake).
 # TYPE probe_phase_duration_seconds gauge
 probe_phase_duration_seconds{impact="critical",network_path="direct",phase="dns_resolve",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.000777178
 probe_phase_duration_seconds{impact="critical",network_path="direct",phase="tcp_connect",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.000253737
@@ -412,7 +415,7 @@ probe_phase_duration_seconds{impact="critical",network_path="direct",phase="tran
 probe_http_status_code{impact="critical",network_path="direct",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 200
 probe_http_status_code{impact="high",network_path="direct",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/error",target_account="dev-stack",target_name="http-500-expected-200",target_partition="dev",target_region="local"} 500
 
-# HELP probe_http_response_truncated 1 if the HTTP response body exceeded the effective transfer limit, 0 otherwise.
+# HELP probe_http_response_truncated 1 if the HTTP response body exceeded the effective response body limit, 0 otherwise.
 # TYPE probe_http_response_truncated gauge
 probe_http_response_truncated{impact="critical",network_path="direct",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0
 

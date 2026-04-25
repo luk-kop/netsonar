@@ -22,12 +22,12 @@ remain useful when investigating a specific endpoint or network path.
 
 | NetSonar metric | Reference tool | Expected relationship |
 |---|---|---|
-| `probe_duration_seconds` for HTTP | `curl -w '%{time_total}'` | Direct comparison when redirects and transfer limits do not change semantics |
+| `probe_duration_seconds` for HTTP | `curl -w '%{time_total}'` | Direct comparison when redirects and response body limits do not change semantics |
 | `probe_http_status_code` | `curl -w '%{http_code}'` | Direct integer comparison |
 | HTTP `dns_resolve` phase | `curl -w '%{time_namelookup}'` | Direct comparison |
 | HTTP `tcp_connect` phase | `curl -w` values `time_connect` and `time_namelookup` | Delta comparison: subtract `time_namelookup` from `time_connect` |
 | HTTP `tls_handshake` phase | `curl -w` values `time_appconnect` and `time_connect` | Delta comparison: subtract `time_connect` from `time_appconnect` |
-| HTTP `ttfb` phase | Blackbox `probe_http_duration_seconds{phase="processing"}` | Direct comparison; same semantic phase |
+| HTTP `ttfb` phase | Blackbox `probe_http_duration_seconds{phase="processing"}` | Direct comparison for empty/small requests; generated upload time is split into NetSonar `request_write` |
 | HTTP `transfer` phase | `curl -w` values `time_total` and `time_starttransfer` | Delta comparison: subtract `time_starttransfer` from `time_total` |
 | `probe_icmp_avg_rtt_seconds` | `ping -c N` average RTT | Direct comparison for the same ICMP type |
 | `probe_icmp_stddev_rtt_seconds` | Per-reply `ping -D` or `fping -C N` RTTs | Compute population standard deviation; do not compare to Linux `ping` mdev |
@@ -61,13 +61,15 @@ per-phase deltas. Use these mappings:
 | `dns_resolve + tcp_connect` | `time_connect` |
 | `dns_resolve + tcp_connect + tls_handshake` | `time_appconnect` |
 | `probe_duration_seconds` | `time_total` |
-| HTTPS `ttfb` | `time_starttransfer - time_appconnect` |
-| Plain HTTP `ttfb` | `time_starttransfer - time_connect` |
+| HTTPS `ttfb` | `time_starttransfer - time_appconnect` for empty/small requests |
+| Plain HTTP `ttfb` | `time_starttransfer - time_connect` for empty/small requests |
 | `transfer` | `time_total - time_starttransfer` |
 
-NetSonar's `ttfb` starts after TCP connect and, for HTTPS, after TLS handshake.
-This aligns it with Prometheus Blackbox Exporter's `processing` phase and with
-browser-style Navigation Timing semantics.
+NetSonar's `request_write` starts after TCP connect and, for HTTPS, after TLS
+handshake. NetSonar's `ttfb` starts after request write completion. For
+empty/small requests this remains close to Prometheus Blackbox Exporter's
+`processing` phase and browser-style Navigation Timing semantics; for generated
+request bodies, upload time is separated into `request_write`.
 
 ## Timing Thresholds
 
@@ -113,7 +115,8 @@ dashboard. The lab compares these phase pairs:
 | `dns_resolve` | `resolve` |
 | `tcp_connect` | `connect` |
 | `tls_handshake` | `tls` |
-| `ttfb` | `processing` |
+| `request_write` | Included in `processing` |
+| `ttfb` | `processing` minus request-write time |
 | `transfer` | `transfer` |
 
 The lab intentionally validates only local HTTP and HTTPS probes. It does not
@@ -160,7 +163,7 @@ reflect the last connection in the redirect chain while total duration includes
 the whole chain. Direct curl phase comparison is only clean with
 non-redirecting targets or `follow_redirects: false`.
 
-**HTTP transfer cap.** NetSonar reads at most `max_transfer_bytes` from the
+**HTTP transfer cap.** NetSonar reads at most `response_body_limit_bytes` from the
 response body. If the body exceeds that cap, total duration and transfer phase
 describe the capped read, while curl normally reads the full body.
 

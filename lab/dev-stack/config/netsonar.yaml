@@ -104,6 +104,21 @@ targets:
       target_partition: dev
       target_account: dev-stack-remote
 
+  - name: http-upload-64k
+    address: "http://fake-targets:8080/upload"
+    probe_type: http
+    probe_opts:
+      method: POST
+      request_body_bytes: 65536
+      expected_status_codes: [200]
+    tags:
+      service: fake-http
+      scope: same-region
+      impact: medium
+      target_region: local
+      target_partition: dev
+      target_account: dev-stack
+
   - name: http-body-ok
     address: "http://fake-targets:8080/ok"
     probe_type: http_body
