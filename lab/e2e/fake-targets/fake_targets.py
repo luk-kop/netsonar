@@ -25,6 +25,24 @@ class HTTPHandler(http.server.BaseHTTPRequestHandler):
             return
         self._write(404, b"not found\n")
 
+    def do_POST(self):
+        if self.path != "/upload":
+            self._write(404, b"not found\n")
+            return
+
+        length = int(self.headers.get("Content-Length", "0"))
+        body = self.rfile.read(length)
+        if len(body) != length:
+            self._write(400, b"incomplete upload\n")
+            return
+        if self.headers.get("Transfer-Encoding"):
+            self._write(400, b"chunked upload not expected\n")
+            return
+        if self.headers.get("Content-Type") != "application/octet-stream":
+            self._write(415, b"unexpected content type\n")
+            return
+        self._write(200, f"uploaded {len(body)}\n".encode("ascii"))
+
     def log_message(self, fmt, *args):
         return
 
@@ -46,13 +64,17 @@ class ProxyHandler(socketserver.StreamRequestHandler):
         method = parts[0] if len(parts) >= 1 else ""
         target = parts[1] if len(parts) >= 2 else ""
 
+        headers = {}
         while True:
             header = self.rfile.readline()
             if header in (b"\r\n", b"\n", b""):
                 break
+            name, _, value = header.decode("iso-8859-1", "replace").partition(":")
+            if name:
+                headers[name.strip().lower()] = value.strip()
 
-        if method == "GET":
-            self._handle_get(target)
+        if method in ("GET", "POST"):
+            self._handle_http(method, target, headers)
             return
 
         if method != "CONNECT":
@@ -68,7 +90,7 @@ class ProxyHandler(socketserver.StreamRequestHandler):
 
         self.wfile.write(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
 
-    def _handle_get(self, target):
+    def _handle_http(self, method, target, headers):
         parsed = urllib.parse.urlparse(target)
         if parsed.scheme != "http" or parsed.netloc != "fake-targets:8080":
             self.wfile.write(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
@@ -79,13 +101,24 @@ class ProxyHandler(socketserver.StreamRequestHandler):
             path = path + "?" + parsed.query
 
         with socket.create_connection(("127.0.0.1", 8080), timeout=2) as upstream:
+            content_length = 0
+            if method == "POST":
+                content_length = int(headers.get("content-length", "0"))
+                body = self.rfile.read(content_length)
+            else:
+                body = b""
+
             upstream.sendall(
-                f"GET {path} HTTP/1.1\r\n"
+                f"{method} {path} HTTP/1.1\r\n"
                 "Host: fake-targets:8080\r\n"
                 "Connection: close\r\n"
+                f"Content-Length: {content_length}\r\n"
+                "Content-Type: application/octet-stream\r\n"
                 "\r\n"
                 .encode("ascii")
             )
+            if body:
+                upstream.sendall(body)
             while True:
                 chunk = upstream.recv(4096)
                 if not chunk:

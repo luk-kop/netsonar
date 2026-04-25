@@ -23,6 +23,7 @@ import (
 // target URL uses a literal IP address.
 var requiredPhaseKeys = []string{
 	"tcp_connect",
+	"request_write",
 	"ttfb",
 	"transfer",
 }
@@ -192,11 +193,12 @@ func TestPropertyHTTPPhaseBreakdownCompleteness(t *testing.T) {
 
 			// --- Property 8b: Sum of phases ≈ total duration ---
 			//
-			// Observed phases are non-overlapping: ttfb is anchored at the
-			// later of connectEnd and tlsEnd, so for HTTPS it excludes the
-			// TLS handshake (which is reported separately as tls_handshake).
+			// Observed phases are non-overlapping: request_write is anchored
+			// at connection readiness and ttfb is anchored after request write,
+			// so HTTPS excludes the TLS handshake (reported separately).
 			// The sum of observed phases should approximate total duration.
 			phaseSum := result.Phases["tcp_connect"] +
+				result.Phases["request_write"] +
 				result.Phases["ttfb"] +
 				result.Phases["transfer"]
 			if dnsDur, ok := result.Phases["dns_resolve"]; ok {

@@ -95,7 +95,7 @@ func NewMetricsExporter(tagKeys []string) *MetricsExporter {
 
 		probePhaseDuration: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "probe_phase_duration_seconds",
-			Help: "Per-phase timing for probes that expose sub-phase breakdowns (TCP: dns_resolve for hostname targets, tcp_connect; HTTP: dns_resolve, tcp_connect, tls_handshake, ttfb, transfer; TLS cert direct: dns_resolve for hostname targets, tcp_connect, tls_handshake; proxy and TLS cert via proxy: proxy_dial, proxy_tls, proxy_connect; TLS cert via proxy also adds tls_handshake).",
+			Help: "Per-phase timing for probes that expose sub-phase breakdowns (TCP: dns_resolve for hostname targets, tcp_connect; HTTP: dns_resolve, tcp_connect, tls_handshake, request_write, ttfb, transfer; TLS cert direct: dns_resolve for hostname targets, tcp_connect, tls_handshake; proxy and TLS cert via proxy: proxy_dial, proxy_tls, proxy_connect; TLS cert via proxy also adds tls_handshake).",
 		}, append(commonLabels, "phase")),
 
 		httpStatusCode: prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -155,7 +155,7 @@ func NewMetricsExporter(tagKeys []string) *MetricsExporter {
 
 		httpResponseTruncated: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "probe_http_response_truncated",
-			Help: "1 if the HTTP response body exceeded the effective transfer limit, 0 otherwise.",
+			Help: "1 if the HTTP response body exceeded the effective response body limit, 0 otherwise.",
 		}, commonLabels),
 
 		probeSkippedOverlapTotal: prometheus.NewCounterVec(prometheus.CounterOpts{

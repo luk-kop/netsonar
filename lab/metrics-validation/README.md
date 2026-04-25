@@ -16,7 +16,8 @@ same semantics as an independent reference prober:
 | `dns_resolve` | `resolve` |
 | `tcp_connect` | `connect` |
 | `tls_handshake` | `tls` |
-| `ttfb` | `processing` |
+| `request_write` | Included in `processing` |
+| `ttfb` | `processing` minus request-write time |
 | `transfer` | `transfer` |
 
 The lab is intentionally local and deterministic. It is not an Internet

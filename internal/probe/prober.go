@@ -42,6 +42,7 @@ const (
 	PhaseDNSResolve   = "dns_resolve"
 	PhaseTCPConnect   = "tcp_connect"
 	PhaseTLSHandshake = "tls_handshake"
+	PhaseRequestWrite = "request_write"
 	PhaseTTFB         = "ttfb"
 	PhaseTransfer     = "transfer"
 	PhaseProxyDial    = "proxy_dial"
@@ -61,6 +62,7 @@ var AllPhases = []string{
 	PhaseDNSResolve,
 	PhaseTCPConnect,
 	PhaseTLSHandshake,
+	PhaseRequestWrite,
 	PhaseTTFB,
 	PhaseTransfer,
 	PhaseProxyDial,
@@ -80,9 +82,10 @@ type ProbeResult struct {
 	// Phases contains per-phase timing for probes that expose a sub-phase
 	// breakdown. TCP and direct TLS cert emit dns_resolve for hostname
 	// targets, plus tcp_connect; direct TLS cert also emits tls_handshake.
-	// HTTP uses dns_resolve, tcp_connect, tls_handshake, ttfb, and transfer.
-	// Proxy and TLS cert via proxy use proxy_dial, proxy_tls, and
-	// proxy_connect; TLS cert via proxy also adds the target tls_handshake.
+	// HTTP uses dns_resolve, tcp_connect, tls_handshake, request_write,
+	// ttfb, and transfer. Proxy and TLS cert via proxy use proxy_dial,
+	// proxy_tls, and proxy_connect; TLS cert via proxy also adds the target
+	// tls_handshake.
 	// Nil for probe types without meaningful sub-phases.
 	Phases map[string]time.Duration
 
@@ -145,8 +148,8 @@ type ProbeResult struct {
 	DNSMatched bool
 
 	// HTTPResponseTruncated is true when the HTTP probe observed a response
-	// body larger than the effective transfer limit. It is not a failure by
-	// itself and is only used by probe_type=http.
+	// body larger than the effective response body limit. It is not a failure
+	// by itself and is only used by probe_type=http.
 	HTTPResponseTruncated bool
 
 	// HTTPTruncationEvaluated is true when the HTTP probe received a response

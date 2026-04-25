@@ -104,6 +104,7 @@ Additional deep-dives:
 
 - [MTU/PMTUD internals](docs/mtu-pmtud.md)
 - [MTU measurement options](docs/mtu-measurement-options.md)
+- [HTTP request payload probes](docs/http-request-payload-probe.md)
 - [Proxy probing guide](docs/proxy-probing.md)
 
 ## Metrics Reference
