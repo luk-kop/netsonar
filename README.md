@@ -1,12 +1,10 @@
 # NetSonar
 
+<!-- markdownlint-disable MD033 -->
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/img/netsonar_horizontal_lockup_dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="docs/img/netsonar_horizontal_lockup_outlined.svg">
-    <img src="docs/img/netsonar_horizontal_lockup_outlined.svg" alt="NetSonar">
-  </picture>
+  <img src="docs/img/netsonar_horizontal_lockup_readme.svg" alt="NetSonar">
 </p>
+<!-- markdownlint-enable MD033 -->
 
 [![CI](https://github.com/luk-kop/netsonar/actions/workflows/ci.yml/badge.svg)](https://github.com/luk-kop/netsonar/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/luk-kop/netsonar)](https://go.dev/)
