@@ -1,0 +1,56 @@
+<svg width="512" height="640" viewBox="0 0 512 640" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="radarBg" cx="50%" cy="50%" r="58%">
+      <stop offset="0%" stop-color="#102b3c"/>
+      <stop offset="72%" stop-color="#0b2433"/>
+      <stop offset="100%" stop-color="#071b28"/>
+    </radialGradient>
+    <linearGradient id="blueRing" x1="120" y1="90" x2="880" y2="920" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#7ddcff"/>
+      <stop offset="48%" stop-color="#4fc8f4"/>
+      <stop offset="100%" stop-color="#39bff0"/>
+    </linearGradient>
+    <linearGradient id="sweepBody" x1="817.47" y1="206.53" x2="645.50" y2="101.14" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#7dff78" stop-opacity="0.82"/>
+      <stop offset="24%" stop-color="#5df36a" stop-opacity="0.58"/>
+      <stop offset="58%" stop-color="#4ade5a" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#4ade5a" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="sweepEdge" x1="512" y1="512" x2="817.47" y2="206.53" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#76ff73" stop-opacity="0.28"/>
+      <stop offset="68%" stop-color="#82ff76" stop-opacity="0.92"/>
+      <stop offset="100%" stop-color="#e0ffd2"/>
+    </linearGradient>
+    <clipPath id="insideRadar">
+      <circle cx="512" cy="512" r="432"/>
+    </clipPath>
+  </defs>
+
+  <g transform="translate(76 28) scale(0.3515625)">
+    <circle cx="512" cy="512" r="470" fill="url(#radarBg)" stroke="url(#blueRing)" stroke-width="76"/>
+    <circle cx="512" cy="512" r="310" fill="none" stroke="#9fb0b7" stroke-width="5" opacity="0.58"/>
+    <circle cx="512" cy="512" r="175" fill="none" stroke="#9fb0b7" stroke-width="5" opacity="0.58"/>
+    <line x1="512" y1="72" x2="512" y2="952" stroke="#9fb0b7" stroke-width="5" opacity="0.55"/>
+    <line x1="72" y1="512" x2="952" y2="512" stroke="#9fb0b7" stroke-width="5" opacity="0.55"/>
+    <line x1="213" y1="213" x2="811" y2="811" stroke="#8b9ca4" stroke-width="4" opacity="0.38"/>
+
+    <g clip-path="url(#insideRadar)">
+      <path d="M 512 512 L 645.50 101.14 A 432 432 0 0 1 817.47 206.53 Z" fill="url(#sweepBody)"/>
+      <line x1="512" y1="512" x2="817.47" y2="206.53" stroke="url(#sweepEdge)" stroke-width="15" stroke-linecap="round"/>
+      <line x1="512" y1="512" x2="817.47" y2="206.53" stroke="#efffe6" stroke-width="4.5" stroke-linecap="round" opacity="0.80"/>
+    </g>
+
+    <path d="M295 304 L255 690 L505 820 L805 430" fill="none" stroke="#ffffff" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M295 304 L512 512 L255 690" fill="none" stroke="#ffffff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="295" cy="304" r="34" fill="#57e665"/>
+    <circle cx="255" cy="690" r="44" fill="#ffffff"/>
+    <circle cx="505" cy="820" r="48" fill="#57e665"/>
+    <circle cx="805" cy="430" r="42" fill="#ffffff"/>
+    <circle cx="512" cy="512" r="50" fill="#0b2433" stroke="#aab7bd" stroke-width="7"/>
+  </g>
+
+  <text x="256" y="472" text-anchor="middle" font-family="Inter, Arial, Helvetica, sans-serif" font-size="74" font-weight="800">
+    <tspan fill="#0B1B28">Net</tspan><tspan fill="#22C55E">Sonar</tspan>
+  </text>
+  <text x="256" y="520" text-anchor="middle" font-family="Inter, Arial, Helvetica, sans-serif" font-size="18" font-weight="700" letter-spacing="1.7" fill="#334155">NETWORK VISIBILITY &amp; DIAGNOSTICS</text>
+</svg>
