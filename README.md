@@ -2,7 +2,7 @@
 
 <!-- markdownlint-disable MD033 -->
 <p align="center">
-  <img src="docs/img/netsonar_horizontal_lockup_readme.svg" alt="NetSonar">
+  <img src="docs/img/netsonar_horizontal_lockup_readme.svg" alt="NetSonar" width="520">
 </p>
 <!-- markdownlint-enable MD033 -->
 
