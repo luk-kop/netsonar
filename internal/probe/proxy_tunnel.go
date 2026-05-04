@@ -13,22 +13,32 @@ import (
 	"time"
 )
 
+// proxyConnectResponse captures the proxy's response to a CONNECT request.
+// Observed is true when the proxy returned a parseable HTTP response (success
+// or failure); StatusCode is only meaningful when Observed is true.
+type proxyConnectResponse struct {
+	StatusCode int
+	Observed   bool
+}
+
 // dialProxyTunnel dials proxyURL and issues HTTP CONNECT to tunnelDest.
 // On success it returns a byte-stream net.Conn to tunnelDest plus recorded
-// phases. On error it returns phases accumulated up to the failure point,
-// closes any connection it opened, and returns a non-nil error. The caller
+// phases and the observed CONNECT response. On error it returns phases
+// accumulated up to the failure point, the observed CONNECT response (if
+// any), closes any connection it opened, and a non-nil error. The caller
 // owns the returned connection on success and must close it.
-func dialProxyTunnel(ctx context.Context, proxyURL *url.URL, tunnelDest string) (net.Conn, map[string]time.Duration, error) {
+func dialProxyTunnel(ctx context.Context, proxyURL *url.URL, tunnelDest string) (net.Conn, map[string]time.Duration, proxyConnectResponse, error) {
 	proxyAddr := hostPortForURL(proxyURL)
 	start := time.Now()
 	phases := make(map[string]time.Duration, 3)
+	var connectResp proxyConnectResponse
 
 	var d net.Dialer
 	proxyConn, err := d.DialContext(ctx, "tcp", proxyAddr)
 	proxyDialDone := time.Now()
 	addObservedPhase(phases, PhaseProxyDial, proxyDialDone, start)
 	if err != nil {
-		return nil, phases, fmt.Errorf("proxy dial: %s", err.Error())
+		return nil, phases, connectResp, fmt.Errorf("proxy dial: %s", err.Error())
 	}
 
 	closeOnError := true
@@ -47,7 +57,7 @@ func dialProxyTunnel(ctx context.Context, proxyURL *url.URL, tunnelDest string) 
 		tlsEnd := time.Now()
 		addObservedPhase(phases, PhaseProxyTLS, tlsEnd, tlsStart)
 		if err != nil {
-			return nil, phases, fmt.Errorf("proxy tls handshake: %s", err.Error())
+			return nil, phases, connectResp, fmt.Errorf("proxy tls handshake: %s", err.Error())
 		}
 		proxyConn = tlsConn
 	}
@@ -57,7 +67,7 @@ func dialProxyTunnel(ctx context.Context, proxyURL *url.URL, tunnelDest string) 
 	// to the underlying net.Conn, so this covers both operations.
 	if deadline, ok := ctx.Deadline(); ok {
 		if err := proxyConn.SetDeadline(deadline); err != nil {
-			return nil, phases, fmt.Errorf("set deadline: %s", err.Error())
+			return nil, phases, connectResp, fmt.Errorf("set deadline: %s", err.Error())
 		}
 	}
 
@@ -76,14 +86,15 @@ func dialProxyTunnel(ctx context.Context, proxyURL *url.URL, tunnelDest string) 
 	connectStart := time.Now()
 	if err := connectReq.Write(proxyConn); err != nil {
 		addObservedPhase(phases, PhaseProxyConnect, time.Now(), connectStart)
-		return nil, phases, fmt.Errorf("writing CONNECT request: %s", err.Error())
+		return nil, phases, connectResp, fmt.Errorf("writing CONNECT request: %s", err.Error())
 	}
 
 	resp, err := http.ReadResponse(bufio.NewReader(proxyConn), connectReq)
 	addObservedPhase(phases, PhaseProxyConnect, time.Now(), connectStart)
 	if err != nil {
-		return nil, phases, fmt.Errorf("reading CONNECT response: %s", err.Error())
+		return nil, phases, connectResp, fmt.Errorf("reading CONNECT response: %s", err.Error())
 	}
+	connectResp = proxyConnectResponse{StatusCode: resp.StatusCode, Observed: true}
 	// Intentionally not draining resp.Body before Close:
 	// - On 200 OK the body is a CONNECT tunnel stream; draining would block
 	//   until ctx deadline and corrupt result.Duration.
@@ -91,12 +102,26 @@ func dialProxyTunnel(ctx context.Context, proxyURL *url.URL, tunnelDest string) 
 	//   by defer; there is no connection pool to return a clean conn to.
 	_ = resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, phases, fmt.Errorf("proxy CONNECT returned status %d", resp.StatusCode)
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return nil, phases, connectResp, fmt.Errorf("proxy CONNECT returned status %d", resp.StatusCode)
 	}
 
 	closeOnError = false
-	return proxyConn, phases, nil
+	return proxyConn, phases, connectResp, nil
+}
+
+// hostPortForURL returns host:port from a proxy URL, applying the scheme
+// default (443 for https, 80 otherwise) when the URL has no explicit port.
+func hostPortForURL(u *url.URL) string {
+	port := u.Port()
+	if port == "" {
+		if u.Scheme == "https" {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+	return net.JoinHostPort(u.Hostname(), port)
 }
 
 // setProxyAuthorization applies Basic proxy authentication from proxy URL

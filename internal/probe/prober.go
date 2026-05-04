@@ -96,6 +96,15 @@ type ProbeResult struct {
 	// response metadata such as status code became observable.
 	HTTPResponseReceived bool
 
+	// ProxyConnectStatusCode is the HTTP status code returned by a proxy to a
+	// CONNECT request. It is distinct from StatusCode, which is the target HTTP
+	// response status code.
+	ProxyConnectStatusCode int
+
+	// ProxyConnectResponseReceived is true when a proxy CONNECT response was
+	// received and ProxyConnectStatusCode is meaningful.
+	ProxyConnectResponseReceived bool
+
 	// CertExpiry is the earliest TLS certificate NotAfter timestamp in the
 	// peer certificate chain (TLS and HTTPS probes only).
 	CertExpiry time.Time

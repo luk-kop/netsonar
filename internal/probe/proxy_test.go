@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -122,8 +121,8 @@ func TestProxyProber_Success(t *testing.T) {
 
 	target := config.TargetConfig{
 		Name:      "test-proxy-success",
-		Address:   "https://example.com",
-		ProbeType: config.ProbeTypeProxy,
+		Address:   "example.com:443",
+		ProbeType: config.ProbeTypeProxyConnect,
 		Timeout:   5 * time.Second,
 		ProbeOpts: config.ProbeOptions{
 			ProxyURL: "http://" + proxyAddr,
@@ -169,8 +168,8 @@ func TestProxyProber_SendsProxyAuthorizationFromURLUserinfo(t *testing.T) {
 
 	target := config.TargetConfig{
 		Name:      "test-proxy-auth",
-		Address:   "https://example.com",
-		ProbeType: config.ProbeTypeProxy,
+		Address:   "example.com:443",
+		ProbeType: config.ProbeTypeProxyConnect,
 		Timeout:   5 * time.Second,
 		ProbeOpts: config.ProbeOptions{
 			ProxyURL: "http://user:pass@" + proxyAddr,
@@ -194,8 +193,8 @@ func TestProxyProber_SendsProxyAuthorizationWithEmptyPassword(t *testing.T) {
 
 	target := config.TargetConfig{
 		Name:      "test-proxy-auth-empty-password",
-		Address:   "https://example.com",
-		ProbeType: config.ProbeTypeProxy,
+		Address:   "example.com:443",
+		ProbeType: config.ProbeTypeProxyConnect,
 		Timeout:   5 * time.Second,
 		ProbeOpts: config.ProbeOptions{
 			ProxyURL: "http://user@" + proxyAddr,
@@ -219,8 +218,8 @@ func TestProxyProber_DoesNotSendProxyAuthorizationWithoutURLUserinfo(t *testing.
 
 	target := config.TargetConfig{
 		Name:      "test-proxy-no-auth",
-		Address:   "https://example.com",
-		ProbeType: config.ProbeTypeProxy,
+		Address:   "example.com:443",
+		ProbeType: config.ProbeTypeProxyConnect,
 		Timeout:   5 * time.Second,
 		ProbeOpts: config.ProbeOptions{
 			ProxyURL: "http://" + proxyAddr,
@@ -244,8 +243,8 @@ func TestProxyProber_DoesNotLeakProxyCredentialsInErrors(t *testing.T) {
 
 	target := config.TargetConfig{
 		Name:      "test-proxy-auth-error-redaction",
-		Address:   "https://example.com",
-		ProbeType: config.ProbeTypeProxy,
+		Address:   "example.com:443",
+		ProbeType: config.ProbeTypeProxyConnect,
 		Timeout:   5 * time.Second,
 		ProbeOpts: config.ProbeOptions{
 			ProxyURL: "http://user:secret@" + proxyAddr,
@@ -272,8 +271,8 @@ func TestProxyProber_PreservesPhasesOnHTTPSProxyTLSFailure(t *testing.T) {
 
 	target := config.TargetConfig{
 		Name:      "test-proxy-tls-failure-phases",
-		Address:   "https://example.com",
-		ProbeType: config.ProbeTypeProxy,
+		Address:   "example.com:443",
+		ProbeType: config.ProbeTypeProxyConnect,
 		Timeout:   5 * time.Second,
 		ProbeOpts: config.ProbeOptions{
 			ProxyURL: "https://" + proxyAddr,
@@ -308,8 +307,8 @@ func TestProxyProber_ProxyReturnsNon200(t *testing.T) {
 
 	target := config.TargetConfig{
 		Name:      "test-proxy-non200",
-		Address:   "https://example.com",
-		ProbeType: config.ProbeTypeProxy,
+		Address:   "example.com:443",
+		ProbeType: config.ProbeTypeProxyConnect,
 		Timeout:   5 * time.Second,
 		ProbeOpts: config.ProbeOptions{
 			ProxyURL: "http://" + proxyAddr,
@@ -333,6 +332,12 @@ func TestProxyProber_ProxyReturnsNon200(t *testing.T) {
 	if result.Error != expected {
 		t.Fatalf("expected Error=%q, got %q", expected, result.Error)
 	}
+	if !result.ProxyConnectResponseReceived {
+		t.Fatal("expected proxy CONNECT status to be observed")
+	}
+	if result.ProxyConnectStatusCode != http.StatusForbidden {
+		t.Fatalf("expected proxy CONNECT status 403, got %d", result.ProxyConnectStatusCode)
+	}
 	if result.Phases["proxy_dial"] <= 0 {
 		t.Fatalf("expected proxy_dial phase to be preserved, got %v", result.Phases)
 	}
@@ -341,13 +346,77 @@ func TestProxyProber_ProxyReturnsNon200(t *testing.T) {
 	}
 }
 
+func TestProxyProber_ExpectedProxyConnectStatus(t *testing.T) {
+	proxyAddr, cleanup := mockProxy(t, http.StatusForbidden)
+	defer cleanup()
+
+	target := config.TargetConfig{
+		Name:      "test-proxy-expected-deny",
+		Address:   "example.com:443",
+		ProbeType: config.ProbeTypeProxyConnect,
+		Timeout:   5 * time.Second,
+		ProbeOpts: config.ProbeOptions{
+			ProxyURL:                        "http://" + proxyAddr,
+			ExpectedProxyConnectStatusCodes: []int{http.StatusForbidden},
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
+	defer cancel()
+
+	prober := &ProxyProber{}
+	result := prober.Probe(ctx, target)
+
+	if !result.Success {
+		t.Fatalf("expected Success=true for expected CONNECT 403, error=%q", result.Error)
+	}
+	if result.Error != "" {
+		t.Fatalf("expected empty Error for expected CONNECT 403, got %q", result.Error)
+	}
+	if !result.ProxyConnectResponseReceived || result.ProxyConnectStatusCode != http.StatusForbidden {
+		t.Fatalf("expected observed CONNECT 403, got observed=%v code=%d", result.ProxyConnectResponseReceived, result.ProxyConnectStatusCode)
+	}
+}
+
+func TestProxyProber_UnexpectedProxyConnectStatus(t *testing.T) {
+	proxyAddr, cleanup := mockProxy(t, http.StatusOK)
+	defer cleanup()
+
+	target := config.TargetConfig{
+		Name:      "test-proxy-unexpected-allow",
+		Address:   "example.com:443",
+		ProbeType: config.ProbeTypeProxyConnect,
+		Timeout:   5 * time.Second,
+		ProbeOpts: config.ProbeOptions{
+			ProxyURL:                        "http://" + proxyAddr,
+			ExpectedProxyConnectStatusCodes: []int{http.StatusForbidden},
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
+	defer cancel()
+
+	prober := &ProxyProber{}
+	result := prober.Probe(ctx, target)
+
+	if result.Success {
+		t.Fatal("expected Success=false for unexpected CONNECT 200")
+	}
+	if result.Error != "unexpected proxy CONNECT status 200" {
+		t.Fatalf("expected unexpected status error, got %q", result.Error)
+	}
+	if !result.ProxyConnectResponseReceived || result.ProxyConnectStatusCode != http.StatusOK {
+		t.Fatalf("expected observed CONNECT 200, got observed=%v code=%d", result.ProxyConnectResponseReceived, result.ProxyConnectStatusCode)
+	}
+}
+
 // TestProxyProber_InvalidProxyURL verifies that an invalid proxy URL
 // results in Success=false with a descriptive error.
 func TestProxyProber_InvalidProxyURL(t *testing.T) {
 	target := config.TargetConfig{
 		Name:      "test-proxy-invalid-url",
-		Address:   "https://example.com",
-		ProbeType: config.ProbeTypeProxy,
+		Address:   "example.com:443",
+		ProbeType: config.ProbeTypeProxyConnect,
 		Timeout:   2 * time.Second,
 		ProbeOpts: config.ProbeOptions{
 			ProxyURL: "://not-a-valid-url",
@@ -377,7 +446,7 @@ func TestProxyProber_InvalidTargetAddress(t *testing.T) {
 	target := config.TargetConfig{
 		Name:      "test-proxy-invalid-target",
 		Address:   "not-a-url-or-host-port",
-		ProbeType: config.ProbeTypeProxy,
+		ProbeType: config.ProbeTypeProxyConnect,
 		Timeout:   2 * time.Second,
 		ProbeOpts: config.ProbeOptions{
 			ProxyURL: "http://" + proxyAddr,
@@ -398,6 +467,39 @@ func TestProxyProber_InvalidTargetAddress(t *testing.T) {
 	}
 }
 
+// TestProxyProber_RejectsURLAddress is a defensive guard: config validation
+// should reject URL-shaped addresses upstream, but the prober itself must
+// also fail with a clear, actionable error message if a URL ever reaches it.
+// This locks the wording so a future refactor doesn't silently revert the
+// "URL syntax not supported" hint.
+func TestProxyProber_RejectsURLAddress(t *testing.T) {
+	proxyAddr, cleanup := mockProxy(t, http.StatusOK)
+	defer cleanup()
+
+	target := config.TargetConfig{
+		Name:      "test-proxy-url-address",
+		Address:   "https://example.com",
+		ProbeType: config.ProbeTypeProxyConnect,
+		Timeout:   2 * time.Second,
+		ProbeOpts: config.ProbeOptions{
+			ProxyURL: "http://" + proxyAddr,
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
+	defer cancel()
+
+	prober := &ProxyProber{}
+	result := prober.Probe(ctx, target)
+
+	if result.Success {
+		t.Fatal("expected Success=false for URL target address")
+	}
+	if !strings.Contains(result.Error, "URL syntax not supported") {
+		t.Fatalf("expected error to mention URL syntax rejection, got %q", result.Error)
+	}
+}
+
 // TestProxyProber_ConnectionRefused verifies that when the proxy is not
 // reachable, Success=false and Error is non-empty.
 func TestProxyProber_ConnectionRefused(t *testing.T) {
@@ -411,8 +513,8 @@ func TestProxyProber_ConnectionRefused(t *testing.T) {
 
 	target := config.TargetConfig{
 		Name:      "test-proxy-refused",
-		Address:   "https://example.com",
-		ProbeType: config.ProbeTypeProxy,
+		Address:   "example.com:443",
+		ProbeType: config.ProbeTypeProxyConnect,
 		Timeout:   2 * time.Second,
 		ProbeOpts: config.ProbeOptions{
 			ProxyURL: "http://" + addr,
@@ -430,30 +532,6 @@ func TestProxyProber_ConnectionRefused(t *testing.T) {
 	}
 	if result.Error == "" {
 		t.Fatal("expected non-empty Error for connection refused")
-	}
-}
-
-// TestParseTunnelDestination_HTTPS verifies that an HTTPS URL extracts
-// host:443.
-func TestParseTunnelDestination_HTTPS(t *testing.T) {
-	dest, err := parseTunnelDestination("https://example.com")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if dest != "example.com:443" {
-		t.Fatalf("expected %q, got %q", "example.com:443", dest)
-	}
-}
-
-// TestParseTunnelDestination_HTTP verifies that an HTTP URL extracts
-// host:80.
-func TestParseTunnelDestination_HTTP(t *testing.T) {
-	dest, err := parseTunnelDestination("http://example.com")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if dest != "example.com:80" {
-		t.Fatalf("expected %q, got %q", "example.com:80", dest)
 	}
 }
 
@@ -478,17 +556,29 @@ func TestParseTunnelDestination_Invalid(t *testing.T) {
 	}
 }
 
-// TestParseTunnelDestination_IPv6 verifies that IPv6 literals in URLs are
-// returned with a single pair of brackets and the scheme-default port.
+// TestParseTunnelDestination_RejectsURL verifies that proxy_connect does not
+// accept URL syntax. CONNECT policy is defined for host:port, not URL paths.
+func TestParseTunnelDestination_RejectsURL(t *testing.T) {
+	for _, address := range []string{"https://example.com", "http://example.com"} {
+		t.Run(address, func(t *testing.T) {
+			_, err := parseTunnelDestination(address)
+			if err == nil {
+				t.Fatalf("expected error for URL address %q, got nil", address)
+			}
+		})
+	}
+}
+
+// TestParseTunnelDestination_IPv6 verifies that bracketed IPv6 host:port
+// addresses are returned as-is.
 func TestParseTunnelDestination_IPv6(t *testing.T) {
 	cases := []struct {
 		name    string
 		address string
 		want    string
 	}{
-		{"https no port", "https://[2001:db8::1]", "[2001:db8::1]:443"},
-		{"http no port", "http://[::1]", "[::1]:80"},
-		{"https explicit port", "https://[2001:db8::1]:8443", "[2001:db8::1]:8443"},
+		{"ipv6 explicit port", "[2001:db8::1]:8443", "[2001:db8::1]:8443"},
+		{"loopback explicit port", "[::1]:443", "[::1]:443"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -498,35 +588,6 @@ func TestParseTunnelDestination_IPv6(t *testing.T) {
 			}
 			if got != tc.want {
 				t.Fatalf("parseTunnelDestination(%q) = %q, want %q", tc.address, got, tc.want)
-			}
-		})
-	}
-}
-
-// TestHostPortForURL covers the scheme-default port and IPv6 literal paths
-// used by ProxyProber when resolving the dial address for the proxy itself.
-func TestHostPortForURL(t *testing.T) {
-	cases := []struct {
-		name string
-		raw  string
-		want string
-	}{
-		{"http ipv4 no port", "http://127.0.0.1", "127.0.0.1:80"},
-		{"https ipv4 no port", "https://127.0.0.1", "127.0.0.1:443"},
-		{"http ipv6 no port", "http://[2001:db8::1]", "[2001:db8::1]:80"},
-		{"https ipv6 no port", "https://[::1]", "[::1]:443"},
-		{"http ipv6 explicit port", "http://[::1]:3128", "[::1]:3128"},
-		{"http hostname explicit port", "http://proxy.example:3128", "proxy.example:3128"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			u, err := url.Parse(tc.raw)
-			if err != nil {
-				t.Fatalf("url.Parse(%q): %v", tc.raw, err)
-			}
-			got := hostPortForURL(u)
-			if got != tc.want {
-				t.Fatalf("hostPortForURL(%q) = %q, want %q", tc.raw, got, tc.want)
 			}
 		})
 	}

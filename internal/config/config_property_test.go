@@ -39,7 +39,7 @@ func genAlphaString(maxLen int) gopter.Gen {
 func genProbeType() gopter.Gen {
 	probeTypes := []ProbeType{
 		ProbeTypeTCP, ProbeTypeHTTP, ProbeTypeICMP, ProbeTypeMTU,
-		ProbeTypeDNS, ProbeTypeTLSCert, ProbeTypeHTTPBody, ProbeTypeProxy,
+		ProbeTypeDNS, ProbeTypeTLSCert, ProbeTypeHTTPBody, ProbeTypeProxyConnect,
 	}
 	return gen.IntRange(0, len(probeTypes)-1).Map(func(i int) ProbeType {
 		return probeTypes[i]
@@ -174,7 +174,7 @@ func genProbeOptions(pt ProbeType) gopter.Gen {
 				}
 			})
 		}, reflect.TypeOf(ProbeOptions{}))
-	case ProbeTypeProxy:
+	case ProbeTypeProxyConnect:
 		return genAlphaString(8).Map(func(host string) ProbeOptions {
 			return ProbeOptions{
 				ProxyURL: "http://" + host + ":8888",
@@ -285,6 +285,9 @@ func normalizeProbeOptions(opts *ProbeOptions) {
 	}
 	if opts.ExpectedStatusCodes == nil {
 		opts.ExpectedStatusCodes = []int{}
+	}
+	if opts.ExpectedProxyConnectStatusCodes == nil {
+		opts.ExpectedProxyConnectStatusCodes = []int{}
 	}
 	if opts.ICMPPayloadSizes == nil {
 		opts.ICMPPayloadSizes = []int{}
@@ -443,7 +446,7 @@ var invalidMutations = []invalidMutation{
 		name: "proxy missing proxy_url",
 		apply: func(cfg *Config, _ *gopter.GenParameters) {
 			if len(cfg.Targets) > 0 {
-				cfg.Targets[0].ProbeType = ProbeTypeProxy
+				cfg.Targets[0].ProbeType = ProbeTypeProxyConnect
 				cfg.Targets[0].ProbeOpts = ProbeOptions{
 					ProxyURL: "",
 				}

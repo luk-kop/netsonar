@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -21,26 +22,26 @@ import (
 type ProbeType string
 
 const (
-	ProbeTypeTCP      ProbeType = "tcp"
-	ProbeTypeHTTP     ProbeType = "http"
-	ProbeTypeICMP     ProbeType = "icmp"
-	ProbeTypeMTU      ProbeType = "mtu"
-	ProbeTypeDNS      ProbeType = "dns"
-	ProbeTypeTLSCert  ProbeType = "tls_cert"
-	ProbeTypeHTTPBody ProbeType = "http_body"
-	ProbeTypeProxy    ProbeType = "proxy"
+	ProbeTypeTCP          ProbeType = "tcp"
+	ProbeTypeHTTP         ProbeType = "http"
+	ProbeTypeICMP         ProbeType = "icmp"
+	ProbeTypeMTU          ProbeType = "mtu"
+	ProbeTypeDNS          ProbeType = "dns"
+	ProbeTypeTLSCert      ProbeType = "tls_cert"
+	ProbeTypeHTTPBody     ProbeType = "http_body"
+	ProbeTypeProxyConnect ProbeType = "proxy_connect"
 )
 
 // ValidProbeTypes is the set of all valid probe type values.
 var ValidProbeTypes = map[ProbeType]bool{
-	ProbeTypeTCP:      true,
-	ProbeTypeHTTP:     true,
-	ProbeTypeICMP:     true,
-	ProbeTypeMTU:      true,
-	ProbeTypeDNS:      true,
-	ProbeTypeTLSCert:  true,
-	ProbeTypeHTTPBody: true,
-	ProbeTypeProxy:    true,
+	ProbeTypeTCP:          true,
+	ProbeTypeHTTP:         true,
+	ProbeTypeICMP:         true,
+	ProbeTypeMTU:          true,
+	ProbeTypeDNS:          true,
+	ProbeTypeTLSCert:      true,
+	ProbeTypeHTTPBody:     true,
+	ProbeTypeProxyConnect: true,
 }
 
 // ValidDNSQueryTypes is the set of allowed dns_query_type values.
@@ -126,6 +127,7 @@ type AgentConfig struct {
 	DefaultICMPPayloadSizes []int         `yaml:"default_icmp_payload_sizes"`
 	LogLevel                string        `yaml:"log_level"`
 	LogFormat               string        `yaml:"log_format"`
+	EnableRuntimeMetrics    bool          `yaml:"enable_runtime_metrics"`
 	AllowedTagKeys          []string      `yaml:"allowed_tag_keys"`
 }
 
@@ -143,13 +145,14 @@ type TargetConfig struct {
 // ProbeOptions holds probe-type-specific settings.
 type ProbeOptions struct {
 	// HTTP/HTTPS options
-	Method                 string            `yaml:"method"`
-	Headers                map[string]string `yaml:"headers"`
-	ExpectedStatusCodes    []int             `yaml:"expected_status_codes"`
-	FollowRedirects        bool              `yaml:"follow_redirects"`
-	TLSSkipVerify          bool              `yaml:"tls_skip_verify"`
-	ResponseBodyLimitBytes int64             `yaml:"response_body_limit_bytes"`
-	RequestBodyBytes       int64             `yaml:"request_body_bytes"`
+	Method                          string            `yaml:"method"`
+	Headers                         map[string]string `yaml:"headers"`
+	ExpectedStatusCodes             []int             `yaml:"expected_status_codes"`
+	ExpectedProxyConnectStatusCodes []int             `yaml:"expected_proxy_connect_status_codes"`
+	FollowRedirects                 bool              `yaml:"follow_redirects"`
+	TLSSkipVerify                   bool              `yaml:"tls_skip_verify"`
+	ResponseBodyLimitBytes          int64             `yaml:"response_body_limit_bytes"`
+	RequestBodyBytes                int64             `yaml:"request_body_bytes"`
 
 	// HTTP body validation
 	BodyMatchRegex  string `yaml:"body_match_regex"`
@@ -309,7 +312,7 @@ func validate(cfg *Config) error {
 
 		// Valid probe type.
 		if !ValidProbeTypes[t.ProbeType] {
-			return fmt.Errorf("target %q: invalid probe_type %q (valid: tcp, http, icmp, mtu, dns, tls_cert, http_body, proxy)", t.Name, t.ProbeType)
+			return fmt.Errorf("target %q: invalid probe_type %q (valid: tcp, http, icmp, mtu, dns, tls_cert, http_body, proxy_connect)", t.Name, t.ProbeType)
 		}
 
 		// Interval must be positive after defaults have been applied. Zero
@@ -442,6 +445,9 @@ func validateProbeOpts(t TargetConfig) error {
 	if t.ProbeOpts.RequestBodyBytes > 0 && t.ProbeType != ProbeTypeHTTP {
 		return fmt.Errorf("target %q: request_body_bytes is supported only for probe_type 'http'", t.Name)
 	}
+	if len(t.ProbeOpts.ExpectedProxyConnectStatusCodes) > 0 && t.ProbeType != ProbeTypeProxyConnect {
+		return fmt.Errorf("target %q: expected_proxy_connect_status_codes is supported only for probe_type 'proxy_connect'", t.Name)
+	}
 
 	switch t.ProbeType {
 	case ProbeTypeTCP:
@@ -497,13 +503,37 @@ func validateProbeOpts(t TargetConfig) error {
 		if err := validateProxyURL(t.Name, t.ProbeOpts.ProxyURL); err != nil {
 			return err
 		}
-	case ProbeTypeProxy:
+	case ProbeTypeProxyConnect:
 		if t.ProbeOpts.ProxyURL == "" {
-			return fmt.Errorf("target %q: probe_type 'proxy' requires 'proxy_url' in probe_opts", t.Name)
+			return fmt.Errorf("target %q: probe_type 'proxy_connect' requires 'proxy_url' in probe_opts", t.Name)
+		}
+		if err := validateProxyConnectAddress(t); err != nil {
+			return err
+		}
+		if len(t.ProbeOpts.ExpectedStatusCodes) > 0 {
+			return fmt.Errorf("target %q: expected_status_codes is not supported for probe_type 'proxy_connect'; use expected_proxy_connect_status_codes instead", t.Name)
 		}
 		if err := validateProxyURL(t.Name, t.ProbeOpts.ProxyURL); err != nil {
 			return err
 		}
+		if err := validateExpectedProxyConnectStatusCodes(t); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateProxyConnectAddress(t TargetConfig) error {
+	if strings.Contains(t.Address, "://") {
+		return fmt.Errorf("target %q: probe_type 'proxy_connect' address must be host:port", t.Name)
+	}
+	host, port, err := net.SplitHostPort(t.Address)
+	if err != nil || host == "" || port == "" {
+		return fmt.Errorf("target %q: probe_type 'proxy_connect' address must be host:port", t.Name)
+	}
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 1 || portNumber > 65535 {
+		return fmt.Errorf("target %q: probe_type 'proxy_connect' address port must be in range 1-65535", t.Name)
 	}
 	return nil
 }
@@ -581,6 +611,15 @@ func validateExpectedStatusCodes(t TargetConfig) error {
 	for _, code := range t.ProbeOpts.ExpectedStatusCodes {
 		if code < 100 || code > 599 {
 			return fmt.Errorf("target %q: invalid expected_status_codes value %d (valid: 100-599)", t.Name, code)
+		}
+	}
+	return nil
+}
+
+func validateExpectedProxyConnectStatusCodes(t TargetConfig) error {
+	for _, code := range t.ProbeOpts.ExpectedProxyConnectStatusCodes {
+		if code < 100 || code > 599 {
+			return fmt.Errorf("target %q: invalid expected_proxy_connect_status_codes value %d (valid: 100-599)", t.Name, code)
 		}
 	}
 	return nil

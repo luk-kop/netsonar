@@ -87,6 +87,30 @@ targets:
 	if cfg.Agent.MetricsPath != "/metrics" {
 		t.Errorf("metrics_path = %q, want %q", cfg.Agent.MetricsPath, "/metrics")
 	}
+	if cfg.Agent.EnableRuntimeMetrics {
+		t.Error("enable_runtime_metrics default = true, want false")
+	}
+}
+
+func TestLoadConfig_EnableRuntimeMetricsAccepted(t *testing.T) {
+	yaml := `
+agent:
+  default_interval: 30s
+  default_timeout: 5s
+  enable_runtime_metrics: true
+
+targets:
+  - name: "tcp-target"
+    address: "example.com:443"
+    probe_type: tcp
+`
+	cfg, err := LoadConfig(writeConfigFile(t, yaml))
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if !cfg.Agent.EnableRuntimeMetrics {
+		t.Error("enable_runtime_metrics = false, want true")
+	}
 }
 
 func TestLoadConfig_InitialProbeJitterAccepted(t *testing.T) {
@@ -1045,8 +1069,8 @@ agent:
 
 targets:
   - name: "proxy-bad"
-    address: "https://example.com"
-    probe_type: proxy
+    address: "example.com:443"
+    probe_type: proxy_connect
     timeout: 5s
 `
 	_, err := LoadConfig(writeConfigFile(t, yaml))
@@ -1065,8 +1089,8 @@ agent:
 
 targets:
   - name: "proxy-ok"
-    address: "https://example.com"
-    probe_type: proxy
+    address: "example.com:443"
+    probe_type: proxy_connect
     timeout: 5s
     probe_opts:
       proxy_url: "http://proxy.internal:8888"
@@ -1074,6 +1098,28 @@ targets:
 	_, err := LoadConfig(writeConfigFile(t, yaml))
 	if err != nil {
 		t.Fatalf("expected no error for proxy with proxy_url, got: %v", err)
+	}
+}
+
+func TestLoadConfig_ProxyConnectRequiresHostPortAddress(t *testing.T) {
+	yaml := `
+agent:
+  default_interval: 30s
+
+targets:
+  - name: "proxy-connect-url-address"
+    address: "https://example.com"
+    probe_type: proxy_connect
+    timeout: 5s
+    probe_opts:
+      proxy_url: "http://proxy.internal:8888"
+`
+	_, err := LoadConfig(writeConfigFile(t, yaml))
+	if err == nil {
+		t.Fatal("expected error for URL address on proxy_connect, got nil")
+	}
+	if !strings.Contains(err.Error(), "host:port") {
+		t.Fatalf("error = %q, want host:port guidance", err.Error())
 	}
 }
 
@@ -1098,23 +1144,27 @@ func TestLoadConfig_ValidProxyURLs(t *testing.T) {
 		{"https with port", "http_body", "https://proxy.internal:443"},
 		{"userinfo", "http", "http://user:pass@proxy.internal:8080"},
 		{"tls cert", "tls_cert", "http://proxy.internal:8888"},
-		{"ipv6 bracketed", "proxy", "http://[::1]:8080"},
+		{"ipv6 bracketed", "proxy_connect", "http://[::1]:8080"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			address := "https://example.com"
+			if tt.probeType == "proxy_connect" {
+				address = "example.com:443"
+			}
 			yaml := fmt.Sprintf(`
 agent:
   default_interval: 30s
 
 targets:
   - name: "proxy-url-ok"
-    address: "https://example.com"
+    address: %q
     probe_type: %s
     timeout: 5s
     probe_opts:
       proxy_url: %q
-%s`, tt.probeType, tt.proxyURL, httpBodyMatchOpt(tt.probeType))
+%s`, address, tt.probeType, tt.proxyURL, httpBodyMatchOpt(tt.probeType))
 			_, err := LoadConfig(writeConfigFile(t, yaml))
 			if err != nil {
 				t.Fatalf("expected no error for proxy_url %q, got: %v", tt.proxyURL, err)
@@ -1139,25 +1189,29 @@ func TestLoadConfig_InvalidProxyURLs(t *testing.T) {
 		{"zero port", "http_body", "http://proxy.internal:0", "port must be in range 1-65535"},
 		{"path", "http", "http://proxy.internal:8080/foo", "path is not allowed"},
 		{"query", "http", "http://proxy.internal:8080?x=y", "query is not allowed"},
-		{"fragment", "proxy", "http://proxy.internal:8080#frag", "not a valid absolute URL"},
+		{"fragment", "proxy_connect", "http://proxy.internal:8080#frag", "not a valid absolute URL"},
 		{"ipv6 without brackets", "http", "http://::1:8080", "not a valid absolute URL"},
 		{"tls cert unsupported scheme", "tls_cert", "socks5://proxy.internal:1080", "scheme must be http or https"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			address := "https://example.com"
+			if tt.probeType == "proxy_connect" {
+				address = "example.com:443"
+			}
 			yaml := fmt.Sprintf(`
 agent:
   default_interval: 30s
 
 targets:
   - name: "proxy-url-bad"
-    address: "https://example.com"
+    address: %q
     probe_type: %s
     timeout: 5s
     probe_opts:
       proxy_url: %q
-%s`, tt.probeType, tt.proxyURL, httpBodyMatchOpt(tt.probeType))
+%s`, address, tt.probeType, tt.proxyURL, httpBodyMatchOpt(tt.probeType))
 			_, err := LoadConfig(writeConfigFile(t, yaml))
 			if err == nil {
 				t.Fatalf("expected error for proxy_url %q, got nil", tt.proxyURL)
@@ -1390,7 +1444,7 @@ func TestLoadConfig_AllProbeTypes(t *testing.T) {
 		{"dns-t", "dns", "example.com:443", "\n    probe_opts:\n      dns_query_name: example.com\n      dns_query_type: A"},
 		{"tls-t", "tls_cert", "example.com:443", ""},
 		{"body-t", "http_body", "example.com:443", "\n    probe_opts:\n      body_match_string: \"ok\""},
-		{"proxy-t", "proxy", "example.com:443", "\n    probe_opts:\n      proxy_url: http://proxy:8888"},
+		{"proxy-t", "proxy_connect", "example.com:443", "\n    probe_opts:\n      proxy_url: http://proxy:8888"},
 	}
 
 	var targets strings.Builder
@@ -1808,6 +1862,96 @@ targets:
 			}
 		})
 	}
+}
+
+func TestLoadConfig_ExpectedStatusCodesRejectedForProxyConnect(t *testing.T) {
+	yaml := `
+agent:
+  default_interval: 30s
+
+targets:
+  - name: "proxy-connect-bad-status-field"
+    address: "example.com:443"
+    probe_type: proxy_connect
+    timeout: 5s
+    probe_opts:
+      proxy_url: "http://proxy.internal:8888"
+      expected_status_codes: [403]
+`
+	_, err := LoadConfig(writeConfigFile(t, yaml))
+	if err == nil {
+		t.Fatal("expected error for expected_status_codes on proxy_connect, got nil")
+	}
+	if !strings.Contains(err.Error(), "expected_status_codes") || !strings.Contains(err.Error(), "expected_proxy_connect_status_codes") {
+		t.Fatalf("error = %q, want it to mention both status fields", err.Error())
+	}
+}
+
+func TestLoadConfig_ExpectedProxyConnectStatusCodes(t *testing.T) {
+	t.Run("valid for proxy_connect", func(t *testing.T) {
+		yaml := `
+agent:
+  default_interval: 30s
+
+targets:
+  - name: "proxy-connect-expected-deny"
+    address: "example.com:443"
+    probe_type: proxy_connect
+    timeout: 5s
+    probe_opts:
+      proxy_url: "http://proxy.internal:8888"
+      expected_proxy_connect_status_codes: [403]
+`
+		_, err := LoadConfig(writeConfigFile(t, yaml))
+		if err != nil {
+			t.Fatalf("expected no error for valid expected_proxy_connect_status_codes, got: %v", err)
+		}
+	})
+
+	t.Run("invalid range rejected", func(t *testing.T) {
+		yaml := `
+agent:
+  default_interval: 30s
+
+targets:
+  - name: "proxy-connect-bad-code"
+    address: "example.com:443"
+    probe_type: proxy_connect
+    timeout: 5s
+    probe_opts:
+      proxy_url: "http://proxy.internal:8888"
+      expected_proxy_connect_status_codes: [99]
+`
+		_, err := LoadConfig(writeConfigFile(t, yaml))
+		if err == nil {
+			t.Fatal("expected error for invalid expected_proxy_connect_status_codes, got nil")
+		}
+		if !strings.Contains(err.Error(), "expected_proxy_connect_status_codes") || !strings.Contains(err.Error(), "99") {
+			t.Fatalf("error = %q, want field name and invalid code", err.Error())
+		}
+	})
+
+	t.Run("rejected outside proxy_connect", func(t *testing.T) {
+		yaml := `
+agent:
+  default_interval: 30s
+
+targets:
+  - name: "http-bad-connect-code"
+    address: "https://example.com"
+    probe_type: http
+    timeout: 5s
+    probe_opts:
+      expected_proxy_connect_status_codes: [403]
+`
+		_, err := LoadConfig(writeConfigFile(t, yaml))
+		if err == nil {
+			t.Fatal("expected error for expected_proxy_connect_status_codes on http, got nil")
+		}
+		if !strings.Contains(err.Error(), "supported only for probe_type 'proxy_connect'") {
+			t.Fatalf("error = %q, want proxy_connect-only error", err.Error())
+		}
+	})
 }
 
 func TestLoadConfig_HTTPResponseBodyLimitBytes(t *testing.T) {

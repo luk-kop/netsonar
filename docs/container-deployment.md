@@ -6,17 +6,17 @@
 - [Linux Capabilities](#linux-capabilities)
   - [Unprivileged ICMP and MTU](#unprivileged-icmp-and-mtu)
 - [Docker](#docker)
-  - [Without MTU probes](#without-mtu-probes)
-  - [With MTU probes](#with-mtu-probes)
+  - [Docker without MTU probes](#docker-without-mtu-probes)
+  - [Docker with MTU probes](#docker-with-mtu-probes)
   - [Non-root containers](#non-root-containers)
 - [Kubernetes](#kubernetes)
-  - [Without MTU probes](#without-mtu-probes-1)
-  - [With MTU probes](#with-mtu-probes-1)
-  - [Setting ping_group_range per pod](#setting-pinggrouprange-per-pod)
+  - [Kubernetes without MTU probes](#kubernetes-without-mtu-probes)
+  - [Kubernetes with MTU probes](#kubernetes-with-mtu-probes)
+  - [Setting ping_group_range per pod](#setting-ping_group_range-per-pod)
 - [Rootless Podman](#rootless-podman)
 - [Troubleshooting](#troubleshooting)
   - [ICMP or MTU probes fail with "permission denied"](#icmp-or-mtu-probes-fail-with-permission-denied)
-  - [Checking ping_group_range](#checking-pinggrouprange)
+  - [Checking ping_group_range](#checking-ping_group_range)
   - [Hardened hosts](#hardened-hosts)
 
 ## Overview
@@ -47,9 +47,22 @@ The ICMP and MTU probers use the kernel's unprivileged ICMP socket (`SOCK_DGRAM`
 
 This requires the `net.ipv4.ping_group_range` sysctl to include the effective or supplementary GID of the process running NetSonar. On most modern Linux distributions and container runtimes this is set to `0 2147483647` by default.
 
+> **Note:** `net.ipv4.ping_group_range` is a Linux kernel sysctl that defines
+> the range of group IDs (GIDs) allowed to create unprivileged ICMP datagram
+> sockets (`socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP)`). It takes two
+> space-separated integers — a lower and upper bound. A process whose
+> effective or supplementary GID falls inside this range can send ICMP echo
+> requests (ping) without `CAP_NET_RAW` and without being root. The default
+> `0 2147483647` allows every GID; setting it to `1 0` (lower > upper)
+> disables unprivileged ICMP sockets entirely. NetSonar relies on this
+> mechanism for both ICMP and MTU probes, so the agent's runtime GID must be
+> covered by the configured range. Since Linux 4.18 the sysctl is
+> network-namespaced, so it can be set per pod / per container instead of
+> globally on the host.
+
 ## Docker
 
-### Without MTU probes
+### Docker without MTU probes
 
 No special flags needed. Drop all capabilities for least-privilege:
 
@@ -62,7 +75,7 @@ docker run --rm \
   netsonar:latest
 ```
 
-### With MTU probes
+### Docker with MTU probes
 
 No extra Linux capability is required. Ensure `ping_group_range` includes the
 container process effective or supplementary GID:
@@ -86,7 +99,7 @@ effective or supplementary GID.
 
 ## Kubernetes
 
-### Without MTU probes
+### Kubernetes without MTU probes
 
 Use a restrictive security context. No capabilities needed:
 
@@ -112,36 +125,40 @@ spec:
               drop: [ALL]
 ```
 
-### With MTU probes
+### Kubernetes with MTU probes
 
-Keep the same restrictive security context and add `ping_group_range` if your
-runtime default does not already include the process effective or supplementary
-GID:
+Keep the same restrictive container securityContext, run as a fixed non-root
+UID/GID, and add `ping_group_range` as a pod sysctl if your runtime default
+does not already include the process effective or supplementary GID. The two
+`securityContext` blocks live at different scopes — container-level under
+`spec.containers[].securityContext`, and pod-level under `spec.securityContext`
+(siblings of `containers:`):
 
 ```yaml
-          securityContext:
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: netsonar
+spec:
+  template:
+    spec:
+      containers:
+        - name: netsonar
+          image: netsonar:latest
+          ports:
+            - containerPort: 9275
+              name: metrics
+          securityContext:                 # container-level
             runAsNonRoot: true
             runAsUser: 10001
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
             capabilities:
               drop: [ALL]
-      securityContext:
+      securityContext:                     # pod-level (sibling of containers)
         sysctls:
           - name: net.ipv4.ping_group_range
-            value: "10001 10001"
-```
-
-Concrete non-root example:
-
-```yaml
-          securityContext:
-            runAsNonRoot: true
-            runAsUser: 10001
-            readOnlyRootFilesystem: true
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: [ALL]
+            value: "10001 10001"           # match runAsUser/runAsGroup
 ```
 
 ### Setting ping_group_range per pod
@@ -149,7 +166,10 @@ Concrete non-root example:
 The `net.ipv4.ping_group_range` sysctl is network-namespaced since Linux 4.18 (2018). On kernels 4.18+ you can set it per pod instead of relying on the host default:
 
 ```yaml
-      securityContext:
+# spec:
+#   template:
+#     spec:
+      securityContext:           # pod-level (sibling of containers)
         sysctls:
           - name: net.ipv4.ping_group_range
             value: "0 2147483647"
@@ -211,7 +231,7 @@ sudo sysctl --system
 
 **Fix (Kubernetes, kernel 4.18+):**
 
-Add the sysctl to the pod spec as shown in [Setting ping_group_range per pod](#setting-pinggrouprange-per-pod).
+Add the sysctl to the pod spec as shown in [Setting ping_group_range per pod](#setting-ping_group_range-per-pod).
 
 ### Checking ping_group_range
 
@@ -223,11 +243,11 @@ cat /proc/sys/net/ipv4/ping_group_range
 
 Expected output for unprivileged ICMP to work:
 
-```
-0	2147483647
+```text
+0 2147483647
 ```
 
-If it shows `1	0`, unprivileged ICMP is disabled.
+If it shows `1 0`, unprivileged ICMP is disabled.
 
 ### Hardened hosts
 

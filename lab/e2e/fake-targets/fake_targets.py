@@ -87,6 +87,9 @@ class ProxyHandler(socketserver.StreamRequestHandler):
         if target == "fake-targets:9443":
             self._tunnel(("127.0.0.1", 9443))
             return
+        if target == "fake-targets:9001":
+            self.wfile.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
+            return
 
         self.wfile.write(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
 

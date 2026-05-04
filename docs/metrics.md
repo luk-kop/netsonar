@@ -29,7 +29,7 @@ These labels are hardcoded in the agent binary and applied to every metric autom
 |----------------|-----------------------|--------------------------------------------------|
 | `target`       | `address` field       | Target address (e.g. `https://ssm.eu-central-1.amazonaws.com`) |
 | `target_name`  | `name` field          | Unique target name from config (e.g. `egress-proxy-ok`) |
-| `probe_type`   | `probe_type` field    | Probe type (e.g. `tcp`, `http`, `proxy`)         |
+| `probe_type`   | `probe_type` field    | Probe type (e.g. `tcp`, `http`, `proxy_connect`) |
 | `network_path` | auto from `proxy_url` | `"proxy"` if target uses `proxy_url`, `"direct"` otherwise |
 
 ## Dynamic Labels
@@ -76,10 +76,11 @@ The following table shows which probe types emit each metric:
 |---|---|---|
 | `probe_success` | — | all |
 | `probe_duration_seconds` | — | all |
-| `probe_phase_duration_seconds` | — | tcp, http, tls_cert, proxy |
-| `probe_http_status_code` | `http_` | http |
+| `probe_phase_duration_seconds` | — | tcp, http, tls_cert, proxy_connect |
+| `probe_http_status_code` | `http_` | http, http_body |
 | `probe_http_response_truncated` | `http_` | http |
 | `probe_http_body_match` | `http_` | http_body |
+| `probe_proxy_connect_status_code` | `proxy_` | proxy_connect, tls_cert (with `proxy_url`), http (with `proxy_url`, `https://` target), http_body (with `proxy_url`, `https://` target) |
 | `probe_tls_cert_expiry_timestamp_seconds` | `tls_` | http, tls_cert |
 | `probe_tls_cert_chain_expiry_timestamp_seconds` | `tls_` | http, tls_cert |
 | `probe_icmp_packet_loss_ratio` | `icmp_` | icmp |
@@ -99,6 +100,7 @@ The following table shows which probe types emit each metric:
 | `probe_duration_seconds`            | Gauge | common          | Total probe duration                           |
 | `probe_phase_duration_seconds`      | Gauge | common + `phase`| Per-phase timing for probes with sub-phases    |
 | `probe_http_status_code`            | Gauge | common          | HTTP response status code                      |
+| `probe_proxy_connect_status_code`   | Gauge | common          | HTTP status code returned by the proxy to a CONNECT request |
 | `probe_tls_cert_expiry_timestamp_seconds` | Gauge | common    | Unix timestamp of earliest TLS certificate expiry in the peer chain |
 | `probe_tls_cert_chain_expiry_timestamp_seconds` | Gauge | common + `cert_index`, `cert_role` | Unix timestamp of each peer certificate expiry |
 | `probe_http_response_truncated`     | Gauge | common          | 1 if HTTP response body exceeded response body limit, 0 otherwise |
@@ -114,27 +116,34 @@ The following table shows which probe types emit each metric:
 
 ## Agent Metadata Metrics
 
-| Metric                              | Type  | Labels      | Description                                              |
-|-------------------------------------|-------|-------------|----------------------------------------------------------|
-| `agent_info`                        | Gauge | `version`   | Agent build info (always 1)                              |
-| `agent_config_info`                 | Gauge | `hash`      | Short SHA256 hash of the effective configuration (always 1) |
-| `agent_targets_total`               | Gauge | -           | Total number of configured targets                       |
-| `agent_config_reload_timestamp_seconds` | Gauge | -        | Unix timestamp of last config reload                     |
+| Metric                                      | Type  | Labels                                | Description                                              |
+|---------------------------------------------|-------|---------------------------------------|----------------------------------------------------------|
+| `netsonar_build_info`                       | Gauge | `version`, `revision`, `build_date`   | NetSonar build info (always 1)                           |
+| `netsonar_config_info`                      | Gauge | `hash`                                | Short SHA256 hash of the effective configuration (always 1) |
+| `netsonar_targets_total`                    | Gauge | -                                     | Total number of configured targets                       |
+| `netsonar_config_reload_timestamp_seconds`  | Gauge | -                                     | Unix timestamp of last config reload                     |
 
-### `agent_config_reload_timestamp_seconds`
+### `netsonar_config_reload_timestamp_seconds`
 
 The timestamp is set both at **startup** (initial config load) and after
 every successful **SIGHUP reload**. Because the initial load also sets the
-gauge, `time() - agent_config_reload_timestamp_seconds` effectively tracks
+gauge, `time() - netsonar_config_reload_timestamp_seconds` effectively tracks
 agent uptime when no reloads have occurred.
 
-### `agent_config_info`
+### `netsonar_config_info`
 
 The hash is computed over the effective configuration **after** defaults
 have been applied and validation has passed, not over the raw YAML bytes.
 `Targets` are sorted by `name` before hashing, so reordering targets in the
 YAML file does not change the hash. Whitespace, comments, and key order in
 the YAML file are irrelevant.
+
+## Optional Runtime Metrics
+
+By default, NetSonar does not expose Go runtime or process metrics from the
+Prometheus client library. Set `agent.enable_runtime_metrics: true` to add
+standard metric families such as `go_goroutines`, `go_memstats_*`, and
+`process_cpu_seconds_total` to the existing `/metrics` endpoint.
 
 The hash is emitted as the first 12 hex characters of SHA256 and is also
 written to the agent log at startup and after every successful reload. Use
@@ -227,6 +236,7 @@ Do not treat absence of a conditional value metric as a generic probe failure si
 | `probe_duration_seconds` | always | every probe result | unexpected for an active target |
 | `probe_phase_duration_seconds` | conditional | the phase was observed in the latest probe result | the phase was not reached or not observed in the latest probe result |
 | `probe_http_status_code` | conditional | an HTTP response was received in the latest probe result | no HTTP response was received in the latest probe result |
+| `probe_proxy_connect_status_code` | conditional | a proxy CONNECT response was received in the latest probe result | no proxy CONNECT response was received in the latest probe result (no proxy hop, or proxy connection failed before a response) |
 | `probe_http_response_truncated` | conditional | truncation evaluation was performed in the latest probe result | truncation was not evaluable in the latest probe result |
 | `probe_http_body_match` | conditional | body evaluation was performed in the latest probe result | body evaluation was not performed in the latest probe result |
 | `probe_tls_cert_expiry_timestamp_seconds` | conditional | a certificate was observed in the latest probe result | no certificate was observed in the latest probe result |
@@ -270,7 +280,7 @@ In dashboards and runbooks, NetSonar refers to this cross-probe value as **Prima
 | `dns` | `probe_dns_resolve_seconds` | DNS lookup latency | No |
 | `http` | `probe_phase_duration_seconds{phase="ttfb"}` | Request-to-first-byte latency | No |
 | `tls_cert` | `probe_phase_duration_seconds{phase="tls_handshake"}` | TLS handshake latency | No |
-| `proxy` | `probe_phase_duration_seconds{phase="proxy_connect"}` | Proxy CONNECT request/response latency | No |
+| `proxy_connect` | `probe_phase_duration_seconds{phase="proxy_connect"}` | Proxy CONNECT request/response latency | No |
 
 Per-metric interpretation notes:
 
@@ -279,6 +289,7 @@ Per-metric interpretation notes:
 - `tls_handshake` measures the TLS handshake phase. It is useful for diagnosing handshake slowness, but it is not RTT.
 - `ttfb` measures time from request-send readiness to first response byte. It includes server processing time and response-header travel time, so it must not be interpreted as RTT.
 - `proxy_connect` measures CONNECT request/response latency through the proxy tunnel. It is useful for proxy-path diagnosis, not RTT estimation.
+- `probe_proxy_connect_status_code` records the HTTP status returned by the proxy to a CONNECT request. It is distinct from `probe_http_status_code`, which records the target HTTP response for `http` and `http_body`.
 
 `probe_icmp_stddev_rtt_seconds` is intentionally not part of the primary-latency mapping. It tracks RTT variation, not latency itself.
 
@@ -295,6 +306,14 @@ When reading dashboards and alerts:
 - use phase metrics when you want to identify which protocol stage is slow
 - use `probe_duration_seconds` when you want the total cost of the probe as an operation
 - do not assume that two timing metrics with the same unit have the same meaning
+
+The main Grafana duration panels use a 5-minute rolling median per target. This
+keeps normal millisecond-range latency readable without letting a short outlier
+dominate the panel for several minutes. The panels use a linear axis with a 1s
+threshold line and a 1s soft maximum; Grafana can still extend the axis when
+samples exceed that value. The "Slowest HTTP Probes" panel intentionally
+remains raw `topk` data because its purpose is to surface outliers and
+timeouts.
 
 A useful mental model is:
 
@@ -328,7 +347,7 @@ The `Total Probe Time` column in the "All Probes — Status Table" shows `probe_
 | `http`, `http_body` | tens–hundreds of ms | DNS + connect + TLS + request write + TTFB + transfer (capped) |
 | `tls_cert` | tens–hundreds of ms | DNS + connect + TLS handshake |
 | `dns` | tens of ms | Single resolver lookup |
-| `proxy` | tens–hundreds of ms | Proxy dial + TLS (optional) + CONNECT |
+| `proxy_connect` | tens–hundreds of ms | Proxy dial + TLS (optional) + CONNECT |
 | `icmp` | **seconds** | `ping_count × ping_interval` + per-echo RTTs (default `ping_interval = 1s`) |
 | `mtu` | **seconds** | Sanity echo + step-down across `icmp_payload_sizes`, each size with up to `mtu_retries` attempts and `mtu_per_attempt_timeout` each (defaults: 3 retries, 2s per attempt) |
 
@@ -378,18 +397,18 @@ Common causes of 100% packet loss with a working `ping` command:
 This is a shortened capture from the local `lab/dev-stack` NetSonar container, scraped directly from `http://127.0.0.1:9275/metrics` inside the container network. Timings, timestamps, and config hashes will differ between runs. Prometheus adds scrape labels such as `job` and `instance` after collection; they are not emitted by NetSonar itself.
 
 ```prometheus
-# HELP agent_config_info Hash of the effective configuration currently in use (always 1).
-# TYPE agent_config_info gauge
-agent_config_info{hash="53590d3a77e8"} 1
-# HELP agent_config_reload_timestamp_seconds Unix timestamp of last configuration reload.
-# TYPE agent_config_reload_timestamp_seconds gauge
-agent_config_reload_timestamp_seconds 1.776588892e+09
-# HELP agent_info Agent build information (always 1).
-# TYPE agent_info gauge
-agent_info{version="dev"} 1
-# HELP agent_targets_total Total number of configured targets.
-# TYPE agent_targets_total gauge
-agent_targets_total 22
+# HELP netsonar_config_info Hash of the effective configuration currently in use (always 1).
+# TYPE netsonar_config_info gauge
+netsonar_config_info{hash="53590d3a77e8"} 1
+# HELP netsonar_config_reload_timestamp_seconds Unix timestamp of last configuration reload.
+# TYPE netsonar_config_reload_timestamp_seconds gauge
+netsonar_config_reload_timestamp_seconds 1.776588892e+09
+# HELP netsonar_build_info NetSonar build information (always 1).
+# TYPE netsonar_build_info gauge
+netsonar_build_info{build_date="unknown",revision="unknown",version="dev"} 1
+# HELP netsonar_targets_total Total number of configured targets.
+# TYPE netsonar_targets_total gauge
+netsonar_targets_total 22
 
 # HELP probe_success 1 if the probe succeeded, 0 if it failed.
 # TYPE probe_success gauge
@@ -397,23 +416,30 @@ probe_success{impact="critical",network_path="direct",probe_type="http",scope="s
 probe_success{impact="high",network_path="direct",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/error",target_account="dev-stack",target_name="http-500-expected-200",target_partition="dev",target_region="local"} 0
 probe_success{impact="high",network_path="proxy",probe_type="http",scope="same-region",service="fake-proxy",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-via-proxy",target_partition="dev",target_region="local"} 1
 probe_success{impact="high",network_path="proxy",probe_type="tls_cert",scope="same-region",service="fake-proxy",target="fake-targets:9443",target_account="dev-stack",target_name="tls-cert-via-proxy",target_partition="dev",target_region="local"} 1
+probe_success{impact="low",network_path="proxy",probe_type="proxy_connect",scope="same-region",service="fake-proxy",target="fake-targets:9001",target_account="dev-stack",target_name="proxy-connect-denied",target_partition="dev",target_region="local"} 1
 probe_success{impact="low",network_path="direct",probe_type="dns",scope="same-region",service="fake-dns",target="localhost",target_account="dev-stack",target_name="dns-localhost-mismatch",target_partition="dev",target_region="local"} 0
 
 # HELP probe_duration_seconds Total probe duration in seconds.
 # TYPE probe_duration_seconds gauge
 probe_duration_seconds{impact="critical",network_path="direct",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.008137887
 
-# HELP probe_phase_duration_seconds Per-phase timing for probes that expose sub-phase breakdowns (TCP: dns_resolve for hostname targets, tcp_connect; HTTP: dns_resolve, tcp_connect, tls_handshake, request_write, ttfb, transfer; TLS cert direct: dns_resolve for hostname targets, tcp_connect, tls_handshake; proxy and TLS cert via proxy: proxy_dial, proxy_tls, proxy_connect; TLS cert via proxy also adds tls_handshake).
+# HELP probe_phase_duration_seconds Per-phase timing for probes that expose sub-phase breakdowns (TCP: dns_resolve for hostname targets, tcp_connect; HTTP: dns_resolve, tcp_connect, tls_handshake, request_write, ttfb, transfer; TLS cert direct: dns_resolve for hostname targets, tcp_connect, tls_handshake; proxy_connect and TLS cert via proxy: proxy_dial, proxy_tls, proxy_connect; TLS cert via proxy also adds tls_handshake).
 # TYPE probe_phase_duration_seconds gauge
 probe_phase_duration_seconds{impact="critical",network_path="direct",phase="dns_resolve",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.000777178
 probe_phase_duration_seconds{impact="critical",network_path="direct",phase="tcp_connect",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.000253737
 probe_phase_duration_seconds{impact="critical",network_path="direct",phase="ttfb",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.006660328
 probe_phase_duration_seconds{impact="critical",network_path="direct",phase="transfer",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.000389704
+probe_phase_duration_seconds{impact="low",network_path="proxy",phase="proxy_dial",probe_type="proxy_connect",scope="same-region",service="fake-proxy",target="fake-targets:9001",target_account="dev-stack",target_name="proxy-connect-denied",target_partition="dev",target_region="local"} 0.000412303
+probe_phase_duration_seconds{impact="low",network_path="proxy",phase="proxy_connect",probe_type="proxy_connect",scope="same-region",service="fake-proxy",target="fake-targets:9001",target_account="dev-stack",target_name="proxy-connect-denied",target_partition="dev",target_region="local"} 0.001874519
 
 # HELP probe_http_status_code HTTP response status code.
 # TYPE probe_http_status_code gauge
 probe_http_status_code{impact="critical",network_path="direct",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 200
 probe_http_status_code{impact="high",network_path="direct",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/error",target_account="dev-stack",target_name="http-500-expected-200",target_partition="dev",target_region="local"} 500
+
+# HELP probe_proxy_connect_status_code HTTP status code returned by the proxy to a CONNECT request. Emitted by probe_type=proxy_connect, and by probe_type=http, http_body, or tls_cert when proxy_url targets an HTTPS destination that requires CONNECT.
+# TYPE probe_proxy_connect_status_code gauge
+probe_proxy_connect_status_code{impact="low",network_path="proxy",probe_type="proxy_connect",scope="same-region",service="fake-proxy",target="fake-targets:9001",target_account="dev-stack",target_name="proxy-connect-denied",target_partition="dev",target_region="local"} 403
 
 # HELP probe_http_response_truncated 1 if the HTTP response body exceeded the effective response body limit, 0 otherwise.
 # TYPE probe_http_response_truncated gauge

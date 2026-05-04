@@ -1,5 +1,22 @@
 # Operations Guide
 
+## Pre-flight Diagnostics (`--doctor`)
+
+`./bin/netsonar --doctor --config /etc/netsonar/config.yaml` runs config-aware
+environment checks and exits without starting the agent. It validates the
+configuration, the listen address, and the host capabilities required by the
+probe types in your config (ICMP, MTU, DNS), and prints a `PASS` / `WARN` /
+`FAIL` / `SKIP` report. Exit code is non-zero only when at least one check
+returns `FAIL`.
+
+Run it before first start on a new host or container, after sysctl changes
+(especially `net.ipv4.ping_group_range`), after changing the runtime user, and
+as a first-line triage step when `probe_success=0` for ICMP, MTU, or DNS
+targets.
+
+For the full list of checks, severity semantics, sample output, and the
+`--listen-addr` override, see [docs/doctor.md](doctor.md).
+
 ## Multiple Agents on One Host
 
 Running two NetSonar agents on the same VM is supported when you want to
@@ -25,8 +42,8 @@ at the same time. Account for this when choosing intervals and timeouts.
 
 Probe-type notes:
 
-- TCP, HTTP, HTTP body, DNS, TLS certificate, and proxy probes are independent
-  per process.
+- TCP, HTTP, HTTP body, DNS, TLS certificate, and `proxy_connect` probes are
+  independent per process.
 - ICMP probes use unprivileged datagram ICMP sockets. The kernel manages ICMP
   IDs and filters replies per socket, so cross-talk between agents is not
   expected.
@@ -41,7 +58,9 @@ models:
   send identical probe bursts at the same time.
 - Use longer MTU intervals than lightweight TCP/HTTP checks.
 - Set `agent.initial_probe_jitter` to spread each target's first probe after
-  startup or reload.
+  startup or reload. For the strongest smoothing, set it to the shortest
+  common probe interval so target tickers keep different offsets after the
+  first probe.
 
 ## Scrape Interval Alignment
 

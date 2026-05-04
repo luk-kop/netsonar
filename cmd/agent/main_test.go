@@ -148,7 +148,7 @@ func TestSetupLogger_FormatSelection(t *testing.T) {
 }
 
 func TestNewHTTPServer_HasTimeouts(t *testing.T) {
-	exporter := metrics.NewMetricsExporter(nil)
+	exporter := metrics.NewMetricsExporter(nil, metrics.ExporterOptions{})
 	srv := newHTTPServer(":9275", "/metrics", exporter)
 
 	if srv.ReadHeaderTimeout != 5*time.Second {
@@ -166,7 +166,7 @@ func TestNewHTTPServer_HasTimeouts(t *testing.T) {
 }
 
 func TestNewHTTPMux_Healthz(t *testing.T) {
-	exporter := metrics.NewMetricsExporter(nil)
+	exporter := metrics.NewMetricsExporter(nil, metrics.ExporterOptions{})
 	handler := newHTTPMux("/metrics", exporter)
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
@@ -185,7 +185,7 @@ func TestNewHTTPMux_Healthz(t *testing.T) {
 }
 
 func TestNewHTTPMux_Readyz(t *testing.T) {
-	exporter := metrics.NewMetricsExporter(nil)
+	exporter := metrics.NewMetricsExporter(nil, metrics.ExporterOptions{})
 	handler := newHTTPMux("/metrics", exporter)
 
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
@@ -205,14 +205,14 @@ func TestNewHTTPMux_Readyz(t *testing.T) {
 
 func TestNewProber_CoversAllValidProbeTypes(t *testing.T) {
 	expected := map[config.ProbeType]reflect.Type{
-		config.ProbeTypeTCP:      reflect.TypeOf(&probe.TCPProber{}),
-		config.ProbeTypeHTTP:     reflect.TypeOf(&probe.HTTPProber{}),
-		config.ProbeTypeICMP:     reflect.TypeOf(&probe.ICMPProber{}),
-		config.ProbeTypeMTU:      reflect.TypeOf(&probe.MTUProber{}),
-		config.ProbeTypeDNS:      reflect.TypeOf(&probe.DNSProber{}),
-		config.ProbeTypeTLSCert:  reflect.TypeOf(&probe.TLSCertProber{}),
-		config.ProbeTypeHTTPBody: reflect.TypeOf(&probe.HTTPBodyProber{}),
-		config.ProbeTypeProxy:    reflect.TypeOf(&probe.ProxyProber{}),
+		config.ProbeTypeTCP:          reflect.TypeOf(&probe.TCPProber{}),
+		config.ProbeTypeHTTP:         reflect.TypeOf(&probe.HTTPProber{}),
+		config.ProbeTypeICMP:         reflect.TypeOf(&probe.ICMPProber{}),
+		config.ProbeTypeMTU:          reflect.TypeOf(&probe.MTUProber{}),
+		config.ProbeTypeDNS:          reflect.TypeOf(&probe.DNSProber{}),
+		config.ProbeTypeTLSCert:      reflect.TypeOf(&probe.TLSCertProber{}),
+		config.ProbeTypeHTTPBody:     reflect.TypeOf(&probe.HTTPBodyProber{}),
+		config.ProbeTypeProxyConnect: reflect.TypeOf(&probe.ProxyProber{}),
 	}
 
 	if len(expected) != len(config.ValidProbeTypes) {

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptrace"
+	"net/url"
 	"slices"
 	"sync"
 	"time"
@@ -27,6 +28,21 @@ var (
 	httpRequestBodyPattern     []byte
 )
 
+type proxyConnectStatusCapture struct {
+	statusCode int
+	observed   bool
+}
+
+type proxyConnectStatusCaptureKey struct{}
+
+func captureProxyConnectStatus(ctx context.Context, _ *url.URL, _ *http.Request, resp *http.Response) error {
+	if capture, ok := ctx.Value(proxyConnectStatusCaptureKey{}).(*proxyConnectStatusCapture); ok && resp != nil {
+		capture.statusCode = resp.StatusCode
+		capture.observed = true
+	}
+	return nil
+}
+
 func requestBodyReader(n int64) io.Reader {
 	httpRequestBodyPatternOnce.Do(func() {
 		httpRequestBodyPattern = bytes.Repeat([]byte("n"), int(config.MaxHTTPRequestBodyBytes))
@@ -41,6 +57,9 @@ type HTTPProber struct {
 	// DisableKeepAlives to ensure each probe creates a fresh connection
 	// for accurate connection-establishment measurements.
 	client *http.Client
+	// useProxy is true when the prober was constructed with a non-empty
+	// proxyURL, so a CONNECT response can be observed and is worth capturing.
+	useProxy bool
 }
 
 // NewHTTPProber creates an HTTPProber with a transport configured for
@@ -56,6 +75,7 @@ func NewHTTPProber(tlsSkipVerify bool, followRedirects bool, proxyURL string) *H
 
 	if proxyURL != "" {
 		transport.Proxy = http.ProxyURL(mustProxyURL("NewHTTPProber", proxyURL))
+		transport.OnProxyConnectResponse = captureProxyConnectStatus
 	}
 
 	client := &http.Client{
@@ -70,7 +90,7 @@ func NewHTTPProber(tlsSkipVerify bool, followRedirects bool, proxyURL string) *H
 		}
 	}
 
-	return &HTTPProber{client: client}
+	return &HTTPProber{client: client, useProxy: proxyURL != ""}
 }
 
 // Probe executes a full HTTP request against target.Address with httptrace
@@ -124,9 +144,15 @@ func (p *HTTPProber) Probe(ctx context.Context, target config.TargetConfig) Prob
 	if target.ProbeOpts.RequestBodyBytes > 0 {
 		body = requestBodyReader(target.ProbeOpts.RequestBodyBytes)
 	}
+	reqCtx := httptrace.WithClientTrace(ctx, trace)
+	var connectCapture *proxyConnectStatusCapture
+	if p.useProxy {
+		connectCapture = &proxyConnectStatusCapture{}
+		reqCtx = context.WithValue(reqCtx, proxyConnectStatusCaptureKey{}, connectCapture)
+	}
 
 	req, err := http.NewRequestWithContext(
-		httptrace.WithClientTrace(ctx, trace),
+		reqCtx,
 		method,
 		target.Address,
 		body,
@@ -146,6 +172,10 @@ func (p *HTTPProber) Probe(ctx context.Context, target config.TargetConfig) Prob
 
 	start := time.Now()
 	resp, err := p.client.Do(req)
+	if connectCapture != nil && connectCapture.observed {
+		result.ProxyConnectResponseReceived = true
+		result.ProxyConnectStatusCode = connectCapture.statusCode
+	}
 	if err != nil {
 		result.Duration = time.Since(start)
 		result.Error = err.Error()

@@ -56,6 +56,10 @@ Both `make lab-dev` and `make lab-dev-internet` force container recreation so
 the selected config path is applied. After switching configs, wait for the first
 probe cycle and Prometheus scrape before reading dashboard panels.
 
+The lab configs set `initial_probe_jitter` to the default probe interval. This
+spreads target goroutines across the interval window so Docker networking and
+fake targets do not receive every probe in the same burst.
+
 The Internet overlay keeps the default fake-local targets and adds a public
 smoke set:
 
@@ -109,7 +113,7 @@ Included scenarios:
 - TCP open/closed targets, including a healthy `scope=cross-region` target.
 - HTTP success, expected status failure, and accept-any status handling.
 - HTTP body match, mismatch, and body match with unexpected status.
-- HTTP through a forward proxy (`http-via-proxy`) and raw CONNECT proxy probes.
+- HTTP through a forward proxy (`http-via-proxy`) and raw `proxy_connect` probes (allow and expected-deny).
 - TLS certificate inspection through a forward proxy (`tls-cert-via-proxy`).
 - DNS resolution plus DNS expected-result match and mismatch cases.
 - ICMP and MTU probes against the fake target container, including MTU failure

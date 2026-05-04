@@ -32,6 +32,7 @@ agent:
     [1472, 1392, 1372, 1272, 1172, 1072]
   log_level: info               # Log level: debug, info, warn, error
   log_format: text              # Log format: text, json; restart required to change
+  enable_runtime_metrics: false # Expose Go/process metrics; restart required to change
   allowed_tag_keys:             # Optional: restrict tag keys to this allowlist
     - service
     - scope
@@ -47,27 +48,49 @@ If `listen_addr` is omitted, it defaults to `:9275`. If `metrics_path` is
 omitted, it defaults to `/metrics`. Both are startup-only; changing either
 requires restarting the agent (SIGHUP reload will reject the change).
 
+To validate that the configured `listen_addr` is bindable, ICMP/MTU sockets
+work for the runtime user, and the system resolver is reachable for DNS
+targets, run `./bin/netsonar --doctor --config <path>` before starting the
+agent. See [doctor.md](doctor.md) for the full check list.
+
 `initial_probe_jitter` defaults to `0s`. When set, each target waits a random
 duration from `0` through `initial_probe_jitter` before its first probe after
 startup or reload. Later probes keep their configured `interval`. The jitter
 must not exceed the shortest effective target interval after defaults are
-applied.
+applied. To smooth startup and reload bursts, a practical default is to set
+`initial_probe_jitter` equal to the shortest common probe interval.
 
 `log_format` defaults to `text`. Use `json` when logs are collected by systems
 such as Loki, CloudWatch, Fluent Bit, or any pipeline that benefits from
 structured fields. `log_level` can be changed with a SIGHUP reload, but
 `log_format` is startup-only; changing it requires restarting the agent.
 
+`enable_runtime_metrics` defaults to `false`. When set to `true`, NetSonar
+adds standard Go runtime and process metrics such as `go_goroutines` and
+`process_cpu_seconds_total` to the existing `/metrics` endpoint. The setting is
+startup-only because these collectors are registered when the metrics exporter
+is created.
+
+> **Security note.** Process metrics expose details about the running binary
+> (PID, start time, open file descriptors, virtual/resident memory, CPU
+> seconds) that can aid an attacker fingerprinting the host. The `/metrics`
+> endpoint should not be reachable from untrusted networks regardless of this
+> setting, but the exposure is broader when runtime/process metrics are
+> enabled. Restrict `/metrics` to a scrape network (firewall, listen on a
+> private interface, or front it with an authenticating reverse proxy)
+> before enabling `enable_runtime_metrics` in environments where the
+> endpoint might otherwise be reachable.
+
 Text log example:
 
 ```text
-level=WARN msg="probe failed" target_name=egress-proxy target=https://example.com probe_type=proxy duration=23ms error="proxy CONNECT returned status 407"
+level=WARN msg="probe failed" target_name=egress-proxy target=example.com:443 probe_type=proxy_connect duration=23ms error="proxy CONNECT returned status 407"
 ```
 
 JSON log example:
 
 ```json
-{"time":"2026-04-15T20:31:22.123456789Z","level":"WARN","msg":"probe failed","target_name":"egress-proxy","target":"https://example.com","probe_type":"proxy","duration":"23ms","error":"proxy CONNECT returned status 407"}
+{"time":"2026-04-15T20:31:22.123456789Z","level":"WARN","msg":"probe failed","target_name":"egress-proxy","target":"example.com:443","probe_type":"proxy_connect","duration":"23ms","error":"proxy CONNECT returned status 407"}
 ```
 
 ## Target Definition
@@ -129,7 +152,7 @@ flowchart TD
 - `agent.metrics_path` must start with `/`, must be a plain path without whitespace, control characters, or ServeMux wildcards, and must not be `/healthz` or `/readyz`
 - `name` must be unique across all targets
 - `address` must be non-empty
-- `probe_type` must be one of: `tcp`, `http`, `icmp`, `mtu`, `dns`, `tls_cert`, `http_body`, `proxy`
+- `probe_type` must be one of: `tcp`, `http`, `icmp`, `mtu`, `dns`, `tls_cert`, `http_body`, `proxy_connect`
 - After defaults are applied, `interval` must be > 0 (set `target.interval` or `agent.default_interval`)
 - After defaults are applied, `timeout` must be > 0 (set `target.timeout` or `agent.default_timeout`)
 - `timeout` must be ≤ `interval`
@@ -143,15 +166,19 @@ flowchart TD
 - `icmp_payload_sizes` must be sorted in descending order
 - `dns_query_type` must be one of: `A`, `AAAA`, `CNAME`
 - For `http` and `http_body`, `method` must be one of: `GET`, `HEAD`, `POST`; an empty value defaults to `GET`
+- For `http` and `http_body`, `headers` may define custom request headers as string key/value pairs
 - For `http` and `http_body`, every `expected_status_codes` value must be a valid HTTP status code in the range `100`-`599`; an empty list accepts any response that completes according to the probe's body-read semantics
 - For `http`, `response_body_limit_bytes` must be >= 0. `0` or omitted uses the 1 MiB default; positive values set the capped response body read limit in bytes. Larger bodies do not fail the probe, and `probe_http_response_truncated` reports the truncation.
 - Large `response_body_limit_bytes` values are legal but increase bandwidth usage and can lengthen `probe_duration_seconds` and `probe_phase_duration_seconds{phase="transfer"}` for large responses.
 - For `http`, `request_body_bytes` must be >= 0 and <= 16777216 (16 MiB). `0` or omitted sends no generated request body; positive values require explicit `method: POST`.
 - `request_body_bytes` is rejected for `http_body` and all non-HTTP probe types.
 - For `http_body`, `body_match_regex` must be a valid Go regular expression
-- `proxy_url` is required when `probe_type` is `proxy`; optional for `http`, `http_body`, and `tls_cert`; rejected when non-empty for `tcp`, `icmp`, `mtu`, and `dns`
+- `proxy_url` is required when `probe_type` is `proxy_connect`; optional for `http`, `http_body`, and `tls_cert`; rejected when non-empty for `tcp`, `icmp`, `mtu`, and `dns`
+- For `proxy_connect`, `address` must be `host:port`, not a URL. CONNECT policy is host-and-port based and does not include an HTTP path.
+- For `proxy_connect`, `expected_proxy_connect_status_codes` may list valid HTTP status codes in the range `100`-`599`; when set, `probe_success=1` means the proxy returned one of those CONNECT response statuses. Use this for explicit negative tests such as expected Squid `403` denies.
+- `expected_status_codes` is rejected for `proxy_connect`; it applies only to target HTTP responses from `http` and `http_body` probes.
 - When set, `proxy_url` must be `http://[user:pass@]host[:port]` or `https://[user:pass@]host[:port]`; paths other than `/`, query strings, fragments, invalid ports, relative URLs, and non-HTTP schemes are rejected
-- If `proxy_url` includes `user:pass@`, the credentials are used for proxy Basic authentication; `proxy` and `tls_cert` probes over `network_path="proxy"` send them as `Proxy-Authorization` on the CONNECT request
+- If `proxy_url` includes `user:pass@`, the credentials are used for proxy Basic authentication; `proxy_connect` and `tls_cert` probes over `network_path="proxy"` send them as `Proxy-Authorization` on the CONNECT request
 - Skipping TLS verification for HTTPS proxies is not supported. `tls_skip_verify` applies to the target TLS connection, not to the proxy's own TLS certificate.
 - `mtu_retries` must be ≥ 1 when specified
 - `mtu_per_attempt_timeout` must be > 0 and ≤ `timeout` when specified

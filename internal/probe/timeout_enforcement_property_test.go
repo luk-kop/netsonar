@@ -39,7 +39,7 @@ func genTimeoutProbeType() gopter.Gen {
 		config.ProbeTypeDNS,
 		config.ProbeTypeTLSCert,
 		config.ProbeTypeHTTPBody,
-		config.ProbeTypeProxy,
+		config.ProbeTypeProxyConnect,
 	}
 	return gen.IntRange(0, len(types)-1).Map(func(i int) config.ProbeType {
 		return types[i]
@@ -124,7 +124,7 @@ func buildTimeoutTarget(
 		case config.ProbeTypeTLSCert:
 			target.Address = "192.0.2.1:443"
 			target.ProbeOpts.TLSSkipVerify = true
-		case config.ProbeTypeProxy:
+		case config.ProbeTypeProxyConnect:
 			target.Address = "https://192.0.2.1"
 			target.ProbeOpts.ProxyURL = "http://192.0.2.1:8888"
 		}
@@ -153,7 +153,7 @@ func buildTimeoutTarget(
 		case config.ProbeTypeTLSCert:
 			target.Address = httpsAddr
 			target.ProbeOpts.TLSSkipVerify = true
-		case config.ProbeTypeProxy:
+		case config.ProbeTypeProxyConnect:
 			target.Address = "https://example.com"
 			target.ProbeOpts.ProxyURL = "http://127.0.0.1:19999"
 		}

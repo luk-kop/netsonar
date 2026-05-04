@@ -110,8 +110,8 @@ func TestAllPhasesCoversEmittedPhases(t *testing.T) {
 
 	proxyTarget := config.TargetConfig{
 		Name:      "phases-proxy",
-		Address:   "https://example.com",
-		ProbeType: config.ProbeTypeProxy,
+		Address:   "example.com:443",
+		ProbeType: config.ProbeTypeProxyConnect,
 		Timeout:   5 * time.Second,
 		ProbeOpts: config.ProbeOptions{ProxyURL: "http://" + proxyAddr},
 	}

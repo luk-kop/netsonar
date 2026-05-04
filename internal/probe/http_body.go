@@ -21,6 +21,9 @@ type HTTPBodyProber struct {
 	client                 *http.Client
 	compiledBodyMatchRegex *regexp.Regexp
 	regexCompileErr        error
+	// useProxy is true when the prober was constructed with a non-empty
+	// proxyURL, so a CONNECT response can be observed and is worth capturing.
+	useProxy bool
 }
 
 // maxHTTPBodyBytes is the maximum response body size the prober will read.
@@ -42,6 +45,7 @@ func NewHTTPBodyProber(tlsSkipVerify bool, followRedirects bool, proxyURL string
 
 	if proxyURL != "" {
 		transport.Proxy = http.ProxyURL(mustProxyURL("NewHTTPBodyProber", proxyURL))
+		transport.OnProxyConnectResponse = captureProxyConnectStatus
 	}
 
 	client := &http.Client{
@@ -65,6 +69,7 @@ func NewHTTPBodyProber(tlsSkipVerify bool, followRedirects bool, proxyURL string
 		client:                 client,
 		compiledBodyMatchRegex: compiledRegex,
 		regexCompileErr:        regexErr,
+		useProxy:               proxyURL != "",
 	}
 }
 
@@ -98,7 +103,13 @@ func (p *HTTPBodyProber) Probe(ctx context.Context, target config.TargetConfig) 
 		method = http.MethodGet
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, target.Address, nil)
+	reqCtx := ctx
+	var connectCapture *proxyConnectStatusCapture
+	if p.useProxy {
+		connectCapture = &proxyConnectStatusCapture{}
+		reqCtx = context.WithValue(reqCtx, proxyConnectStatusCaptureKey{}, connectCapture)
+	}
+	req, err := http.NewRequestWithContext(reqCtx, method, target.Address, nil)
 	if err != nil {
 		result.Error = fmt.Sprintf("creating request: %s", err.Error())
 		return result
@@ -110,6 +121,10 @@ func (p *HTTPBodyProber) Probe(ctx context.Context, target config.TargetConfig) 
 
 	start := time.Now()
 	resp, err := p.client.Do(req)
+	if connectCapture != nil && connectCapture.observed {
+		result.ProxyConnectResponseReceived = true
+		result.ProxyConnectStatusCode = connectCapture.statusCode
+	}
 	if err != nil {
 		result.Duration = time.Since(start)
 		result.Error = fmt.Sprintf("http request: %s", err.Error())

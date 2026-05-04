@@ -21,8 +21,8 @@ same semantics as an independent reference prober:
 | `transfer` | `transfer` |
 
 The lab is intentionally local and deterministic. It is not an Internet
-benchmark and it does not validate DNS, ICMP, MTU, proxy, or certificate-expiry
-metrics.
+benchmark and it does not validate DNS, ICMP, MTU, `proxy_connect`, or
+certificate-expiry metrics.
 
 ## Run
 

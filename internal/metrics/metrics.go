@@ -12,6 +12,7 @@ import (
 	"netsonar/internal/probe"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -34,7 +35,8 @@ type MetricsExporter struct {
 	probePhaseDuration *prometheus.GaugeVec
 
 	// HTTP-specific.
-	httpStatusCode *prometheus.GaugeVec
+	httpStatusCode         *prometheus.GaugeVec
+	proxyConnectStatusCode *prometheus.GaugeVec
 
 	// TLS-specific.
 	tlsCertExpiry      *prometheus.GaugeVec
@@ -60,18 +62,25 @@ type MetricsExporter struct {
 	// Scheduler.
 	probeSkippedOverlapTotal *prometheus.CounterVec
 
-	// Agent metadata.
-	agentInfo           *prometheus.GaugeVec
-	agentConfigInfo     *prometheus.GaugeVec
-	agentTargetsTotal   prometheus.Gauge
-	agentConfigReloadTS prometheus.Gauge
+	// NetSonar metadata.
+	buildInfo      *prometheus.GaugeVec
+	configInfo     *prometheus.GaugeVec
+	targetsTotal   prometheus.Gauge
+	configReloadTS prometheus.Gauge
+}
+
+// ExporterOptions controls optional metric collectors.
+type ExporterOptions struct {
+	EnableRuntimeMetrics bool
 }
 
 // NewMetricsExporter creates a MetricsExporter with all metric descriptors
 // registered on a custom prometheus.Registry. The tagKeys parameter defines
 // which tag keys from the configuration become Prometheus labels — this is
-// derived dynamically from config.CollectTagKeys.
-func NewMetricsExporter(tagKeys []string) *MetricsExporter {
+// derived dynamically from config.CollectTagKeys. opts is required so callers
+// must explicitly opt in to (or out of) optional collectors such as runtime
+// and process metrics; pass ExporterOptions{} for defaults.
+func NewMetricsExporter(tagKeys []string, opts ExporterOptions) *MetricsExporter {
 	reg := prometheus.NewRegistry()
 
 	// Build the full label set: base labels + dynamic tag keys.
@@ -95,12 +104,17 @@ func NewMetricsExporter(tagKeys []string) *MetricsExporter {
 
 		probePhaseDuration: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "probe_phase_duration_seconds",
-			Help: "Per-phase timing for probes that expose sub-phase breakdowns (TCP: dns_resolve for hostname targets, tcp_connect; HTTP: dns_resolve, tcp_connect, tls_handshake, request_write, ttfb, transfer; TLS cert direct: dns_resolve for hostname targets, tcp_connect, tls_handshake; proxy and TLS cert via proxy: proxy_dial, proxy_tls, proxy_connect; TLS cert via proxy also adds tls_handshake).",
+			Help: "Per-phase timing for probes that expose sub-phase breakdowns (TCP: dns_resolve for hostname targets, tcp_connect; HTTP: dns_resolve, tcp_connect, tls_handshake, request_write, ttfb, transfer; TLS cert direct: dns_resolve for hostname targets, tcp_connect, tls_handshake; proxy_connect and TLS cert via proxy: proxy_dial, proxy_tls, proxy_connect; TLS cert via proxy also adds tls_handshake).",
 		}, append(commonLabels, "phase")),
 
 		httpStatusCode: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "probe_http_status_code",
 			Help: "HTTP response status code.",
+		}, commonLabels),
+
+		proxyConnectStatusCode: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "probe_proxy_connect_status_code",
+			Help: "HTTP status code returned by the proxy to a CONNECT request. Emitted by probe_type=proxy_connect, and by probe_type=http, http_body, or tls_cert when proxy_url targets an HTTPS destination that requires CONNECT.",
 		}, commonLabels),
 
 		tlsCertExpiry: prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -163,23 +177,23 @@ func NewMetricsExporter(tagKeys []string) *MetricsExporter {
 			Help: "Total probe executions skipped because the previous probe for the same target was still running when the next tick fired.",
 		}, commonLabels),
 
-		agentInfo: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "agent_info",
-			Help: "Agent build information (always 1).",
-		}, []string{"version"}),
+		buildInfo: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "netsonar_build_info",
+			Help: "NetSonar build information (always 1).",
+		}, []string{"version", "revision", "build_date"}),
 
-		agentConfigInfo: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "agent_config_info",
+		configInfo: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "netsonar_config_info",
 			Help: "Hash of the effective configuration currently in use (always 1).",
 		}, []string{"hash"}),
 
-		agentTargetsTotal: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "agent_targets_total",
+		targetsTotal: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "netsonar_targets_total",
 			Help: "Total number of configured targets.",
 		}),
 
-		agentConfigReloadTS: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "agent_config_reload_timestamp_seconds",
+		configReloadTS: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "netsonar_config_reload_timestamp_seconds",
 			Help: "Unix timestamp of last configuration reload.",
 		}),
 	}
@@ -190,6 +204,7 @@ func NewMetricsExporter(tagKeys []string) *MetricsExporter {
 		m.probeDuration,
 		m.probePhaseDuration,
 		m.httpStatusCode,
+		m.proxyConnectStatusCode,
 		m.tlsCertExpiry,
 		m.tlsCertChainExpiry,
 		m.icmpPacketLoss,
@@ -202,11 +217,17 @@ func NewMetricsExporter(tagKeys []string) *MetricsExporter {
 		m.dnsResultMatch,
 		m.httpBodyMatch,
 		m.httpResponseTruncated,
-		m.agentInfo,
-		m.agentConfigInfo,
-		m.agentTargetsTotal,
-		m.agentConfigReloadTS,
+		m.buildInfo,
+		m.configInfo,
+		m.targetsTotal,
+		m.configReloadTS,
 	)
+	if opts.EnableRuntimeMetrics {
+		reg.MustRegister(
+			collectors.NewGoCollector(),
+			collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
+		)
+	}
 
 	return m
 }
@@ -259,6 +280,18 @@ func (m *MetricsExporter) Record(target config.TargetConfig, result probe.ProbeR
 	}
 	m.probeSuccess.With(labels).Set(successVal)
 	m.probeDuration.With(labels).Set(result.Duration.Seconds())
+
+	// proxy_connect_status_code is only meaningful for probe types that can
+	// observe a proxy CONNECT response. Skip the Delete on probe types that
+	// never emit it (icmp, mtu, dns, tcp) to avoid pointless label-map churn.
+	switch target.ProbeType {
+	case config.ProbeTypeProxyConnect, config.ProbeTypeHTTP, config.ProbeTypeHTTPBody, config.ProbeTypeTLSCert:
+		if result.ProxyConnectResponseReceived {
+			m.proxyConnectStatusCode.With(labels).Set(float64(result.ProxyConnectStatusCode))
+		} else {
+			m.proxyConnectStatusCode.Delete(labels)
+		}
+	}
 
 	// Current-observation semantics: delete all known phase series first,
 	// then set only phases present in this result. Missing phases (e.g.
@@ -334,7 +367,7 @@ func (m *MetricsExporter) Record(target config.TargetConfig, result probe.ProbeR
 			m.httpStatusCode.Delete(labels)
 		}
 
-	case config.ProbeTypeTCP, config.ProbeTypeProxy:
+	case config.ProbeTypeTCP, config.ProbeTypeProxyConnect:
 		// No type-specific metrics; phases are handled generically above.
 	}
 }
@@ -419,6 +452,7 @@ func (m *MetricsExporter) DeleteTarget(target config.TargetConfig) {
 
 	m.probeSuccess.Delete(labels)
 	m.probeDuration.Delete(labels)
+	m.proxyConnectStatusCode.Delete(labels)
 	m.httpStatusCode.Delete(labels)
 	m.tlsCertExpiry.Delete(labels)
 	m.tlsCertChainExpiry.DeletePartialMatch(labels)
@@ -455,12 +489,14 @@ func (m *MetricsExporter) IncrSkippedOverlap(target config.TargetConfig) {
 	m.probeSkippedOverlapTotal.With(labels).Inc()
 }
 
-// SetAgentInfo sets the agent_info gauge with the given version string.
+// SetBuildInfo sets the netsonar_build_info gauge with build metadata.
 // Only binary-level information lives here; configuration identity is
 // exposed separately via SetConfigInfo.
-func (m *MetricsExporter) SetAgentInfo(version string) {
-	m.agentInfo.With(prometheus.Labels{
-		"version": version,
+func (m *MetricsExporter) SetBuildInfo(version, revision, buildDate string) {
+	m.buildInfo.With(prometheus.Labels{
+		"version":    version,
+		"revision":   revision,
+		"build_date": buildDate,
 	}).Set(1)
 }
 
@@ -468,18 +504,18 @@ func (m *MetricsExporter) SetAgentInfo(version string) {
 // a single-series gauge. It resets any previously published hash so that
 // /metrics only ever exposes the currently active configuration.
 func (m *MetricsExporter) SetConfigInfo(hash string) {
-	m.agentConfigInfo.Reset()
-	m.agentConfigInfo.With(prometheus.Labels{"hash": hash}).Set(1)
+	m.configInfo.Reset()
+	m.configInfo.With(prometheus.Labels{"hash": hash}).Set(1)
 }
 
-// SetTargetsTotal sets the agent_targets_total gauge.
+// SetTargetsTotal sets the netsonar_targets_total gauge.
 func (m *MetricsExporter) SetTargetsTotal(count int) {
-	m.agentTargetsTotal.Set(float64(count))
+	m.targetsTotal.Set(float64(count))
 }
 
-// SetConfigReloadTimestamp sets the agent_config_reload_timestamp_seconds gauge.
+// SetConfigReloadTimestamp sets the netsonar_config_reload_timestamp_seconds gauge.
 func (m *MetricsExporter) SetConfigReloadTimestamp(t time.Time) {
-	m.agentConfigReloadTS.Set(float64(t.Unix()))
+	m.configReloadTS.Set(float64(t.Unix()))
 }
 
 // cloneLabels returns a shallow copy of a prometheus.Labels map.

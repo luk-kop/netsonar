@@ -3,6 +3,7 @@ agent:
   metrics_path: "/metrics"
   default_interval: 5s
   default_timeout: 2s
+  initial_probe_jitter: 5s
   log_level: info
   allowed_tag_keys:
     - service
@@ -197,7 +198,7 @@ targets:
 
   - name: proxy-connect-ok
     address: "fake-targets:9000"
-    probe_type: proxy
+    probe_type: proxy_connect
     probe_opts:
       proxy_url: "http://fake-targets:8888"
     tags:
@@ -210,9 +211,10 @@ targets:
 
   - name: proxy-connect-denied
     address: "fake-targets:9001"
-    probe_type: proxy
+    probe_type: proxy_connect
     probe_opts:
       proxy_url: "http://fake-targets:8888"
+      expected_proxy_connect_status_codes: [403]
     tags:
       service: fake-proxy
       scope: same-region
