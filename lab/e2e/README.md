@@ -34,7 +34,7 @@ Covered in the basic harness:
 - `http`: connection-refused case where HTTP response-derived metrics must stay absent
 - `http_body`: body match, body mismatch, and body match with unexpected status
 - `http` with `proxy_url`: regular HTTP forwarded through the fake proxy
-- `proxy`: CONNECT accepted and denied
+- `proxy_connect`: CONNECT accepted and expected-denied
 - `dns`: resolution, expected-result match, expected-result mismatch, and no-expected absence semantics
 - `icmp`: echo success against the fake target container, including a single-reply case where stddev must stay absent
 - `mtu`: PMTUD success against the fake target container plus a resolve-failure case where `probe_mtu_bytes` and ICMP RTT stay absent

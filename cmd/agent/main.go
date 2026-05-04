@@ -21,10 +21,10 @@ import (
 	"netsonar/internal/scheduler"
 )
 
-// version, commit, and date are injected at build time via -ldflags.
+// version, revision, and buildDate are injected at build time via -ldflags.
 var version = "dev"
-var commit = "unknown"
-var date = "unknown"
+var revision = "unknown"
+var buildDate = "unknown"
 
 // agentLogLevel is the dynamic level shared by the default slog handler.
 // setupLogger wires it into the handler once at startup; configureLogger
@@ -44,7 +44,7 @@ func run() int {
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Printf("%s commit=%s date=%s\n", version, commit, date)
+		fmt.Printf("%s revision=%s build_date=%s\n", version, revision, buildDate)
 		return 0
 	}
 
@@ -75,8 +75,8 @@ func run() int {
 
 	slog.Info("starting netsonar",
 		"version", version,
-		"commit", commit,
-		"date", date,
+		"revision", revision,
+		"build_date", buildDate,
 		"listen_addr", cfg.Agent.ListenAddr,
 		"targets", len(cfg.Targets),
 		"config_hash", mustConfigHash(cfg),
@@ -84,7 +84,9 @@ func run() int {
 
 	// Initialize metrics exporter with dynamic tag keys from config.
 	tagKeys := config.CollectTagKeys(cfg)
-	exporter := metrics.NewMetricsExporter(tagKeys)
+	exporter := metrics.NewMetricsExporter(tagKeys, metrics.ExporterOptions{
+		EnableRuntimeMetrics: cfg.Agent.EnableRuntimeMetrics,
+	})
 
 	// Initialize scheduler with prober factory.
 	sched := scheduler.New(exporter, newProber)
@@ -120,7 +122,7 @@ func run() int {
 			switch sig {
 			case syscall.SIGHUP:
 				slog.Info("received SIGHUP, reloading configuration")
-				handleReload(ctx, *configPath, sched, exporter, tagKeys, cfg.Agent.LogFormat, cfg.Agent.ListenAddr, cfg.Agent.MetricsPath)
+				handleReload(ctx, *configPath, sched, exporter, tagKeys, cfg.Agent.LogFormat, cfg.Agent.ListenAddr, cfg.Agent.MetricsPath, cfg.Agent.EnableRuntimeMetrics)
 
 			case syscall.SIGTERM, syscall.SIGINT:
 				slog.Info("received shutdown signal, initiating graceful shutdown", "signal", sig)
@@ -145,8 +147,9 @@ func run() int {
 // handleReload re-reads the configuration file and applies changes via
 // the scheduler's diff-based reload. If the new config is invalid or a
 // startup-only field changed (tag key set, log_format, listen_addr,
-// metrics_path), the agent continues with the previous configuration.
-func handleReload(ctx context.Context, configPath string, sched *scheduler.Scheduler, exporter *metrics.MetricsExporter, startupTagKeys []string, startupLogFormat, startupListenAddr, startupMetricsPath string) {
+// metrics_path, enable_runtime_metrics), the agent continues with the previous
+// configuration.
+func handleReload(ctx context.Context, configPath string, sched *scheduler.Scheduler, exporter *metrics.MetricsExporter, startupTagKeys []string, startupLogFormat, startupListenAddr, startupMetricsPath string, startupEnableRuntimeMetrics bool) {
 	newCfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		slog.Error("config reload failed, keeping previous configuration", "error", err)
@@ -180,6 +183,13 @@ func handleReload(ctx context.Context, configPath string, sched *scheduler.Sched
 		slog.Error("config reload rejected: metrics_path changed; restart required",
 			"old", startupMetricsPath,
 			"new", newCfg.Agent.MetricsPath,
+		)
+		return
+	}
+	if newCfg.Agent.EnableRuntimeMetrics != startupEnableRuntimeMetrics {
+		slog.Error("config reload rejected: enable_runtime_metrics changed; restart required",
+			"old", startupEnableRuntimeMetrics,
+			"new", newCfg.Agent.EnableRuntimeMetrics,
 		)
 		return
 	}
@@ -263,7 +273,7 @@ func newProber(target config.TargetConfig) probe.Prober {
 		return &probe.TLSCertProber{}
 	case config.ProbeTypeHTTPBody:
 		return probe.NewHTTPBodyProber(target.ProbeOpts.TLSSkipVerify, target.ProbeOpts.FollowRedirects, target.ProbeOpts.ProxyURL, target.ProbeOpts.BodyMatchRegex)
-	case config.ProbeTypeProxy:
+	case config.ProbeTypeProxyConnect:
 		return &probe.ProxyProber{}
 	default:
 		panic("unreachable: unknown probe type " + string(target.ProbeType))
@@ -272,7 +282,7 @@ func newProber(target config.TargetConfig) probe.Prober {
 
 // updateAgentMetrics sets the agent metadata gauges after startup or reload.
 func updateAgentMetrics(exporter *metrics.MetricsExporter, cfg *config.Config) {
-	exporter.SetAgentInfo(version)
+	exporter.SetBuildInfo(version, revision, buildDate)
 	exporter.SetConfigInfo(mustConfigHash(cfg))
 	exporter.SetTargetsTotal(len(cfg.Targets))
 	exporter.SetConfigReloadTimestamp(time.Now())

@@ -44,7 +44,7 @@ func genProbeType() gopter.Gen {
 		config.ProbeTypeDNS,
 		config.ProbeTypeTLSCert,
 		config.ProbeTypeHTTPBody,
-		config.ProbeTypeProxy,
+		config.ProbeTypeProxyConnect,
 	}
 	return gen.IntRange(0, len(types)-1).Map(func(i int) config.ProbeType {
 		return types[i]
@@ -164,7 +164,7 @@ func buildTarget(sc probeScenario, httpURL, httpsURL string) config.TargetConfig
 		}
 		target.ProbeOpts.TLSSkipVerify = true
 
-	case config.ProbeTypeProxy:
+	case config.ProbeTypeProxyConnect:
 		target.ProbeOpts.ProxyURL = sc.ProxyURL
 		if sc.Address == "127.0.0.1" || sc.Address == "localhost" {
 			target.Address = "https://example.com"
@@ -195,7 +195,7 @@ func proberForType(pt config.ProbeType) Prober {
 		return &TLSCertProber{}
 	case config.ProbeTypeHTTPBody:
 		return NewHTTPBodyProber(true, false, "", "")
-	case config.ProbeTypeProxy:
+	case config.ProbeTypeProxyConnect:
 		return &ProxyProber{}
 	default:
 		return &TCPProber{}

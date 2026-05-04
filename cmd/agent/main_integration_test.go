@@ -99,7 +99,7 @@ func TestIntegration_MetricsEndpoint(t *testing.T) {
 	}
 
 	// --- 4. Wire up the agent components in-process ---
-	exporter := metrics.NewMetricsExporter(config.CollectTagKeys(cfg))
+	exporter := metrics.NewMetricsExporter(config.CollectTagKeys(cfg), metrics.ExporterOptions{EnableRuntimeMetrics: cfg.Agent.EnableRuntimeMetrics})
 
 	proberFactory := func(target config.TargetConfig) probe.Prober {
 		return &probe.TCPProber{}
@@ -116,7 +116,7 @@ func TestIntegration_MetricsEndpoint(t *testing.T) {
 	sched.Start(ctx, *cfg)
 
 	// Set agent metadata metrics (mirrors main.go updateAgentMetrics).
-	exporter.SetAgentInfo("test")
+	exporter.SetBuildInfo("test", "test-revision", "2026-04-26T12:00:00Z")
 	hash, _ := config.ComputeHash(cfg)
 	exporter.SetConfigInfo(hash)
 	exporter.SetTargetsTotal(len(cfg.Targets))
@@ -168,9 +168,9 @@ func TestIntegration_MetricsEndpoint(t *testing.T) {
 	expectedMetrics := []string{
 		"probe_success",
 		"probe_duration_seconds",
-		"agent_info",
-		"agent_targets_total",
-		"agent_config_reload_timestamp_seconds",
+		"netsonar_build_info",
+		"netsonar_targets_total",
+		"netsonar_config_reload_timestamp_seconds",
 	}
 
 	for _, name := range expectedMetrics {
@@ -218,29 +218,41 @@ func TestIntegration_MetricsEndpoint(t *testing.T) {
 		}
 	}
 
-	// --- 10. Verify agent_info carries only the "version" label ---
-	if fam, ok := families["agent_info"]; ok {
+	// --- 10. Verify netsonar_build_info carries build metadata only ---
+	if fam, ok := families["netsonar_build_info"]; ok {
 		if len(fam.GetMetric()) == 0 {
-			t.Error("agent_info has no time series")
+			t.Error("netsonar_build_info has no time series")
 		} else {
 			metric := fam.GetMetric()[0]
 			labelSet := make(map[string]string)
 			for _, lp := range metric.GetLabel() {
 				labelSet[lp.GetName()] = lp.GetValue()
 			}
-			if _, ok := labelSet["version"]; !ok {
-				t.Error("agent_info missing expected label \"version\"")
+			wantLabels := map[string]string{
+				"version":    "test",
+				"revision":   "test-revision",
+				"build_date": "2026-04-26T12:00:00Z",
+			}
+			for name, want := range wantLabels {
+				if got := labelSet[name]; got != want {
+					t.Errorf("netsonar_build_info label %q = %q, want %q", name, got, want)
+				}
 			}
 			if _, ok := labelSet["config_hash"]; ok {
-				t.Error("agent_info must not carry legacy config_hash label")
+				t.Error("netsonar_build_info must not carry legacy config_hash label")
+			}
+			for _, label := range expectedLabels {
+				if _, ok := labelSet[label]; ok {
+					t.Errorf("netsonar_build_info must not carry probe label %q", label)
+				}
 			}
 		}
 	}
 
-	// --- 11. Verify agent_config_info exposes the current config hash ---
-	if fam, ok := families["agent_config_info"]; ok {
+	// --- 11. Verify netsonar_config_info exposes the current config hash ---
+	if fam, ok := families["netsonar_config_info"]; ok {
 		if len(fam.GetMetric()) != 1 {
-			t.Errorf("agent_config_info has %d series, want 1", len(fam.GetMetric()))
+			t.Errorf("netsonar_config_info has %d series, want 1", len(fam.GetMetric()))
 		} else {
 			var hash string
 			for _, lp := range fam.GetMetric()[0].GetLabel() {
@@ -249,17 +261,17 @@ func TestIntegration_MetricsEndpoint(t *testing.T) {
 				}
 			}
 			if hash == "" {
-				t.Error("agent_config_info hash label is empty")
+				t.Error("netsonar_config_info hash label is empty")
 			}
 		}
 	} else {
-		t.Error("agent_config_info metric not found")
+		t.Error("netsonar_config_info metric not found")
 	}
 }
 
 // TestIntegration_ConfigReloadSIGHUP verifies that reloading the configuration
 // (simulating SIGHUP) correctly adds new targets, removes old targets, and
-// updates the agent_targets_total metric. It exercises the same code path as
+// updates the netsonar_targets_total metric. It exercises the same code path as
 // the real SIGHUP handler in main.go: re-read config → validate → scheduler.Reload.
 func TestIntegration_ConfigReloadSIGHUP(t *testing.T) {
 	// --- 1. Start two local TCP listeners as probe targets ---
@@ -364,7 +376,7 @@ func TestIntegration_ConfigReloadSIGHUP(t *testing.T) {
 	}
 
 	tagKeys := config.CollectTagKeys(cfg)
-	exporter := metrics.NewMetricsExporter(tagKeys)
+	exporter := metrics.NewMetricsExporter(tagKeys, metrics.ExporterOptions{EnableRuntimeMetrics: cfg.Agent.EnableRuntimeMetrics})
 	proberFactory := func(target config.TargetConfig) probe.Prober {
 		return &probe.TCPProber{}
 	}
@@ -377,7 +389,7 @@ func TestIntegration_ConfigReloadSIGHUP(t *testing.T) {
 	})
 
 	sched.Start(ctx, *cfg)
-	exporter.SetAgentInfo("test")
+	exporter.SetBuildInfo("test", "test-revision", "2026-04-26T12:00:00Z")
 	hash, _ := config.ComputeHash(cfg)
 	exporter.SetConfigInfo(hash)
 	exporter.SetTargetsTotal(len(cfg.Targets))
@@ -433,15 +445,15 @@ func TestIntegration_ConfigReloadSIGHUP(t *testing.T) {
 		return addrs
 	}
 
-	// getAgentTargetsTotal reads the agent_targets_total gauge value.
+	// getAgentTargetsTotal reads the netsonar_targets_total gauge value.
 	getAgentTargetsTotal := func(families map[string]*dto.MetricFamily) float64 {
 		t.Helper()
-		fam, ok := families["agent_targets_total"]
+		fam, ok := families["netsonar_targets_total"]
 		if !ok {
-			t.Fatal("agent_targets_total not found")
+			t.Fatal("netsonar_targets_total not found")
 		}
 		if len(fam.GetMetric()) == 0 {
-			t.Fatal("agent_targets_total has no time series")
+			t.Fatal("netsonar_targets_total has no time series")
 		}
 		return fam.GetMetric()[0].GetGauge().GetValue()
 	}
@@ -459,14 +471,14 @@ func TestIntegration_ConfigReloadSIGHUP(t *testing.T) {
 		t.Errorf("initial scrape: target-b address %q should not be present before reload", addrB)
 	}
 	if total := getAgentTargetsTotal(families); total != 1 {
-		t.Errorf("initial agent_targets_total = %v, want 1", total)
+		t.Errorf("initial netsonar_targets_total = %v, want 1", total)
 	}
 
 	// --- 6. Overwrite config: remove target-A, add target-B ---
 	writeConfig([]map[string]interface{}{targetB})
 
 	// Simulate SIGHUP by calling handleReload (same code path as the signal handler).
-	handleReload(ctx, configPath, sched, exporter, tagKeys, "text", ":0", "/metrics")
+	handleReload(ctx, configPath, sched, exporter, tagKeys, "text", ":0", "/metrics", false)
 
 	// --- 7. Wait for the new probe to execute, then scrape again ---
 	time.Sleep(500 * time.Millisecond)
@@ -478,26 +490,26 @@ func TestIntegration_ConfigReloadSIGHUP(t *testing.T) {
 		t.Errorf("post-reload scrape: expected target-b address %q in probe_success, got %v", addrB, addrs)
 	}
 	if total := getAgentTargetsTotal(families); total != 1 {
-		t.Errorf("post-reload agent_targets_total = %v, want 1", total)
+		t.Errorf("post-reload netsonar_targets_total = %v, want 1", total)
 	}
 
-	// --- 8. Verify agent_config_reload_timestamp_seconds was updated ---
-	if fam, ok := families["agent_config_reload_timestamp_seconds"]; ok {
+	// --- 8. Verify netsonar_config_reload_timestamp_seconds was updated ---
+	if fam, ok := families["netsonar_config_reload_timestamp_seconds"]; ok {
 		if len(fam.GetMetric()) == 0 {
-			t.Error("agent_config_reload_timestamp_seconds has no time series")
+			t.Error("netsonar_config_reload_timestamp_seconds has no time series")
 		} else {
 			ts := fam.GetMetric()[0].GetGauge().GetValue()
 			if ts <= 0 {
-				t.Errorf("agent_config_reload_timestamp_seconds = %v, want > 0", ts)
+				t.Errorf("netsonar_config_reload_timestamp_seconds = %v, want > 0", ts)
 			}
 		}
 	} else {
-		t.Error("agent_config_reload_timestamp_seconds not found after reload")
+		t.Error("netsonar_config_reload_timestamp_seconds not found after reload")
 	}
 
 	// --- 9. Test reload with both targets (additive reload) ---
 	writeConfig([]map[string]interface{}{targetA, targetB})
-	handleReload(ctx, configPath, sched, exporter, tagKeys, "text", ":0", "/metrics")
+	handleReload(ctx, configPath, sched, exporter, tagKeys, "text", ":0", "/metrics", false)
 
 	time.Sleep(500 * time.Millisecond)
 
@@ -511,7 +523,7 @@ func TestIntegration_ConfigReloadSIGHUP(t *testing.T) {
 		t.Errorf("additive reload: expected target-b address %q in probe_success", addrB)
 	}
 	if total := getAgentTargetsTotal(families); total != 2 {
-		t.Errorf("additive reload agent_targets_total = %v, want 2", total)
+		t.Errorf("additive reload netsonar_targets_total = %v, want 2", total)
 	}
 
 	// --- 10. Test reload with invalid config (agent keeps previous config) ---
@@ -519,7 +531,7 @@ func TestIntegration_ConfigReloadSIGHUP(t *testing.T) {
 		t.Fatalf("failed to write invalid config: %v", err)
 	}
 
-	handleReload(ctx, configPath, sched, exporter, tagKeys, "text", ":0", "/metrics")
+	handleReload(ctx, configPath, sched, exporter, tagKeys, "text", ":0", "/metrics", false)
 
 	// Agent should still be running with the previous 2-target config.
 	time.Sleep(200 * time.Millisecond)
@@ -531,7 +543,7 @@ func TestIntegration_ConfigReloadSIGHUP(t *testing.T) {
 		t.Errorf("after invalid reload: expected both targets still present, got %v", addrs)
 	}
 	if total := getAgentTargetsTotal(families); total != 2 {
-		t.Errorf("after invalid reload agent_targets_total = %v, want 2 (should keep previous config)", total)
+		t.Errorf("after invalid reload netsonar_targets_total = %v, want 2 (should keep previous config)", total)
 	}
 }
 
@@ -626,7 +638,7 @@ func TestIntegration_GracefulShutdown(t *testing.T) {
 		t.Fatalf("LoadConfig failed: %v", err)
 	}
 
-	exporter := metrics.NewMetricsExporter(config.CollectTagKeys(cfg))
+	exporter := metrics.NewMetricsExporter(config.CollectTagKeys(cfg), metrics.ExporterOptions{EnableRuntimeMetrics: cfg.Agent.EnableRuntimeMetrics})
 	proberFactory := func(target config.TargetConfig) probe.Prober {
 		return &probe.TCPProber{}
 	}
@@ -636,7 +648,7 @@ func TestIntegration_GracefulShutdown(t *testing.T) {
 	// No t.Cleanup for sched.Stop/cancel — shutdown() will handle that.
 
 	sched.Start(ctx, *cfg)
-	exporter.SetAgentInfo("test")
+	exporter.SetBuildInfo("test", "test-revision", "2026-04-26T12:00:00Z")
 	hash, _ := config.ComputeHash(cfg)
 	exporter.SetConfigInfo(hash)
 	exporter.SetTargetsTotal(len(cfg.Targets))
@@ -812,7 +824,7 @@ func TestIntegration_ConfigReloadLogLevel(t *testing.T) {
 	}
 
 	tagKeys := config.CollectTagKeys(cfg)
-	exporter := metrics.NewMetricsExporter(tagKeys)
+	exporter := metrics.NewMetricsExporter(tagKeys, metrics.ExporterOptions{EnableRuntimeMetrics: cfg.Agent.EnableRuntimeMetrics})
 	proberFactory := func(target config.TargetConfig) probe.Prober {
 		return &probe.TCPProber{}
 	}
@@ -829,7 +841,7 @@ func TestIntegration_ConfigReloadLogLevel(t *testing.T) {
 
 	// --- 4. Rewrite config with log_level: debug and reload ---
 	writeConfig("debug")
-	handleReload(schedCtx, configPath, sched, exporter, tagKeys, "text", ":0", "/metrics")
+	handleReload(schedCtx, configPath, sched, exporter, tagKeys, "text", ":0", "/metrics", false)
 
 	if got := agentLogLevel.Level(); got != slog.LevelDebug {
 		t.Errorf("after reload to debug: level = %v, want debug", got)
@@ -840,7 +852,7 @@ func TestIntegration_ConfigReloadLogLevel(t *testing.T) {
 
 	// --- 5. Reload to error and verify down-level transition ---
 	writeConfig("error")
-	handleReload(schedCtx, configPath, sched, exporter, tagKeys, "text", ":0", "/metrics")
+	handleReload(schedCtx, configPath, sched, exporter, tagKeys, "text", ":0", "/metrics", false)
 
 	if got := agentLogLevel.Level(); got != slog.LevelError {
 		t.Errorf("after reload to error: level = %v, want error", got)
@@ -870,7 +882,7 @@ targets:
 `), 0644); err != nil {
 		t.Fatalf("failed to write invalid config: %v", err)
 	}
-	handleReload(schedCtx, configPath, sched, exporter, tagKeys, "text", ":0", "/metrics")
+	handleReload(schedCtx, configPath, sched, exporter, tagKeys, "text", ":0", "/metrics", false)
 
 	// Rejected reload keeps previous level (error from step 5).
 	if got := agentLogLevel.Level(); got != slog.LevelError {
@@ -896,9 +908,34 @@ targets:
 `), 0644); err != nil {
 		t.Fatalf("failed to write log_format change config: %v", err)
 	}
-	handleReload(schedCtx, configPath, sched, exporter, tagKeys, "text", ":0", "/metrics")
+	handleReload(schedCtx, configPath, sched, exporter, tagKeys, "text", ":0", "/metrics", false)
 
 	if got := agentLogLevel.Level(); got != slog.LevelError {
 		t.Errorf("after rejected log_format reload: level = %v, want error (previous)", got)
+	}
+
+	// --- 8. Rejected reload (enable_runtime_metrics change) must NOT change the level ---
+	if err := os.WriteFile(configPath, []byte(`agent:
+  default_interval: 30s
+  log_level: debug
+  enable_runtime_metrics: true
+targets:
+  - name: x
+    address: `+addr+`
+    probe_type: tcp
+    interval: 5s
+    timeout: 2s
+    tags:
+      service: svc
+      scope: local
+      provider: test
+      target_region: test-region
+`), 0644); err != nil {
+		t.Fatalf("failed to write enable_runtime_metrics change config: %v", err)
+	}
+	handleReload(schedCtx, configPath, sched, exporter, tagKeys, "text", ":0", "/metrics", false)
+
+	if got := agentLogLevel.Level(); got != slog.LevelError {
+		t.Errorf("after rejected enable_runtime_metrics reload: level = %v, want error (previous)", got)
 	}
 }

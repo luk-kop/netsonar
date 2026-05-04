@@ -26,8 +26,6 @@ The current implementation is Linux-only and IPv4-only. IPv6 MTU probing needs
 a separate design because ICMPv6 Packet Too Big uses different socket options
 and error classification.
 
-[Back to Table of Contents](#table-of-contents)
-
 ## What MTU Means
 
 MTU means Maximum Transmission Unit. It is the largest packet size, in bytes, that can pass over a network link without fragmentation.
@@ -50,8 +48,6 @@ So an ICMP payload of `1472` corresponds to a path MTU of `1500`.
 This calculation assumes a standard IPv4 header with no options. IPv4 headers
 can be up to 60 bytes when options are present, which would reduce the payload
 that fits inside the same path MTU.
-
-[Back to Table of Contents](#table-of-contents)
 
 ## How PMTUD Works
 
@@ -81,8 +77,6 @@ sequenceDiagram
 ```
 
 When a packet gets through and the agent receives an ICMP echo reply, that payload size is considered successful.
-
-[Back to Table of Contents](#table-of-contents)
 
 ## How the Agent Implements MTU Probes
 
@@ -172,8 +166,6 @@ The probe does not require `CAP_NET_RAW`. It requires `net.ipv4.ping_group_range
 On Linux ping sockets, the kernel manages the ICMP identifier and filters
 traffic by connected peer. The probe still verifies Echo Reply sequence numbers.
 
-[Back to Table of Contents](#table-of-contents)
-
 ## ICMP Destination Unreachable Codes
 
 ICMPv4 Destination Unreachable is a broad message type. The code determines the real cause.
@@ -191,8 +183,6 @@ Examples:
 For PMTUD, only code `4` means "this payload is too large for the path". Other Destination Unreachable codes should not be treated as MTU-size failures because a smaller packet will usually not fix routing, reachability, or policy denial.
 
 This matters for diagnosis. The agent treats code `4` as a size failure and treats other Destination Unreachable codes as a fatal reachability/policy signal for the probe: `state="unreachable", detail="destination_unreachable"`.
-
-[Back to Table of Contents](#table-of-contents)
 
 ## Network Requirements in Cloud Environments
 
@@ -223,8 +213,6 @@ For cloud deployments, treat the current ICMP MTU probe as a trade-off:
 - it avoids opening a TCP or UDP application port on the target,
 - it requires Linux ping-socket permission through `ping_group_range`,
 - it requires ICMP Echo and ICMP error traffic to be allowed by cloud and host firewalls.
-
-[Back to Table of Contents](#table-of-contents)
 
 ## Linux Ping-Socket Backend
 
@@ -278,8 +266,6 @@ The backend uses one connected ping socket per attempt. That keeps error-queue
 state isolated between payload sizes and lets the kernel provide the primary
 peer filtering boundary.
 
-[Back to Table of Contents](#table-of-contents)
-
 ## UDP Error Queue Alternative
 
 Linux also supports a different PMTU technique used by tools such as `tracepath`: a process can open an ordinary UDP socket, enable `IP_RECVERR`, send packets with PMTUD enabled, and read ICMP errors from the socket error queue with `recvmsg(..., MSG_ERRQUEUE)`.
@@ -308,8 +294,6 @@ However, a UDP error-queue probe has different cloud requirements from the ICMP 
 This makes UDP error-queue probing attractive only in environments where opening one UDP test port is easier than configuring `ping_group_range`. It is less attractive when cloud policy drops unsolicited UDP, because the result becomes inconclusive rather than a clear MTU measurement.
 
 If implemented, this should be exposed as a separate backend or probe mode, not as an invisible replacement for the ICMP MTU probe. UDP and ICMP approaches have different operational requirements and different failure semantics.
-
-[Back to Table of Contents](#table-of-contents)
 
 ## Common PMTUD Problems
 
@@ -403,8 +387,6 @@ The request path and response path can differ. A payload may reach the target, b
 
 VPNs, GRE, IPsec, VXLAN, WireGuard, cloud overlays, and private connectivity services add headers. That reduces the effective MTU available to application traffic. A path that looks like Ethernet 1500 at the interface can have a lower usable MTU end to end.
 
-[Back to Table of Contents](#table-of-contents)
-
 ## Interpreting Results
 
 | Result | Meaning |
@@ -475,8 +457,6 @@ Key points:
 - `probe_icmp_avg_rtt_seconds` is the average RTT across all successful ICMP echo replies (sanity echo and step-down payloads). It is absent when no echo reply was received.
 - `probe_success=0` with `state="degraded"` and a non-absent `probe_mtu_bytes` means the path works but MTU is below `expected_min_mtu`.
 
-[Back to Table of Contents](#table-of-contents)
-
 ## Configuration Examples
 
 Use defaults:
@@ -533,8 +513,6 @@ Setting `expected_min_mtu` too high for a tunnelled path will cause persistent f
 
 `mtu_per_attempt_timeout` bounds each individual sanity or MTU attempt. The target `timeout` remains the global deadline for the whole probe.
 
-[Back to Table of Contents](#table-of-contents)
-
 ## Local Internet Smoke Targets
 
 The optional dev-stack Internet config includes low-frequency MTU smoke probes:
@@ -558,8 +536,6 @@ real PMTUD problem, but it can also mean local firewall policy, Docker host
 networking, VPN policy, upstream ICMP filtering, anycast routing, or ICMP
 rate-limiting. Treat them as diagnostic signals alongside TCP, HTTP, DNS, and
 TLS probes in the same `lab-dev-internet` stack.
-
-[Back to Table of Contents](#table-of-contents)
 
 ## Troubleshooting
 
@@ -591,6 +567,4 @@ sudo sysctl -w net.ipv4.ping_group_range="0 4294967294"
 For containers and Kubernetes, `ping_group_range` is network-namespaced. Set it
 inside the container or pod network namespace, not only on the host namespace.
 See [Container Deployment](container-deployment.md) for Docker and Kubernetes
-examples.
-
-[Back to Table of Contents](#table-of-contents)
+ examples.

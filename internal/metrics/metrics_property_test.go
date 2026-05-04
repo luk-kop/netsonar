@@ -29,7 +29,7 @@ func genProbeType() gopter.Gen {
 	probeTypes := []config.ProbeType{
 		config.ProbeTypeTCP, config.ProbeTypeHTTP, config.ProbeTypeICMP,
 		config.ProbeTypeMTU, config.ProbeTypeDNS, config.ProbeTypeTLSCert,
-		config.ProbeTypeHTTPBody, config.ProbeTypeProxy,
+		config.ProbeTypeHTTPBody, config.ProbeTypeProxyConnect,
 	}
 	return gen.IntRange(0, len(probeTypes)-1).Map(func(i int) config.ProbeType {
 		return probeTypes[i]
@@ -183,7 +183,7 @@ func TestPropertyMetricsLabelsMatchTargetTags(t *testing.T) {
 
 	properties.Property("recorded metric labels match target tags", prop.ForAll(
 		func(tw targetWithTags) bool {
-			m := NewMetricsExporter(testTagKeys)
+			m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 			result := probeResultForType(tw.Target.ProbeType)
 			m.Record(tw.Target, result)
 

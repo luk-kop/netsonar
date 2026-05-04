@@ -598,7 +598,7 @@ func waitForTargets(s *Scheduler, expected int, timeout time.Duration) int {
 }
 
 func TestReload_AddTarget(t *testing.T) {
-	me := metrics.NewMetricsExporter(nil)
+	me := metrics.NewMetricsExporter(nil, metrics.ExporterOptions{})
 	factory := func(_ config.TargetConfig) probe.Prober { return &noopProber{} }
 	s := New(me, factory)
 
@@ -631,7 +631,7 @@ func TestReload_AddTarget(t *testing.T) {
 }
 
 func TestReload_RemoveTarget(t *testing.T) {
-	me := metrics.NewMetricsExporter(nil)
+	me := metrics.NewMetricsExporter(nil, metrics.ExporterOptions{})
 	factory := func(_ config.TargetConfig) probe.Prober { return &noopProber{} }
 	s := New(me, factory)
 
@@ -664,7 +664,7 @@ func TestReload_RemoveTarget(t *testing.T) {
 }
 
 func TestReload_ChangeTarget(t *testing.T) {
-	me := metrics.NewMetricsExporter(nil)
+	me := metrics.NewMetricsExporter(nil, metrics.ExporterOptions{})
 	var probers []*countingProber
 	var mu sync.Mutex
 	factory := func(_ config.TargetConfig) probe.Prober {
@@ -713,7 +713,7 @@ func TestReload_ChangeTarget(t *testing.T) {
 }
 
 func TestReload_UnchangedTargetContinues(t *testing.T) {
-	me := metrics.NewMetricsExporter(nil)
+	me := metrics.NewMetricsExporter(nil, metrics.ExporterOptions{})
 	var proberCount int
 	var mu sync.Mutex
 	factory := func(_ config.TargetConfig) probe.Prober {
@@ -782,7 +782,7 @@ func TestExecuteProbe_DiscardsResultAfterContextCancel(t *testing.T) {
 	// This test verifies that when the parent context is cancelled (e.g. by
 	// Reload removing a target) while a probe is in flight, the result is
 	// discarded and Record is NOT called on the exporter.
-	me := metrics.NewMetricsExporter(nil)
+	me := metrics.NewMetricsExporter(nil, metrics.ExporterOptions{})
 
 	target := config.TargetConfig{
 		Name:      "discard-test",

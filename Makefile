@@ -5,14 +5,14 @@ BINDIR   := bin
 PKG      := ./cmd/agent
 MODULE   := netsonar
 
-VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-COMMIT   ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-DATE     ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
+VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+REVISION   ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_DATE ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 
 LDFLAGS  := -s -w \
 	-X 'main.version=$(VERSION)' \
-	-X 'main.commit=$(COMMIT)' \
-	-X 'main.date=$(DATE)'
+	-X 'main.revision=$(REVISION)' \
+	-X 'main.buildDate=$(BUILD_DATE)'
 
 .PHONY: all build build-release test test-short test-race test-pbt lab-e2e lab-dev lab-dev-internet lab-dev-reload lab-dev-down lab-mv lab-mv-down lab-metrics-validation lab-metrics-validation-down lint fmt vet clean
 

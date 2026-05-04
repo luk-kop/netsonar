@@ -17,6 +17,10 @@ agent:
   log_level: info
   # Log format: text or json. Changing log_format requires an agent restart.
   log_format: text
+  # Optional: expose Go runtime and process metrics such as go_goroutines and
+  # process_cpu_seconds_total. Disabled by default. Changing this setting
+  # requires an agent restart.
+  enable_runtime_metrics: false
   # Optional: restrict tag keys to a fixed allowlist. When set, targets may
   # only use keys from this list. When absent or empty, tag keys are collected
   # dynamically from all targets (max 30 unique keys).
@@ -77,6 +81,9 @@ targets:
     timeout: 5s
     probe_opts:
       method: GET
+      # Optional custom request headers.
+      # headers:
+      #   X-Custom: "value"
       follow_redirects: false
       expected_status_codes: []
       # Optional. 0 or omitted uses the 1 MiB default response body read cap.
@@ -147,6 +154,9 @@ targets:
     timeout: 5s
     probe_opts:
       method: GET
+      # Optional custom request headers, for example auth or tenant routing.
+      # headers:
+      #   X-Health-Check: "netsonar"
       body_match_string: "ok"
     tags:
       service: api-pub
@@ -222,14 +232,16 @@ targets:
       target_partition: global
       target_account: ep-devops-eu1
 
-  # Proxy connectivity
+  # Proxy CONNECT tunnel
   - name: fwd-proxy
-    address: "https://example.com"
-    probe_type: proxy
+    address: "example.com:443"
+    probe_type: proxy_connect
     timeout: 5s
     probe_opts:
       # For authenticated proxies, use: http://user:pass@proxy:port
       proxy_url: "http://fwd-proxy.example.internal:8888"
+      # Optional: treat an explicit CONNECT denial as success for negative tests.
+      # expected_proxy_connect_status_codes: [403]
     tags:
       service: proxy
       scope: same-region

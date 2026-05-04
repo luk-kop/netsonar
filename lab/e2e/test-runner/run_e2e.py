@@ -32,9 +32,12 @@ EXPECTATIONS = [
     ("probe_success", {"target_name": "http-via-proxy"}, 1.0),
     ("probe_http_status_code", {"target_name": "http-via-proxy"}, 200.0),
     ("probe_success", {"target_name": "proxy-connect-ok"}, 1.0),
-    ("probe_success", {"target_name": "proxy-connect-denied"}, 0.0),
+    ("probe_proxy_connect_status_code", {"target_name": "proxy-connect-ok"}, 200.0),
+    ("probe_success", {"target_name": "proxy-connect-denied"}, 1.0),
+    ("probe_proxy_connect_status_code", {"target_name": "proxy-connect-denied"}, 403.0),
     ("probe_success", {"target_name": "tls-cert-via-proxy"}, 1.0),
     ("probe_success", {"target_name": "tls-cert-connect-fail"}, 0.0),
+    ("probe_proxy_connect_status_code", {"target_name": "tls-cert-connect-fail"}, 403.0),
     ("probe_success", {"target_name": "dns-fake-targets"}, 1.0),
     ("probe_success", {"target_name": "dns-localhost-match"}, 1.0),
     ("probe_dns_result_match", {"target_name": "dns-localhost-match"}, 1.0),
@@ -46,7 +49,7 @@ EXPECTATIONS = [
     ("probe_icmp_packet_loss_ratio", {"target_name": "icmp-single-reply"}, 0.0),
     ("probe_success", {"target_name": "mtu-fake-targets"}, 1.0),
     ("probe_success", {"target_name": "mtu-no-resolve"}, 0.0),
-    ("agent_info", {"version": "e2e"}, 1.0),
+    ("netsonar_build_info", {"version": "e2e"}, 1.0),
 ]
 
 RANGE_EXPECTATIONS = [

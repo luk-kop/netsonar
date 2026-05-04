@@ -9,7 +9,7 @@ certificate chains or DNS CNAME normalization behave predictably.
 ## Validation Layers
 
 | Layer | Tooling | Runs | Catches |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | CI integration tests | `httptest.Server`, controlled TLS/DNS servers, e2e lab | Every push | Regressions, off-by-one errors, phase attribution bugs |
 | Local side-by-side lab | NetSonar and Prometheus Blackbox Exporter in `lab/metrics-validation/` | Manually on demand | Systematic HTTP phase drift, semantic mismatches |
 | Production spot checks | `curl`, `openssl`, `dig`, `ping`, `tcpdump` | One-shot when needed | Environment-specific anomalies and real-world edge cases |
@@ -21,7 +21,7 @@ remain useful when investigating a specific endpoint or network path.
 ## Reference Tool Mapping
 
 | NetSonar metric | Reference tool | Expected relationship |
-|---|---|---|
+| --- | --- | --- |
 | `probe_duration_seconds` for HTTP | `curl -w '%{time_total}'` | Direct comparison when redirects and response body limits do not change semantics |
 | `probe_http_status_code` | `curl -w '%{http_code}'` | Direct integer comparison |
 | HTTP `dns_resolve` phase | `curl -w '%{time_namelookup}'` | Direct comparison |
@@ -39,7 +39,8 @@ remain useful when investigating a specific endpoint or network path.
 | `probe_tls_cert_chain_expiry_timestamp_seconds` | `openssl s_client -showcerts` plus per-cert `openssl x509 -enddate` | Per-certificate timestamp comparison |
 | `probe_http_body_match` | `curl -s URL` plus `grep -E` or fixed-string comparison | Binary match/mismatch; status validation is separate |
 | `probe_http_response_truncated` | Controlled server/test only | Internal transfer-limit behavior; no external one-command equivalent |
-| `probe_success` for proxy probes | `curl -x http://proxy:3128 -w '%{http_code}'` | Success/failure only; duration is not comparable |
+| `probe_success` for `proxy_connect` probes | `curl -x http://proxy:3128 -w '%{http_code}'` | Success/failure only; duration is not comparable |
+| `probe_proxy_connect_status_code` | Controlled lab only | curl exits 56 on non-2xx CONNECT without exposing the status code; no clean external one-command equivalent |
 
 For DNS result matching, compare A and AAAA probes only against IP address
 answers. `dig +short A` may include CNAME lines before final IPs, while
@@ -56,7 +57,7 @@ must inspect every certificate returned by `openssl s_client -showcerts`.
 per-phase deltas. Use these mappings:
 
 | NetSonar value | curl value |
-|---|---|
+| --- | --- |
 | `dns_resolve` | `time_namelookup` |
 | `dns_resolve + tcp_connect` | `time_connect` |
 | `dns_resolve + tcp_connect + tls_handshake` | `time_appconnect` |
@@ -90,7 +91,7 @@ Docker-network HTTP/HTTPS validation targets, the expected pass/fail guidance is
 The following coverage is currently implemented:
 
 | Area | Coverage |
-|---|---|
+| --- | --- |
 | TLS certificate expiry | Controlled single-cert and chain tests in `internal/probe/tls_cert_test.go`, including intermediate-earliest and leaf-earliest cases |
 | TLS expiry metric export | `TestRecord_TLSCertExpiry` in `internal/metrics/metrics_test.go` asserts the exported Unix timestamp |
 | HTTP phase attribution | Property coverage for non-overlapping phase sums plus targeted controlled-delay tests for TTFB and transfer attribution in `internal/probe/http_test.go` |
@@ -111,7 +112,7 @@ Open Grafana at `http://localhost:3000` and use the **Metrics Validation**
 dashboard. The lab compares these phase pairs:
 
 | NetSonar phase | Blackbox phase |
-|---|---|
+| --- | --- |
 | `dns_resolve` | `resolve` |
 | `tcp_connect` | `connect` |
 | `tls_handshake` | `tls` |
@@ -120,7 +121,7 @@ dashboard. The lab compares these phase pairs:
 | `transfer` | `transfer` |
 
 The lab intentionally validates only local HTTP and HTTPS probes. It does not
-validate DNS, ICMP, MTU, proxy, Internet targets, or TLS certificate expiry.
+validate DNS, ICMP, MTU, `proxy_connect`, Internet targets, or TLS certificate expiry.
 Those areas are covered by targeted tests, e2e checks, or manual reference
 commands.
 

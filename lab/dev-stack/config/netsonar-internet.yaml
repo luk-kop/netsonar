@@ -3,6 +3,7 @@ agent:
   metrics_path: "/metrics"
   default_interval: 10s
   default_timeout: 5s
+  initial_probe_jitter: 10s
   log_level: info
   allowed_tag_keys:
     - service

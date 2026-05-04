@@ -67,7 +67,7 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "agent_targets_total{job=~\"$job\"}",
+          "expr": "netsonar_targets_total{job=~\"$job\"}",
           "legendFormat": "Total Targets",
           "refId": "A",
           "instant": true
@@ -348,7 +348,7 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "agent_info{job=~\"$job\"}",
+          "expr": "netsonar_build_info{job=~\"$job\"}",
           "legendFormat": "Agent Version",
           "refId": "A",
           "instant": true,
@@ -414,7 +414,7 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "topk(1, last_over_time(agent_config_info{job=~\"$job\"}[30s]))",
+          "expr": "topk(1, last_over_time(netsonar_config_info{job=~\"$job\"}[30s]))",
           "legendFormat": "Config",
           "refId": "A",
           "instant": true,
@@ -490,7 +490,7 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "time() - agent_config_reload_timestamp_seconds{job=~\"$job\"}",
+          "expr": "time() - netsonar_config_reload_timestamp_seconds{job=~\"$job\"}",
           "legendFormat": "Config Age",
           "refId": "A",
           "instant": true
@@ -857,7 +857,7 @@
           "show": false
         }
       },
-      "title": "All Probes \u2014 Status Table",
+      "title": "All Probes — Status Table",
       "description": "Current status of every configured probe target. Sorted by Status so failures appear first.\n\nColumn legend:\n- Status: probe outcome from probe_success. OK = succeeded, FAIL = failed. On FAIL, compare Total Probe Time against the target timeout to distinguish a full timeout from a fast fail (DNS/socket error).\n- Name / Probe / Path: target identity. Path = YES means the probe goes through an HTTP proxy (network_path=proxy); blank = direct.\n- Primary Latency: probe-type-specific latency (ICMP/MTU RTT, TCP connect, HTTP TTFB, TLS handshake, proxy CONNECT, DNS resolve). See Latency Signal for which metric produced the value. N/A = no usable timing signal (e.g., 100% ICMP packet loss).\n- Latency Signal: which metric or phase produced Primary Latency: icmp_rtt, tcp_connect, ttfb, tls_handshake, proxy_connect, or dns_resolve.\n- Total Probe Time: wall-clock duration of the full probe (probe_duration_seconds). For ICMP/MTU this runs in seconds by design, driven by ping intervals and retry budgets, not network speed. Not a health signal on its own; use Status + Primary Latency for health.",
       "type": "table",
       "transformations": [
@@ -1000,7 +1000,7 @@
           "format": "table"
         },
         {
-          "expr": "label_replace(probe_icmp_avg_rtt_seconds{job=~\"$job\"}, \"phase\", \"icmp_rtt\", \"__name__\", \".*\") or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"tcp\", phase=\"tcp_connect\"} or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"ttfb\"} or (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"tls_handshake\"} unless on(target_name) probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"ttfb\"}) or (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"tcp_connect\"} unless on(target_name) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"ttfb\"} or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"tls_handshake\"})) or (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"dns_resolve\"} unless on(target_name) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"ttfb\"} or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"tls_handshake\"} or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"tcp_connect\"})) or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"tls_cert\", phase=\"tls_handshake\"} or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"proxy\", phase=\"proxy_connect\"} or label_replace(probe_dns_resolve_seconds{job=~\"$job\"}, \"phase\", \"dns_resolve\", \"__name__\", \".*\")",
+          "expr": "label_replace(probe_icmp_avg_rtt_seconds{job=~\"$job\"}, \"phase\", \"icmp_rtt\", \"__name__\", \".*\") or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"tcp\", phase=\"tcp_connect\"} or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"ttfb\"} or (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"tls_handshake\"} unless on(target_name) probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"ttfb\"}) or (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"tcp_connect\"} unless on(target_name) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"ttfb\"} or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"tls_handshake\"})) or (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"dns_resolve\"} unless on(target_name) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"ttfb\"} or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"tls_handshake\"} or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"tcp_connect\"})) or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"tls_cert\", phase=\"tls_handshake\"} or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"proxy_connect\", phase=\"proxy_connect\"} or label_replace(probe_dns_resolve_seconds{job=~\"$job\"}, \"phase\", \"dns_resolve\", \"__name__\", \".*\")",
           "legendFormat": "",
           "refId": "B",
           "instant": true,
@@ -1089,7 +1089,7 @@
           "mode": "multi"
         }
       },
-      "title": "TCP Duration \u2014 Same Region",
+      "title": "TCP Duration — Same Region",
       "type": "timeseries",
       "targets": [
         {
@@ -1161,7 +1161,7 @@
           "mode": "multi"
         }
       },
-      "title": "TCP Duration \u2014 Cross Region",
+      "title": "TCP Duration — Cross Region",
       "type": "timeseries",
       "targets": [
         {
@@ -1233,7 +1233,7 @@
           "mode": "multi"
         }
       },
-      "title": "TCP Duration \u2014 AWS Regional Endpoints",
+      "title": "TCP Duration — AWS Regional Endpoints",
       "type": "timeseries",
       "targets": [
         {
@@ -1494,12 +1494,32 @@
           "custom": {
             "axisBorderShow": false,
             "axisLabel": "",
+            "axisSoftMax": 1.0,
             "drawStyle": "line",
             "fillOpacity": 10,
             "lineWidth": 2,
             "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
             "showPoints": "auto",
-            "spanNulls": false
+            "spanNulls": false,
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1.0
+              }
+            ]
           },
           "unit": "s"
         },
@@ -1526,11 +1546,11 @@
           "mode": "multi"
         }
       },
-      "title": "HTTP Duration (Direct)",
+      "title": "HTTP Duration median (5m) (Direct)",
       "type": "timeseries",
       "targets": [
         {
-          "expr": "probe_duration_seconds{job=~\"$job\", probe_type=\"http\", network_path=\"direct\"}",
+          "expr": "quantile_over_time(0.5, probe_duration_seconds{job=~\"$job\", probe_type=\"http\", network_path=\"direct\"}[5m])",
           "legendFormat": "{{target_name}}",
           "refId": "A"
         }
@@ -1831,7 +1851,7 @@
         ]
       },
       "title": "HTTP Phase Breakdown (current)",
-      "description": "Instant snapshot of HTTP phase durations pivoted by target.\n\nColumn legend:\n- Target: HTTP target name; click to drill down to HTTP Details.\n- dns_resolve: DNS lookup time for hostname targets. N/A means DNS was not observed, for example a literal IP target.\n- tcp_connect: TCP connection establishment time.\n- tls_handshake: Target TLS handshake time. N/A means TLS was not observed, for example plain HTTP.\n- request_write: Time from connection/TLS readiness to request write completion. Usually near-zero for GET/small requests; grows when request_body_bytes sends an upload payload.\n- ttfb: Time from request write completion to first response byte.\n- transfer: Response body read time up to response_body_limit_bytes.\n\nCell colours: green <50 ms, yellow 50\u2013200 ms, red >200 ms. N/A cells mean the phase was not observed or does not apply.",
+      "description": "Instant snapshot of HTTP phase durations pivoted by target.\n\nColumn legend:\n- Target: HTTP target name; click to drill down to HTTP Details.\n- dns_resolve: DNS lookup time for hostname targets. N/A means DNS was not observed, for example a literal IP target.\n- tcp_connect: TCP connection establishment time.\n- tls_handshake: Target TLS handshake time. N/A means TLS was not observed, for example plain HTTP.\n- request_write: Time from connection/TLS readiness to request write completion. Usually near-zero for GET/small requests; grows when request_body_bytes sends an upload payload.\n- ttfb: Time from request write completion to first response byte.\n- transfer: Response body read time up to response_body_limit_bytes.\n\nCell colours: green <50 ms, yellow 50–200 ms, red >200 ms. N/A cells mean the phase was not observed or does not apply.",
       "type": "table",
       "targets": [
         {
@@ -1945,7 +1965,7 @@
         "showUnfilled": true
       },
       "title": "HTTP Total Duration (last)",
-      "description": "Horizontal bar gauge of total HTTP probe duration per target. Thresholds match the phase breakdown table: green <50 ms, yellow 50\u2013200 ms, red >200 ms.",
+      "description": "Horizontal bar gauge of total HTTP probe duration per target. Thresholds match the phase breakdown table: green <50 ms, yellow 50–200 ms, red >200 ms.",
       "type": "bargauge",
       "targets": [
         {
@@ -2824,48 +2844,48 @@
               "target_account 1": true,
               "target_account 2": true,
               "target_name 1": true,
-                "target_name 2": true,
-                "service 2": true,
-                "scope 2": true,
-                "target_region 2": true,
-                "target 2": true,
-                "state 2": true,
-                "detail 2": true,
-                "Value #A": true
-              },
-              "indexByName": {
-                "target_name": 0,
-                "service": 1,
-                "service 1": 1,
-                "scope": 2,
-                "scope 1": 2,
-                "target_region": 3,
-                "target_region 1": 3,
-                "target": 4,
-                "target 1": 4,
-                "Value #B": 5,
-                "state": 6,
-                "detail": 7,
-                "Value #C": 8
-              },
-              "renameByName": {
-                "target_name": "Name",
-                "target": "Target",
-                "target 1": "Target",
-                "service": "Service",
-                "service 1": "Service",
-                "scope": "Scope",
-                "scope 1": "Scope",
-                "target_region": "Region",
-                "target_region 1": "Region",
-                "Value #B": "Status",
-                "state": "State",
-                "detail": "Detail",
-                "Value #C": "MTU (bytes)"
-              }
+              "target_name 2": true,
+              "service 2": true,
+              "scope 2": true,
+              "target_region 2": true,
+              "target 2": true,
+              "state 2": true,
+              "detail 2": true,
+              "Value #A": true
+            },
+            "indexByName": {
+              "target_name": 0,
+              "service": 1,
+              "service 1": 1,
+              "scope": 2,
+              "scope 1": 2,
+              "target_region": 3,
+              "target_region 1": 3,
+              "target": 4,
+              "target 1": 4,
+              "Value #B": 5,
+              "state": 6,
+              "detail": 7,
+              "Value #C": 8
+            },
+            "renameByName": {
+              "target_name": "Name",
+              "target": "Target",
+              "target 1": "Target",
+              "service": "Service",
+              "service 1": "Service",
+              "scope": "Scope",
+              "scope 1": "Scope",
+              "target_region": "Region",
+              "target_region 1": "Region",
+              "Value #B": "Status",
+              "state": "State",
+              "detail": "Detail",
+              "Value #C": "MTU (bytes)"
             }
           }
-        ],
+        }
+      ],
       "targets": [
         {
           "expr": "probe_mtu_state{job=~\"$job\"}",
@@ -3077,7 +3097,7 @@
         }
       },
       "title": "Probes Exceeding Interval (skipped cycles)",
-      "description": "Counts how often a probe was still running when the next scheduled cycle fired. Non-zero values mean the probe duration exceeds the configured interval \u2014 consider increasing the interval or timeout for affected targets.",
+      "description": "Counts how often a probe was still running when the next scheduled cycle fired. Non-zero values mean the probe duration exceeds the configured interval — consider increasing the interval or timeout for affected targets.",
       "type": "timeseries",
       "targets": [
         {
@@ -3395,7 +3415,7 @@
           "show": false
         }
       },
-      "title": "TLS Certificate Expiry \u2014 Earliest",
+      "title": "TLS Certificate Expiry — Earliest",
       "description": "Days until the earliest TLS peer certificate expiry observed in the latest probe result. Targets where the latest probe failed without retrieving a certificate do not appear in this table.",
       "type": "table",
       "transformations": [
@@ -3601,7 +3621,7 @@
           "show": false
         }
       },
-      "title": "TLS Certificate Expiry \u2014 Chain",
+      "title": "TLS Certificate Expiry — Chain",
       "description": "Days until each certificate in the peer chain expires, including cert_index and cert_role labels from the latest probe result.",
       "type": "table",
       "transformations": [
@@ -4040,9 +4060,29 @@
             "lineWidth": 2,
             "pointSize": 5,
             "showPoints": "auto",
-            "spanNulls": false
+            "spanNulls": false,
+            "axisSoftMax": 1.0,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "thresholdsStyle": {
+              "mode": "line"
+            }
           },
-          "unit": "s"
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1.0
+              }
+            ]
+          }
         },
         "overrides": []
       },
@@ -4067,11 +4107,11 @@
           "mode": "multi"
         }
       },
-      "title": "HTTP Body Duration",
+      "title": "HTTP Body Duration median (5m)",
       "type": "timeseries",
       "targets": [
         {
-          "expr": "probe_duration_seconds{job=~\"$job\", probe_type=\"http_body\"}",
+          "expr": "quantile_over_time(0.5, probe_duration_seconds{job=~\"$job\", probe_type=\"http_body\"}[5m])",
           "legendFormat": "{{target_name}}",
           "refId": "A"
         }
@@ -4333,9 +4373,29 @@
             "lineWidth": 2,
             "pointSize": 5,
             "showPoints": "auto",
-            "spanNulls": false
+            "spanNulls": false,
+            "axisSoftMax": 1.0,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "thresholdsStyle": {
+              "mode": "line"
+            }
           },
-          "unit": "s"
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1.0
+              }
+            ]
+          }
         },
         "overrides": []
       },
@@ -4360,11 +4420,11 @@
           "mode": "multi"
         }
       },
-      "title": "Proxy-Path HTTP Duration",
+      "title": "Proxy-Path HTTP Duration median (5m)",
       "type": "timeseries",
       "targets": [
         {
-          "expr": "probe_duration_seconds{job=~\"$job\", probe_type=\"http\", network_path=\"proxy\"}",
+          "expr": "quantile_over_time(0.5, probe_duration_seconds{job=~\"$job\", probe_type=\"http\", network_path=\"proxy\"}[5m])",
           "legendFormat": "{{target_name}}",
           "refId": "A"
         }
@@ -4430,7 +4490,7 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "count(probe_success{job=~\"$job\", probe_type=\"proxy\"})",
+          "expr": "count(probe_success{job=~\"$job\", probe_type=\"proxy_connect\"})",
           "legendFormat": "Total Proxy CONNECT",
           "refId": "A",
           "instant": true
@@ -4485,7 +4545,7 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "count(probe_success{job=~\"$job\", probe_type=\"proxy\"} == 1)",
+          "expr": "count(probe_success{job=~\"$job\", probe_type=\"proxy_connect\"} == 1)",
           "legendFormat": "CONNECT OK",
           "refId": "A",
           "instant": true
@@ -4544,7 +4604,7 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "count(probe_success{job=~\"$job\", probe_type=\"proxy\"} == 0) OR on() vector(0)",
+          "expr": "count(probe_success{job=~\"$job\", probe_type=\"proxy_connect\"} == 0) OR on() vector(0)",
           "legendFormat": "CONNECT Failed",
           "refId": "A",
           "instant": true
@@ -4601,7 +4661,7 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "avg(probe_duration_seconds{job=~\"$job\", probe_type=\"proxy\"})",
+          "expr": "avg(probe_duration_seconds{job=~\"$job\", probe_type=\"proxy_connect\"})",
           "legendFormat": "Avg CONNECT Duration",
           "refId": "A",
           "instant": true
@@ -4658,7 +4718,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "probe_duration_seconds{job=~\"$job\", probe_type=\"proxy\"}",
+          "expr": "probe_duration_seconds{job=~\"$job\", probe_type=\"proxy_connect\"}",
           "legendFormat": "{{target_name}}",
           "refId": "A"
         }
@@ -4789,6 +4849,63 @@
                 "value": 300
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "CONNECT Code"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "text",
+                      "value": null
+                    },
+                    {
+                      "color": "green",
+                      "value": 200
+                    },
+                    {
+                      "color": "orange",
+                      "value": 300
+                    },
+                    {
+                      "color": "red",
+                      "value": 500
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 130
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              },
+              {
+                "id": "noValue",
+                "value": "-"
+              }
+            ]
           }
         ]
       },
@@ -4812,7 +4929,7 @@
         }
       },
       "title": "Proxy CONNECT Status per Target",
-      "description": "Current status of each proxy CONNECT target. Sorted by Status so failures appear first.\n\nColumn legend:\n- Status: binary probe outcome from probe_success. OK = proxy accepted the CONNECT tunnel, FAIL = proxy rejected the tunnel or connection failed.\n- Name / Service / Target / Scope / Region: target identity and routing context from config labels.\n- Duration (s): wall-clock time for the CONNECT probe, including TCP dial to proxy and CONNECT request/response. Use the Proxy CONNECT Phase Timing panel to see which stage is slow.",
+      "description": "Current status of each proxy CONNECT target. Sorted by Status so failures appear first.\n\nColumn legend:\n- Status: binary probe outcome from probe_success. OK = proxy accepted the CONNECT tunnel or returned the expected CONNECT denial, FAIL = unexpected CONNECT status or connection failure.\n- CONNECT Code: HTTP status returned by the proxy to the CONNECT request when available. Colour codes the kind of response: green (2xx) = tunnel established; orange (3xx-4xx) = client/policy response, typically an explicit denial such as 403 — paired with Status=OK only when the target's expected_proxy_connect_status_codes matches; red (5xx) = upstream/infrastructure failure; blank = no CONNECT response observed (proxy unreachable or dial failed before any response).\n- Name / Service / Target / Scope / Region: target identity and routing context from config labels.\n- Duration (s): wall-clock time for the CONNECT probe, including TCP dial to proxy and CONNECT request/response. Use the Proxy CONNECT Phase Timing panel to see which stage is slow.",
       "type": "table",
       "transformations": [
         {
@@ -4832,36 +4949,54 @@
               "__name__": true,
               "__name__ 1": true,
               "__name__ 2": true,
+              "__name__ 3": true,
               "job": true,
               "job 1": true,
               "job 2": true,
+              "job 3": true,
               "instance": true,
               "instance 1": true,
               "instance 2": true,
+              "instance 3": true,
               "url": true,
               "url 1": true,
               "url 2": true,
+              "url 3": true,
               "host": true,
               "host 1": true,
               "host 2": true,
+              "host 3": true,
               "monitor": true,
               "monitor 1": true,
               "monitor 2": true,
+              "monitor 3": true,
               "port": true,
               "port 1": true,
               "port 2": true,
+              "port 3": true,
               "visibility": true,
               "visibility 1": true,
               "visibility 2": true,
+              "visibility 3": true,
               "provider": true,
               "provider 1": true,
               "provider 2": true,
+              "provider 3": true,
               "probe_type": true,
               "probe_type 1": true,
               "probe_type 2": true,
+              "probe_type 3": true,
               "network_path": true,
               "network_path 1": true,
               "network_path 2": true,
+              "network_path 3": true,
+              "impact 3": true,
+              "target_partition 3": true,
+              "target_region 3": true,
+              "target_account 3": true,
+              "scope 3": true,
+              "service 3": true,
+              "target 3": true,
               "impact 2": true,
               "target_partition 2": true,
               "target_region 2": true,
@@ -4870,7 +5005,8 @@
               "service 2": true,
               "target 2": true,
               "target_name 1": true,
-              "target_name 2": true
+              "target_name 2": true,
+              "target_name 3": true
             },
             "indexByName": {
               "Value #A": 0,
@@ -4879,7 +5015,8 @@
               "target 1": 3,
               "scope 1": 4,
               "target_region 1": 5,
-              "Value #B": 6
+              "Value #C": 6,
+              "Value #B": 7
             },
             "renameByName": {
               "target_name": "Name",
@@ -4891,23 +5028,31 @@
               "target_partition 1": "Partition",
               "target_account 1": "Account",
               "Value #A": "Status",
-              "Value #B": "Duration (s)"
+              "Value #B": "Duration (s)",
+              "Value #C": "CONNECT Code"
             }
           }
         }
       ],
       "targets": [
         {
-          "expr": "probe_success{job=~\"$job\", probe_type=\"proxy\"}",
+          "expr": "probe_success{job=~\"$job\", probe_type=\"proxy_connect\"}",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
           "format": "table"
         },
         {
-          "expr": "probe_duration_seconds{job=~\"$job\", probe_type=\"proxy\"}",
+          "expr": "probe_duration_seconds{job=~\"$job\", probe_type=\"proxy_connect\"}",
           "legendFormat": "",
           "refId": "B",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "probe_proxy_connect_status_code{job=~\"$job\", probe_type=\"proxy_connect\"}",
+          "legendFormat": "",
+          "refId": "C",
           "instant": true,
           "format": "table"
         }
@@ -4963,8 +5108,8 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "probe_phase_duration_seconds{job=~\"$job\", probe_type=\"proxy\"}",
-          "legendFormat": "{{target_name}} \u2014 {{phase}}",
+          "expr": "probe_phase_duration_seconds{job=~\"$job\", probe_type=\"proxy_connect\"}",
+          "legendFormat": "{{target_name}} — {{phase}}",
           "refId": "A"
         }
       ]

@@ -62,7 +62,7 @@ func labelValue(metric *dto.Metric, name string) string {
 // ---------- Metric Registration Tests ----------
 
 func TestNewMetricsExporter_RegistersAllMetrics(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
 	// Record a minimal result so gauge vecs produce at least one time series.
 	target := makeTarget("reg-test", "10.0.0.1:443", config.ProbeTypeTCP, map[string]string{
@@ -75,8 +75,8 @@ func TestNewMetricsExporter_RegistersAllMetrics(t *testing.T) {
 	expected := []string{
 		"probe_success",
 		"probe_duration_seconds",
-		"agent_targets_total",
-		"agent_config_reload_timestamp_seconds",
+		"netsonar_targets_total",
+		"netsonar_config_reload_timestamp_seconds",
 	}
 	for _, name := range expected {
 		if _, ok := families[name]; !ok {
@@ -86,7 +86,7 @@ func TestNewMetricsExporter_RegistersAllMetrics(t *testing.T) {
 }
 
 func TestNewMetricsExporter_HTTPMetricsRegistered(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
 	target := makeTarget("http-reg", "https://example.com", config.ProbeTypeHTTP, map[string]string{
 		"service": "web",
@@ -126,7 +126,7 @@ func TestNewMetricsExporter_HTTPMetricsRegistered(t *testing.T) {
 }
 
 func TestNewMetricsExporter_ProbePhaseDurationHelpMentionsCurrentEmitters(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
 	target := makeTarget("phase-help", "127.0.0.1:443", config.ProbeTypeTLSCert, nil)
 	m.Record(target, probe.ProbeResult{
@@ -147,7 +147,7 @@ func TestNewMetricsExporter_ProbePhaseDurationHelpMentionsCurrentEmitters(t *tes
 		"TCP: dns_resolve for hostname targets, tcp_connect",
 		"HTTP: dns_resolve, tcp_connect, tls_handshake, request_write, ttfb, transfer",
 		"TLS cert direct: dns_resolve for hostname targets, tcp_connect, tls_handshake",
-		"proxy and TLS cert via proxy: proxy_dial, proxy_tls, proxy_connect",
+		"proxy_connect and TLS cert via proxy: proxy_dial, proxy_tls, proxy_connect",
 		"TLS cert via proxy also adds tls_handshake",
 	}
 	for _, snippet := range wantSnippets {
@@ -158,7 +158,7 @@ func TestNewMetricsExporter_ProbePhaseDurationHelpMentionsCurrentEmitters(t *tes
 }
 
 func TestNewMetricsExporter_ICMPMetricsRegistered(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
 	target := makeTarget("icmp-reg", "10.0.0.1", config.ProbeTypeICMP, nil)
 	m.Record(target, probe.ProbeResult{
@@ -180,7 +180,7 @@ func TestNewMetricsExporter_ICMPMetricsRegistered(t *testing.T) {
 }
 
 func TestNewMetricsExporter_MTUMetricRegistered(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
 	target := makeTarget("mtu-reg", "10.0.0.1", config.ProbeTypeMTU, nil)
 	m.Record(target, probe.ProbeResult{Success: true, Duration: 1 * time.Second, PathMTU: 1500})
@@ -195,7 +195,7 @@ func TestNewMetricsExporter_MTUMetricRegistered(t *testing.T) {
 }
 
 func TestNewMetricsExporter_DNSMetricsRegistered(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
 	target := makeTarget("dns-reg", "example.com", config.ProbeTypeDNS, nil)
 	target.ProbeOpts.DNSExpectedResults = []string{"1.2.3.4"}
@@ -216,7 +216,7 @@ func TestNewMetricsExporter_DNSMetricsRegistered(t *testing.T) {
 }
 
 func TestNewMetricsExporter_HTTPBodyMetricRegistered(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
 	target := makeTarget("body-reg", "https://example.com", config.ProbeTypeHTTPBody, nil)
 	m.Record(target, probe.ProbeResult{
@@ -234,33 +234,45 @@ func TestNewMetricsExporter_HTTPBodyMetricRegistered(t *testing.T) {
 	}
 }
 
-func TestNewMetricsExporter_AgentInfoRegistered(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+func TestNewMetricsExporter_BuildInfoRegistered(t *testing.T) {
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
-	// Set agent info gauges.
-	m.SetAgentInfo("1.0.0")
+	// Set NetSonar metadata gauges.
+	m.SetBuildInfo("1.0.0", "abc1234", "2026-04-26T12:00:00Z")
 	m.SetConfigInfo("abc123def456")
-	m.agentTargetsTotal.Set(5)
-	m.agentConfigReloadTS.Set(float64(time.Now().Unix()))
+	m.SetTargetsTotal(5)
+	m.SetConfigReloadTimestamp(time.Now())
 
 	families := gatherMetrics(t, m)
-	for _, name := range []string{"agent_info", "agent_config_info", "agent_targets_total", "agent_config_reload_timestamp_seconds"} {
+	for _, name := range []string{"netsonar_build_info", "netsonar_config_info", "netsonar_targets_total", "netsonar_config_reload_timestamp_seconds"} {
 		if _, ok := families[name]; !ok {
-			t.Errorf("expected agent metadata metric %q to be registered", name)
+			t.Errorf("expected NetSonar metadata metric %q to be registered", name)
 		}
 	}
 
-	// agent_info should only carry the "version" label now.
-	if fam, ok := families["agent_info"]; ok && len(fam.GetMetric()) > 0 {
+	// netsonar_build_info should carry build labels and no config identity.
+	if fam, ok := families["netsonar_build_info"]; ok && len(fam.GetMetric()) > 0 {
+		labels := map[string]string{}
 		for _, lp := range fam.GetMetric()[0].GetLabel() {
+			labels[lp.GetName()] = lp.GetValue()
 			if lp.GetName() == "config_hash" {
-				t.Error("agent_info must not carry legacy config_hash label")
+				t.Error("netsonar_build_info must not carry legacy config_hash label")
+			}
+		}
+		wantLabels := map[string]string{
+			"version":    "1.0.0",
+			"revision":   "abc1234",
+			"build_date": "2026-04-26T12:00:00Z",
+		}
+		for name, want := range wantLabels {
+			if got := labels[name]; got != want {
+				t.Errorf("netsonar_build_info label %q = %q, want %q", name, got, want)
 			}
 		}
 	}
 
-	// agent_config_info should carry the hash label.
-	if fam, ok := families["agent_config_info"]; ok && len(fam.GetMetric()) > 0 {
+	// netsonar_config_info should carry the hash label.
+	if fam, ok := families["netsonar_config_info"]; ok && len(fam.GetMetric()) > 0 {
 		var hashVal string
 		for _, lp := range fam.GetMetric()[0].GetLabel() {
 			if lp.GetName() == "hash" {
@@ -268,34 +280,34 @@ func TestNewMetricsExporter_AgentInfoRegistered(t *testing.T) {
 			}
 		}
 		if hashVal != "abc123def456" {
-			t.Errorf("agent_config_info hash = %q, want %q", hashVal, "abc123def456")
+			t.Errorf("netsonar_config_info hash = %q, want %q", hashVal, "abc123def456")
 		}
 	}
 }
 
 func TestSetConfigInfo_ResetsPreviousHash(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
 	m.SetConfigInfo("hash-old-111")
 	m.SetConfigInfo("hash-new-222")
 
 	families := gatherMetrics(t, m)
-	fam, ok := families["agent_config_info"]
+	fam, ok := families["netsonar_config_info"]
 	if !ok {
-		t.Fatal("agent_config_info not registered")
+		t.Fatal("netsonar_config_info not registered")
 	}
 	if got := len(fam.GetMetric()); got != 1 {
-		t.Fatalf("agent_config_info has %d series, want 1 (old hash must be reset)", got)
+		t.Fatalf("netsonar_config_info has %d series, want 1 (old hash must be reset)", got)
 	}
 	for _, lp := range fam.GetMetric()[0].GetLabel() {
 		if lp.GetName() == "hash" && lp.GetValue() != "hash-new-222" {
-			t.Errorf("agent_config_info hash = %q, want %q", lp.GetValue(), "hash-new-222")
+			t.Errorf("netsonar_config_info hash = %q, want %q", lp.GetValue(), "hash-new-222")
 		}
 	}
 }
 
 func TestNewMetricsExporter_UsesCustomRegistry(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 	if m.Registry() == nil {
 		t.Fatal("expected non-nil custom registry")
 	}
@@ -308,10 +320,22 @@ func TestNewMetricsExporter_UsesCustomRegistry(t *testing.T) {
 	}
 }
 
+func TestNewMetricsExporter_RuntimeMetricsEnabled(t *testing.T) {
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{EnableRuntimeMetrics: true})
+
+	families := gatherMetrics(t, m)
+	if _, ok := families["go_goroutines"]; !ok {
+		t.Error("expected Go runtime metrics to be registered when enabled")
+	}
+	if _, ok := families["process_cpu_seconds_total"]; !ok {
+		t.Error("expected process metrics to be registered when enabled")
+	}
+}
+
 // ---------- Label Correctness Tests ----------
 
 func TestRecord_CommonLabelsApplied(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
 	tags := map[string]string{
 		"service":          "api-gw",
@@ -355,7 +379,7 @@ func TestRecord_CommonLabelsApplied(t *testing.T) {
 }
 
 func TestRecord_MissingTagsDefaultToEmpty(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
 	// Only set a subset of tags — the rest should default to "".
 	target := makeTarget("sparse-tags", "10.0.0.1:443", config.ProbeTypeTCP, map[string]string{
@@ -381,7 +405,7 @@ func TestRecord_MissingTagsDefaultToEmpty(t *testing.T) {
 }
 
 func TestRecord_NilTagsHandled(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
 	target := makeTarget("nil-tags", "10.0.0.1:80", config.ProbeTypeTCP, nil)
 	m.Record(target, probe.ProbeResult{Success: false, Duration: 1 * time.Second, Error: "refused"})
@@ -402,7 +426,7 @@ func TestRecord_NilTagsHandled(t *testing.T) {
 }
 
 func TestRecord_HTTPPhaseLabels(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
 	target := makeTarget("phase-labels", "https://example.com", config.ProbeTypeHTTP, map[string]string{
 		"service": "web",
@@ -452,9 +476,9 @@ func TestRecord_HTTPPhaseLabels(t *testing.T) {
 }
 
 func TestRecord_ProxyPhaseLabels(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
-	target := makeTarget("proxy-phase-labels", "https://example.com", config.ProbeTypeProxy, map[string]string{
+	target := makeTarget("proxy-phase-labels", "https://example.com", config.ProbeTypeProxyConnect, map[string]string{
 		"service": "proxy",
 	})
 	phases := map[string]time.Duration{
@@ -481,14 +505,93 @@ func TestRecord_ProxyPhaseLabels(t *testing.T) {
 		}
 		phase := labelValue(metric, "phase")
 		foundPhases[phase] = true
-		if got := labelValue(metric, "probe_type"); got != "proxy" {
-			t.Errorf("phase %q: probe_type label got %q, want %q", phase, got, "proxy")
+		if got := labelValue(metric, "probe_type"); got != "proxy_connect" {
+			t.Errorf("phase %q: probe_type label got %q, want %q", phase, got, "proxy_connect")
 		}
 	}
 
 	for phaseName := range phases {
 		if !foundPhases[phaseName] {
 			t.Errorf("phase %q not found in metrics", phaseName)
+		}
+	}
+}
+
+func TestRecord_ProxyConnectStatusCode(t *testing.T) {
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
+
+	target := makeTarget("proxy-connect-status", "example.com:443", config.ProbeTypeProxyConnect, map[string]string{
+		"service": "proxy",
+	})
+	target.ProbeOpts.ProxyURL = "http://proxy.example.com:3128"
+
+	m.Record(target, probe.ProbeResult{
+		Success:                      true,
+		Duration:                     20 * time.Millisecond,
+		ProxyConnectResponseReceived: true,
+		ProxyConnectStatusCode:       403,
+	})
+
+	families := gatherMetrics(t, m)
+	fam, ok := families["probe_proxy_connect_status_code"]
+	if !ok {
+		t.Fatal("probe_proxy_connect_status_code not found")
+	}
+
+	for _, metric := range fam.GetMetric() {
+		if labelValue(metric, "target_name") != "proxy-connect-status" {
+			continue
+		}
+		if got := metric.GetGauge().GetValue(); got != 403 {
+			t.Fatalf("probe_proxy_connect_status_code = %v, want 403", got)
+		}
+		return
+	}
+	t.Fatal("proxy_connect status metric for target not found")
+}
+
+// TestRecord_ProxyConnectStatusCode_DeletedOnFollowupWithoutResponse verifies
+// that probe_proxy_connect_status_code disappears from /metrics when a later
+// probe result for the same target does not observe a CONNECT response (e.g.
+// the proxy dial failed before any HTTP response was read). This guards the
+// current-observation contract: the gauge must not retain a stale value from
+// a previous probe.
+func TestRecord_ProxyConnectStatusCode_DeletedOnFollowupWithoutResponse(t *testing.T) {
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
+
+	target := makeTarget("proxy-connect-status-delete", "example.com:443", config.ProbeTypeProxyConnect, map[string]string{
+		"service": "proxy",
+	})
+	target.ProbeOpts.ProxyURL = "http://proxy.example.com:3128"
+
+	// First probe observes a CONNECT response — the metric must appear.
+	m.Record(target, probe.ProbeResult{
+		Success:                      true,
+		Duration:                     20 * time.Millisecond,
+		ProxyConnectResponseReceived: true,
+		ProxyConnectStatusCode:       403,
+	})
+	if _, ok := gatherMetrics(t, m)["probe_proxy_connect_status_code"]; !ok {
+		t.Fatal("expected probe_proxy_connect_status_code to be present after first probe")
+	}
+
+	// Second probe fails before any CONNECT response is read (e.g. proxy dial
+	// timed out). The metric for this target must be deleted, not retained.
+	m.Record(target, probe.ProbeResult{
+		Success:  false,
+		Duration: 5 * time.Second,
+		Error:    "proxy dial: i/o timeout",
+	})
+
+	families := gatherMetrics(t, m)
+	fam, ok := families["probe_proxy_connect_status_code"]
+	if !ok {
+		// Gauge vec with no series is removed from the gather output entirely.
+		return
+	}
+	for _, metric := range fam.GetMetric() {
+		if labelValue(metric, "target_name") == "proxy-connect-status-delete" {
+			t.Fatalf("probe_proxy_connect_status_code for target was not deleted; got value=%v", metric.GetGauge().GetValue())
 		}
 	}
 }
@@ -510,7 +613,7 @@ func TestKnownPhasesDedupAndNonEmpty(t *testing.T) {
 }
 
 func TestRecord_TCPDoesNotEmitPhaseMetrics(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
 	target := makeTarget("tcp-no-phases", "10.0.0.1:443", config.ProbeTypeTCP, nil)
 	m.Record(target, probe.ProbeResult{Success: true, Duration: 10 * time.Millisecond})
@@ -528,7 +631,7 @@ func TestRecord_TCPDoesNotEmitPhaseMetrics(t *testing.T) {
 // ---------- Metric Value Correctness Tests ----------
 
 func TestRecord_SuccessValue(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 	target := makeTarget("val-success", "10.0.0.1:80", config.ProbeTypeTCP, nil)
 
 	// Record success.
@@ -549,7 +652,7 @@ func TestRecord_SuccessValue(t *testing.T) {
 }
 
 func TestRecord_DurationValue(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 	target := makeTarget("val-dur", "10.0.0.1:80", config.ProbeTypeTCP, nil)
 
 	dur := 123 * time.Millisecond
@@ -563,7 +666,7 @@ func TestRecord_DurationValue(t *testing.T) {
 }
 
 func TestRecord_ICMPValues(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 	target := makeTarget("val-icmp", "10.0.0.1", config.ProbeTypeICMP, nil)
 
 	m.Record(target, probe.ProbeResult{
@@ -593,7 +696,7 @@ func TestRecord_ICMPValues(t *testing.T) {
 }
 
 func TestRecord_ICMPRTTAbsentOnFailure(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 	target := makeTarget("fail-icmp", "10.0.0.1", config.ProbeTypeICMP, nil)
 
 	m.Record(target, probe.ProbeResult{
@@ -613,7 +716,7 @@ func TestRecord_ICMPRTTAbsentOnFailure(t *testing.T) {
 }
 
 func TestRecord_ICMPStddevAbsentWithSingleReply(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 	target := makeTarget("single-reply-icmp", "10.0.0.1", config.ProbeTypeICMP, nil)
 
 	m.Record(target, probe.ProbeResult{
@@ -636,7 +739,7 @@ func TestRecord_ICMPStddevAbsentWithSingleReply(t *testing.T) {
 }
 
 func TestRecord_MTUValue(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 	target := makeTarget("val-mtu", "10.0.0.1", config.ProbeTypeMTU, nil)
 	target.ProbeOpts.ExpectedMinMTU = 1500
 
@@ -663,7 +766,7 @@ func TestRecord_MTUValue(t *testing.T) {
 }
 
 func TestRecord_MTUEmitsICMPAvgRTT(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 	target := makeTarget("mtu-rtt", "10.0.0.1", config.ProbeTypeMTU, nil)
 
 	m.Record(target, probe.ProbeResult{
@@ -688,7 +791,7 @@ func TestRecord_MTUEmitsICMPAvgRTT(t *testing.T) {
 }
 
 func TestRecord_MTUFailureValue(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 	target := makeTarget("val-mtu-fail", "10.0.0.1", config.ProbeTypeMTU, nil)
 
 	m.Record(target, probe.ProbeResult{
@@ -714,7 +817,7 @@ func TestRecord_MTUFailureValue(t *testing.T) {
 }
 
 func TestRecord_MTUDegradedBelowExpectedMin(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 	target := makeTarget("val-mtu-low", "10.0.0.1", config.ProbeTypeMTU, nil)
 	target.ProbeOpts.ExpectedMinMTU = 1500
 
@@ -798,7 +901,7 @@ func TestRecord_MTUPreservesExplicitStateDetailContract(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := NewMetricsExporter(testTagKeys)
+			m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 			target := makeTarget("mtu-contract-"+tt.name, "10.0.0.1", config.ProbeTypeMTU, nil)
 
 			m.Record(target, probe.ProbeResult{
@@ -825,7 +928,7 @@ func TestRecord_MTUPreservesExplicitStateDetailContract(t *testing.T) {
 }
 
 func TestRecord_TLSCertExpiry(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 	target := makeTarget("val-tls", "example.com:443", config.ProbeTypeTLSCert, nil)
 
 	expiry := time.Date(2027, 6, 15, 12, 0, 0, 0, time.UTC)
@@ -839,7 +942,7 @@ func TestRecord_TLSCertExpiry(t *testing.T) {
 }
 
 func TestRecord_TLSCertChainExpiry(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 	target := makeTarget("val-tls-chain", "example.com:443", config.ProbeTypeTLSCert, nil)
 
 	leafExpiry := time.Date(2027, 6, 15, 12, 0, 0, 0, time.UTC)
@@ -879,7 +982,7 @@ func TestRecord_TLSCertChainExpiry(t *testing.T) {
 }
 
 func TestRecord_TLSCertChainExpiryClearedOnShorterChain(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 	target := makeTarget("val-tls-chain-clear", "example.com:443", config.ProbeTypeTLSCert, nil)
 
 	firstExpiry := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -916,7 +1019,7 @@ func TestRecord_TLSCertChainExpiryClearedOnShorterChain(t *testing.T) {
 }
 
 func TestRecord_HTTPResponseTruncated(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 	target := makeTarget("val-http-truncated", "https://example.com", config.ProbeTypeHTTP, nil)
 
 	m.Record(target, probe.ProbeResult{
@@ -942,7 +1045,7 @@ func TestRecord_HTTPResponseTruncated(t *testing.T) {
 }
 
 func TestRecord_HTTPBodyMatchValues(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 	target := makeTarget("val-body", "https://example.com", config.ProbeTypeHTTPBody, nil)
 
 	// Match = true.
@@ -969,7 +1072,7 @@ func TestRecord_HTTPBodyMatchValues(t *testing.T) {
 }
 
 func TestRecord_DNSValues(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 	target := makeTarget("val-dns", "example.com", config.ProbeTypeDNS, nil)
 	target.ProbeOpts.DNSExpectedResults = []string{"1.2.3.4"}
 
@@ -996,7 +1099,7 @@ func TestRecord_DNSValues(t *testing.T) {
 }
 
 func TestRecord_DNSResultMatchNotSetWithoutExpected(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 	target := makeTarget("val-dns-noexp", "example.com", config.ProbeTypeDNS, nil)
 	// No DNSExpectedResults set.
 
@@ -1014,7 +1117,7 @@ func TestRecord_DNSResultMatchNotSetWithoutExpected(t *testing.T) {
 }
 
 func TestRecord_DNSResultMatchEvaluatedAndCleared(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 	target := makeTarget("val-dns-evaluated", "example.com", config.ProbeTypeDNS, nil)
 	target.ProbeOpts.DNSExpectedResults = []string{"1.2.3.4"}
 
@@ -1052,7 +1155,7 @@ func TestRecord_DNSResultMatchEvaluatedAndCleared(t *testing.T) {
 // ---------- Handler / HTTP Endpoint Tests ----------
 
 func TestHandler_ServesPrometheusFormat(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
 	target := makeTarget("handler-test", "10.0.0.1:443", config.ProbeTypeTCP, map[string]string{
 		"service": "test",
@@ -1100,7 +1203,7 @@ func TestHandler_ServesPrometheusFormat(t *testing.T) {
 // ---------- Concurrent Scrape Safety Tests ----------
 
 func TestRecord_ConcurrentSafety(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
 	targets := []config.TargetConfig{
 		makeTarget("conc-tcp", "10.0.0.1:80", config.ProbeTypeTCP, map[string]string{"service": "a"}),
@@ -1179,7 +1282,7 @@ func TestRecord_ConcurrentSafety(t *testing.T) {
 // ---------- buildLabels Tests ----------
 
 func TestBuildLabels_AllTagsPresent(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
 	tags := map[string]string{
 		"service":          "api",
@@ -1210,7 +1313,7 @@ func TestBuildLabels_AllTagsPresent(t *testing.T) {
 func TestBuildLabels_DynamicTagKeys(t *testing.T) {
 	// Create an exporter with custom tag keys including a non-standard one.
 	customKeys := []string{"custom_tag", "service"}
-	m := NewMetricsExporter(customKeys)
+	m := NewMetricsExporter(customKeys, ExporterOptions{})
 
 	tags := map[string]string{
 		"service":    "svc",
@@ -1236,7 +1339,7 @@ func TestBuildLabels_DynamicTagKeys(t *testing.T) {
 // ---------- Current-Observation Semantics Tests ----------
 
 func TestRecord_StalePhasesCleared(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
 	target := makeTarget("stale-phases", "https://example.com", config.ProbeTypeHTTP, map[string]string{
 		"service": "web",
@@ -1295,7 +1398,7 @@ func TestRecord_StalePhasesCleared(t *testing.T) {
 }
 
 func TestRecord_NoPhasesCleared(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
 	target := makeTarget("no-phases", "https://example.com", config.ProbeTypeHTTP, map[string]string{
 		"service": "web",
@@ -1335,7 +1438,7 @@ func TestRecord_NoPhasesCleared(t *testing.T) {
 }
 
 func TestRecord_StaleCertExpiryCleared_HTTP(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
 	target := makeTarget("stale-cert-http", "https://example.com", config.ProbeTypeHTTP, map[string]string{
 		"service": "web",
@@ -1374,7 +1477,7 @@ func TestRecord_StaleCertExpiryCleared_HTTP(t *testing.T) {
 }
 
 func TestRecord_StaleCertExpiryCleared_TLSCert(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
 	target := makeTarget("stale-cert-tls", "example.com:443", config.ProbeTypeTLSCert, nil)
 
@@ -1425,7 +1528,7 @@ func countPhasesForTarget(fam *dto.MetricFamily, targetName string) int {
 // ---------- Delete Target Tests ----------
 
 func TestDeleteTarget_RemovesAllSeries(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
 	target := makeTarget("del-me", "10.0.0.1", config.ProbeTypeICMP, map[string]string{
 		"service": "web",
@@ -1476,7 +1579,7 @@ func TestDeleteTarget_RemovesAllSeries(t *testing.T) {
 }
 
 func TestDeleteTarget_RemovesMTUSeries(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
 	target := makeTarget("mtu-del", "10.0.0.1", config.ProbeTypeMTU, map[string]string{
 		"service": "net",
@@ -1516,7 +1619,7 @@ func TestDeleteTarget_RemovesMTUSeries(t *testing.T) {
 }
 
 func TestIncrSkippedOverlap(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 	target := makeTarget("slow-mtu", "10.0.0.1", config.ProbeTypeMTU, nil)
 	m.EnsureTarget(target)
 
@@ -1545,7 +1648,7 @@ func TestIncrSkippedOverlap(t *testing.T) {
 }
 
 func TestEnsureTarget_PreinitializesSkippedOverlapCounter(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 	target := makeTarget("preinit-skip", "10.0.0.2", config.ProbeTypeTCP, nil)
 
 	m.EnsureTarget(target)
@@ -1570,7 +1673,7 @@ func TestEnsureTarget_PreinitializesSkippedOverlapCounter(t *testing.T) {
 }
 
 func TestDeleteTarget_HTTPPhasesRemoved(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
 	target := makeTarget("http-del", "https://example.com", config.ProbeTypeHTTP, map[string]string{
 		"service": "api",
@@ -1603,9 +1706,9 @@ func TestDeleteTarget_HTTPPhasesRemoved(t *testing.T) {
 }
 
 func TestDeleteTarget_ProxyPhasesRemoved(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
-	target := makeTarget("proxy-del", "https://example.com", config.ProbeTypeProxy, map[string]string{
+	target := makeTarget("proxy-del", "https://example.com", config.ProbeTypeProxyConnect, map[string]string{
 		"service": "proxy",
 	})
 	result := probe.ProbeResult{
@@ -1634,7 +1737,7 @@ func TestDeleteTarget_ProxyPhasesRemoved(t *testing.T) {
 // ---------- Network Path Label Tests ----------
 
 func TestRecord_NetworkPathProxyWhenProxyURLSet(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
 	target := makeTarget("proxy-path-target", "https://example.com", config.ProbeTypeHTTP, map[string]string{
 		"service": "web",
@@ -1661,7 +1764,7 @@ func TestRecord_NetworkPathProxyWhenProxyURLSet(t *testing.T) {
 }
 
 func TestRecord_NetworkPathDirectWhenNoProxyURL(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
 	target := makeTarget("direct-path-target", "https://example.com", config.ProbeTypeHTTP, map[string]string{
 		"service": "web",
@@ -1688,9 +1791,9 @@ func TestRecord_NetworkPathDirectWhenNoProxyURL(t *testing.T) {
 }
 
 func TestRecord_NetworkPathProxyForProxyProbe(t *testing.T) {
-	m := NewMetricsExporter(testTagKeys)
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
-	target := makeTarget("proxy-probe-path", "https://example.com", config.ProbeTypeProxy, map[string]string{
+	target := makeTarget("proxy-probe-path", "https://example.com", config.ProbeTypeProxyConnect, map[string]string{
 		"service": "proxy",
 	})
 	target.ProbeOpts.ProxyURL = "http://proxy.example.com:3128"

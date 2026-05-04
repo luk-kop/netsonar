@@ -5,7 +5,8 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"net/url"
+	"slices"
+	"strings"
 	"time"
 
 	"netsonar/internal/config"
@@ -23,11 +24,13 @@ type ProxyProber struct{}
 //
 // Preconditions:
 //   - target.ProbeOpts.ProxyURL is a valid HTTP proxy URL
-//   - target.Address is a valid HTTPS URL or host:port
+//   - target.Address is a valid host:port tunnel destination
 //   - ctx carries the probe timeout (set by the scheduler)
 //
 // Postconditions:
-//   - result.Success is true iff the proxy tunnel was established
+//   - result.Success is true iff the proxy tunnel status matched the
+//     configured expectation, or the tunnel was established when no
+//     explicit expectation was configured
 //   - result.Duration reflects wall-clock time from start to tunnel ready
 //   - result.Phases contains proxy_dial, optionally proxy_tls, and proxy_connect
 //   - All connections are closed before returning
@@ -47,52 +50,49 @@ func (p *ProxyProber) Probe(ctx context.Context, target config.TargetConfig) (re
 	}
 
 	start := time.Now()
-	proxyConn, phases, err := dialProxyTunnel(ctx, proxyURL, tunnelDest)
+	proxyConn, phases, connectResp, err := dialProxyTunnel(ctx, proxyURL, tunnelDest)
 	result.Duration = time.Since(start)
 	if len(phases) > 0 {
 		result.Phases = phases
 	}
+	if connectResp.Observed {
+		result.ProxyConnectResponseReceived = true
+		result.ProxyConnectStatusCode = connectResp.StatusCode
+	}
 	if err != nil {
+		if connectResp.Observed && slices.Contains(target.ProbeOpts.ExpectedProxyConnectStatusCodes, connectResp.StatusCode) {
+			result.Success = true
+			return result
+		}
 		result.Error = err.Error()
 		return result
 	}
 	defer func() { _ = proxyConn.Close() }()
+
+	if len(target.ProbeOpts.ExpectedProxyConnectStatusCodes) > 0 {
+		if slices.Contains(target.ProbeOpts.ExpectedProxyConnectStatusCodes, connectResp.StatusCode) {
+			result.Success = true
+		} else {
+			result.Error = fmt.Sprintf("unexpected proxy CONNECT status %d", connectResp.StatusCode)
+		}
+		return result
+	}
 
 	result.Success = true
 
 	return result
 }
 
-// parseTunnelDestination extracts a host:port suitable for an HTTP CONNECT
-// request from the target address. If the address is a URL, the host and
-// port are extracted (defaulting to 443 for HTTPS, 80 for HTTP). If it is
-// already a host:port, it is returned as-is.
+// parseTunnelDestination validates a host:port suitable for an HTTP CONNECT
+// request. URL syntax is intentionally rejected: CONNECT probes test tunneling
+// policy for a host and port, not HTTP forwarding policy for a URL.
 func parseTunnelDestination(address string) (string, error) {
-	u, err := url.Parse(address)
-	if err == nil && u.Scheme != "" && u.Host != "" {
-		return hostPortForURL(u), nil
+	if strings.Contains(address, "://") {
+		return "", fmt.Errorf("address must be host:port (URL syntax not supported for proxy_connect), got %q", address)
 	}
-
-	// Try as host:port directly.
 	if _, _, splitErr := net.SplitHostPort(address); splitErr == nil {
 		return address, nil
 	}
 
-	return "", fmt.Errorf("cannot determine host:port from %q", address)
-}
-
-// hostPortForURL returns host:port from a URL, applying the scheme default
-// (443 for https, 80 otherwise) when the URL has no explicit port. Uses
-// url.Hostname/Port so IPv6 literals like http://[::1] round-trip correctly
-// without double-bracketing.
-func hostPortForURL(u *url.URL) string {
-	port := u.Port()
-	if port == "" {
-		if u.Scheme == "https" {
-			port = "443"
-		} else {
-			port = "80"
-		}
-	}
-	return net.JoinHostPort(u.Hostname(), port)
+	return "", fmt.Errorf("address must be host:port, got %q", address)
 }

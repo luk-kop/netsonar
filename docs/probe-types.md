@@ -1,6 +1,6 @@
 # Probe Types
 
-Supported probe types: `tcp`, `http`, `icmp`, `mtu`, `dns`, `tls_cert`, `http_body`, `proxy`.
+Supported probe types: `tcp`, `http`, `icmp`, `mtu`, `dns`, `tls_cert`, `http_body`, `proxy_connect`.
 
 ## TCP
 
@@ -47,6 +47,19 @@ Use `http_body` when response content must be validated.
     proxy_url: ""                   # Optional: route through HTTP proxy
 ```
 
+### HTTP Options
+
+| Option                      | Type                | Default       | Description                                                                                                          |
+|-----------------------------|---------------------|---------------|----------------------------------------------------------------------------------------------------------------------|
+| `method`                    | string              | `GET`         | HTTP method. One of `GET`, `HEAD`, `POST`. Required to be `POST` when `request_body_bytes > 0`.                      |
+| `headers`                   | `map[string]string` | `{}`          | Custom request headers. Sent on every probe request.                                                                 |
+| `follow_redirects`          | bool                | `false`       | Follow 3xx redirects. When `false`, the redirect response is treated as the final response.                          |
+| `tls_skip_verify`           | bool                | `false`       | Skip TLS certificate verification on the **target** connection (HTTPS only). Does not apply to `https://` proxies.   |
+| `expected_status_codes`     | `[]int`             | `[]`          | Allow-list of HTTP status codes that count as success. Empty list accepts any status. See subsection below.          |
+| `response_body_limit_bytes` | int                 | `0` (= 1 MiB) | Cap on response bytes read and discarded. `0` or omitted falls back to the 1 MiB built-in default.                   |
+| `request_body_bytes`        | int                 | `0`           | Generate an outbound request body of exactly this size. Requires `method: POST`. Capped at 16 MiB. See below.        |
+| `proxy_url`                 | string              | `""`          | Route the request through an HTTP forward proxy (`http://` or `https://`). Basic-auth credentials may be embedded.   |
+
 ### request_body_bytes
 
 `request_body_bytes` generates an outbound HTTP request body of exactly the
@@ -83,6 +96,7 @@ Controls how `probe_success` is determined from the HTTP response:
 When an HTTP response is received, the actual status code is recorded in `probe_http_status_code` regardless of this setting, so you can see what the target returned even when the probe reports failure. Having both metrics is valuable: `probe_success` drives alerting (is the probe healthy?), while `probe_http_status_code` provides the diagnostic detail (what exactly did the target return?). When a probe starts failing after a response is received, the status code tells you whether the target returned 403 (auth issue), 502 (upstream down), 503 (overloaded), or something else — without this, you only know it broke but not why. If no HTTP response is received at all (for example on DNS, TCP, TLS, or timeout failure), `probe_http_status_code` is absent.
 
 Examples:
+
 - AWS service endpoints return 403 without SigV4 signing — use `[]` to test reachability without caring about the status code.
 - Health check endpoints that return 200 on success — use `[200]` to detect when the service is unhealthy.
 - APIs that may return 200 or 204 — use `[200, 204]` to accept both as valid.
@@ -128,6 +142,13 @@ ICMP probes are IPv4-only in the current implementation. Literal IPv6 addresses 
     ping_interval: 1.0              # Seconds between pings
 ```
 
+### ICMP Options
+
+| Option          | Type           | Default | Description                                                                                                  |
+|-----------------|----------------|---------|--------------------------------------------------------------------------------------------------------------|
+| `ping_count`    | int            | `1`     | Number of ICMP echo requests to send. Higher values increase RTT and loss accuracy at the cost of duration.  |
+| `ping_interval` | float seconds  | `1.0`   | Seconds between consecutive echo requests. Only meaningful when `ping_count > 1`.                            |
+
 ## MTU/PMTUD
 
 Detects path MTU by sending ICMP echo requests with the IPv4 DF-bit set, stepping down through configured payload sizes. Uses Linux unprivileged ICMP ping sockets and does not require `CAP_NET_RAW`; `net.ipv4.ping_group_range` must include the process effective or supplementary GID.
@@ -156,6 +177,15 @@ Path MTU is calculated as: `largest_successful_payload + 28` (20 bytes IP header
     mtu_retries: 3
     mtu_per_attempt_timeout: 2s
 ```
+
+### MTU Options
+
+| Option                    | Type     | Default                | Description                                                                                                                                          |
+|---------------------------|----------|------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `icmp_payload_sizes`      | `[]int`  | see precedence below   | ICMP echo payload sizes in bytes, tested largest-first with the IPv4 DF bit set. Must be sorted descending. See "Default Payload Sizes" below.       |
+| `expected_min_mtu`        | int      | `largest_payload + 28` | Minimum acceptable path MTU in bytes. The probe reports `degraded` when the discovered MTU is below this threshold.                                  |
+| `mtu_retries`             | int      | `3`                    | Number of retries per payload size before giving up on that size.                                                                                    |
+| `mtu_per_attempt_timeout` | duration | `2s`                   | Per-attempt timeout for each ICMP echo request. Must be ≤ target `timeout`.                                                                          |
 
 ### Default Payload Sizes
 
@@ -203,6 +233,15 @@ DNS resolution with optional expected result validation. Measures resolution tim
     dns_server: ""                  # Custom resolver (optional, default: system resolver)
     dns_expected: []                # Expected IPs or CNAMEs (optional)
 ```
+
+### DNS Options
+
+| Option           | Type       | Default     | Description                                                                                                            |
+|------------------|------------|-------------|------------------------------------------------------------------------------------------------------------------------|
+| `dns_query_name` | string     | `address`   | DNS name to query. Falls back to the target's `address` when omitted.                                                  |
+| `dns_query_type` | string     | `A`         | DNS record type. One of `A`, `AAAA`, `CNAME`.                                                                          |
+| `dns_server`     | string     | `""`        | Resolver in `host:port` form. Empty uses the system resolver (`/etc/resolv.conf`).                                     |
+| `dns_expected`   | `[]string` | `[]`        | Expected result set. When non-empty, the response must match exactly (order-independent). See subsection below.        |
 
 If `dns_query_name` is omitted, the target's `address` is used as the query name.
 
@@ -282,13 +321,20 @@ Performs a TLS handshake and extracts certificate expiry from the observed peer 
     proxy_url: ""                   # Optional: inspect certificate through HTTP proxy
 ```
 
+### TLS Cert Options
+
+| Option            | Type   | Default | Description                                                                                                                 |
+|-------------------|--------|---------|-----------------------------------------------------------------------------------------------------------------------------|
+| `tls_skip_verify` | bool   | `false` | Skip TLS certificate verification on the target connection. Useful for monitoring expiry of self-signed or untrusted certs. |
+| `proxy_url`       | string | `""`    | Route the TLS handshake through an HTTP CONNECT tunnel. The recorded chain is whatever NetSonar observes from that path.    |
+
 The reported expiry is based on the certificate chain observed by NetSonar from that network path. With a normal CONNECT proxy this is the origin chain. With TLS inspection, the observed chain may be proxy-issued; this is useful when the operational question is what workloads behind that proxy actually see.
 
 Direct probes emit `probe_phase_duration_seconds` with `phase="tcp_connect"` and `phase="tls_handshake"`, plus `phase="dns_resolve"` for hostname targets. Proxy-path probes emit `proxy_dial`, optional `proxy_tls` (for `https://` proxies), `proxy_connect`, and `tls_handshake` for the target handshake through the tunnel.
 
 ## HTTP Body Validation
 
-HTTP request with regex or substring match on the response body. The probe succeeds (`probe_success=1`) when **both** conditions are met: the response body matches the configured pattern, and the response status code satisfies the `expected_status_codes` rule (empty list accepts any status; non-empty list requires the status code to be present). When body evaluation completes, the match result is also reported separately via `probe_http_body_match` for diagnostic visibility. If no HTTP response is received or the body cannot be evaluated, `probe_http_body_match` is absent. The agent reads at most 1 MiB of response body; larger responses fail the probe. Supports optional proxy routing via `proxy_url`.
+HTTP request with regex or substring match on the response body. The probe succeeds (`probe_success=1`) when **both** conditions are met: the response body matches the configured pattern, and the response status code satisfies the `expected_status_codes` rule (empty list accepts any status; non-empty list requires the status code to be present). When body evaluation completes, the match result is also reported separately via `probe_http_body_match` for diagnostic visibility. If no HTTP response is received or the body cannot be evaluated, `probe_http_body_match` is absent. The agent reads at most 1 MiB of response body; larger responses fail the probe. Supports custom request headers via `headers` and optional proxy routing via `proxy_url`.
 
 At least one of `body_match_regex` or `body_match_string` must be set — a target without either is rejected at config load time. `body_match_regex` must be a valid Go regular expression. It is validated when the config is loaded and compiled once when the target prober is created. If both `body_match_regex` and `body_match_string` are set, the regex takes precedence.
 
@@ -299,10 +345,23 @@ At least one of `body_match_regex` or `body_match_string` must be set — a targ
   timeout: 5s
   probe_opts:
     method: GET                     # GET, HEAD, POST (default: GET)
+    headers:                        # Custom request headers
+      X-Custom: "value"
     body_match_string: "ok"         # Substring match
     body_match_regex: "status.*ok"  # Regex match (alternative)
     proxy_url: ""                   # Optional: route through HTTP proxy
 ```
+
+### HTTP Body Options
+
+| Option                  | Type                | Default | Description                                                                                                                          |
+|-------------------------|---------------------|---------|--------------------------------------------------------------------------------------------------------------------------------------|
+| `method`                | string              | `GET`   | HTTP method. One of `GET`, `HEAD`, `POST`.                                                                                           |
+| `headers`               | `map[string]string` | `{}`    | Custom request headers. Sent on every probe request.                                                                                 |
+| `body_match_string`     | string              | `""`    | Substring that must appear in the response body. At least one of `body_match_string` / `body_match_regex` is required.               |
+| `body_match_regex`      | string              | `""`    | Go regular expression matched against the response body. Takes precedence over `body_match_string` when both are set.                |
+| `expected_status_codes` | `[]int`             | `[]`    | Allow-list of HTTP status codes that count as success in addition to the body match. Empty list accepts any status.                  |
+| `proxy_url`             | string              | `""`    | Route the request through an HTTP forward proxy.                                                                                     |
 
 ## Proxy Connectivity
 
@@ -310,16 +369,27 @@ Establishes a raw HTTP CONNECT tunnel through a configured proxy and measures tu
 
 ```yaml
 - name: "egress-proxy-connect"
-  address: "https://example.com"
-  probe_type: proxy
+  address: "example.com:443"
+  probe_type: proxy_connect
   timeout: 5s
   probe_opts:
     proxy_url: "http://fwd-proxy.example.internal:8888"
+    # Optional negative test: success means the proxy returned CONNECT 403.
+    # expected_proxy_connect_status_codes: [403]
 ```
+
+### Proxy CONNECT Options
+
+| Option                                | Type    | Default      | Description                                                                                                                |
+|---------------------------------------|---------|--------------|----------------------------------------------------------------------------------------------------------------------------|
+| `proxy_url`                           | string  | **required** | HTTP forward proxy URL (`http://` or `https://`). May contain Basic-auth credentials.                                      |
+| `expected_proxy_connect_status_codes` | `[]int` | `[]`         | Allow-list of CONNECT response codes that count as success. Empty list means any 2xx is success. Use for negative tests.   |
 
 If the proxy URL contains credentials, the CONNECT request includes `Proxy-Authorization: Basic ...`.
 
-Proxy probes expose phase timings regardless of whether the CONNECT succeeded or failed, which helps diagnose where time is spent when a proxy rejects the tunnel:
+Proxy CONNECT probes expose `probe_proxy_connect_status_code` when the proxy returns a CONNECT response. With no explicit expectation, any 2xx CONNECT response is success. When `expected_proxy_connect_status_codes` is set, success means the proxy's CONNECT response status is in that list. This is intended for explicit negative tests such as Squid ACL denials returning 403.
+
+Proxy CONNECT probes expose phase timings regardless of whether the CONNECT succeeded or failed, which helps diagnose where time is spent when a proxy rejects the tunnel:
 
 | Phase | What It Measures |
 |---|---|
@@ -327,27 +397,32 @@ Proxy probes expose phase timings regardless of whether the CONNECT succeeded or
 | `proxy_tls` | TLS handshake with the proxy, only for `https://` proxy URLs |
 | `proxy_connect` | CONNECT request write and proxy response read |
 
-### Proxy Probe vs HTTP Probe with `proxy_url`
+### Proxy CONNECT Probe vs HTTP Probe with `proxy_url`
 
 The agent offers two distinct ways to test proxy connectivity. Choosing the wrong one leads to false failures.
 
-**`probe_type: proxy`** — sends an `HTTP CONNECT` request to the proxy, asking it to open a raw TCP tunnel to the target. The proxy does not see or interpret the traffic inside the tunnel. Many forward proxies (Squid, Tinyproxy) restrict or disable CONNECT to prevent arbitrary protocol tunnelling. If the target host is not on the proxy's CONNECT allowlist, the probe fails even though regular HTTP forwarding through the same proxy works fine.
+**`probe_type: proxy_connect`** — sends an `HTTP CONNECT` request to the proxy, asking it to open a raw TCP tunnel to the target. The proxy does not see or interpret the traffic inside the tunnel. Many forward proxies (Squid, Tinyproxy) restrict or disable CONNECT to prevent arbitrary protocol tunnelling. If the target host is not on the proxy's CONNECT allowlist, the probe fails even though regular HTTP forwarding through the same proxy works fine.
 
-Use `proxy` when:
+Use `proxy_connect` when:
+
 - Testing SSH-over-proxy, WebSocket, or other non-HTTP protocols tunnelled through CONNECT
 - Verifying the proxy's CONNECT allowlist (positive and negative tests)
 - Measuring raw tunnel establishment time without TLS or HTTP overhead
 
 **`probe_type: http` with `proxy_url`** — sends a standard HTTP request routed through the proxy using Go's `http.Transport.Proxy`. For HTTPS targets, the transport internally performs CONNECT + TLS handshake + HTTP request as a single operation, which is the standard way clients (curl, wget, apt) use forward proxies.
 
+For `http` and `http_body`, `expected_status_codes` always refers to the target HTTP response, not the proxy's CONNECT response. If an HTTPS proxy CONNECT happens, `probe_proxy_connect_status_code` is diagnostic only and does not change `probe_success`.
+
 **`probe_type: tls_cert` with `proxy_url`** — sends CONNECT to the proxy, then performs only the target TLS handshake through the tunnel and records the observed certificate expiry. It does not send an HTTP request to the target.
 
 Use `http` with `proxy_url` when:
+
 - Testing that a forward proxy can reach a target endpoint (the common case)
 - Verifying proxy connectivity for HTTP/HTTPS traffic as clients actually use it
 - You need full HTTP metrics (status code, phase timing, TLS certificate expiry)
 
 Use `tls_cert` with `proxy_url` when:
+
 - You only need certificate expiry metrics from `network_path="proxy"`
 - The target has no useful HTTP endpoint, or a full HTTP request would be too invasive
 - You need to observe certificates as workloads behind an egress proxy see them
@@ -396,10 +471,11 @@ When a `tls_cert` probe uses `proxy_url`, phase timing metrics show the CONNECT 
 The agent automatically adds a `network_path` label to every probe metric: `"proxy"` when the target has a `proxy_url` configured, `"direct"` otherwise. This requires no manual configuration — the agent detects it from `probe_opts.proxy_url`.
 
 On the Grafana dashboard:
+
 - The "All Probes — Status Table" includes a "Path" column.
 - The "Proxy-Path HTTP Probes" section filters by `probe_type="http", network_path="proxy"`.
 - The "HTTP Phase Timing (Proxy Path)" panel shows HTTP phase timings for proxy-path HTTP probes.
-- The "Proxy CONNECT Probes" section filters by `probe_type="proxy"`.
+- The "Proxy CONNECT Probes" section filters by `probe_type="proxy_connect"`.
 - The "Proxy CONNECT Phase Timing" panel shows raw CONNECT probe phases: `proxy_dial`, `proxy_tls`, and `proxy_connect`.
 - PromQL filter: `probe_success{network_path="proxy"}` selects all proxy-path probes regardless of probe type or service name.
 
