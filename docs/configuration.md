@@ -1,10 +1,10 @@
 # Configuration Reference
 
-See `config.example.yaml` for a complete working example.
+See [`../examples/config.yaml`](../examples/config.yaml) for a complete working example.
 
 ## Example Config and Dashboard Sync
 
-The `config.example.yaml` and `grafana/dashboards/shared/netsonar.json` are designed to work together out of the box. The example config uses a specific set of tag keys, and the dashboard expects those same keys as Prometheus labels to populate its columns:
+The [`../examples/config.yaml`](../examples/config.yaml) and [`../grafana/dashboards/shared/netsonar.json`](../grafana/dashboards/shared/netsonar.json) are designed to work together out of the box. The example config uses a specific set of tag keys, and the dashboard expects those same keys as Prometheus labels to populate its columns:
 
 | Tag Key in Config    | Dashboard Column | Description                                      |
 |----------------------|------------------|--------------------------------------------------|

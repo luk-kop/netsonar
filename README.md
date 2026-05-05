@@ -59,7 +59,7 @@ The binary is written to `bin/netsonar`.
 | Target                          | Description                                                |
 |---------------------------------|------------------------------------------------------------|
 | `build`                         | Static binary with `CGO_ENABLED=0` and version injection   |
-| `build-release`                 | Cross-compile for `linux/amd64` and `linux/arm64`          |
+| `build-release`                 | Cross-compile and package release archives for Linux       |
 | `test`                          | Run all tests (`go test ./...`)                            |
 | `test-short`                    | Run tests in short mode (`go test -short ./...`)           |
 | `test-race`                     | Run tests with race detector                               |
@@ -78,6 +78,26 @@ The binary is written to `bin/netsonar`.
 | `lab-mv-down`                   | Stop metrics validation lab and remove volumes             |
 | `lab-metrics-validation`        | Alias for `lab-mv`                                         |
 | `lab-metrics-validation-down`   | Alias for `lab-mv-down`                                    |
+
+### Release Artifacts
+
+Tagged releases publish one archive per Linux architecture plus a shared checksum file:
+
+```text
+netsonar_1.2.3_linux_amd64.tar.gz
+netsonar_1.2.3_linux_arm64.tar.gz
+checksums.txt
+```
+
+The Git tag keeps the `v` prefix, for example `v1.2.3`; release asset names omit it. Each archive extracts into a versioned directory such as `netsonar_1.2.3_linux_amd64/` containing `netsonar`, `README.md`, `LICENSE`, `config.example.yaml`, and `netsonar.service`.
+
+To verify and unpack one asset:
+
+```bash
+sha256sum --ignore-missing -c checksums.txt
+tar -xzf netsonar_1.2.3_linux_amd64.tar.gz
+sudo install -m 0755 netsonar_1.2.3_linux_amd64/netsonar /usr/local/bin/netsonar
+```
 
 ## Usage
 
@@ -105,7 +125,7 @@ The binary is written to `bin/netsonar`.
 
 Agent settings, target definition, dynamic tags, and validation rules — see [docs/configuration.md](docs/configuration.md).
 
-Quick reference: `config.example.yaml` contains a complete working example.
+Quick reference: [`examples/config.yaml`](examples/config.yaml) contains a complete working example.
 
 ## Probe Types
 
@@ -189,18 +209,18 @@ sudo cp bin/netsonar /usr/local/bin/
 # Create config directory and user
 sudo useradd --system --no-create-home --shell /usr/sbin/nologin netsonar
 sudo mkdir -p /etc/netsonar
-sudo cp config.example.yaml /etc/netsonar/config.yaml
+sudo cp examples/config.yaml /etc/netsonar/config.yaml
 sudo chown -R netsonar:netsonar /etc/netsonar
 
 # Install systemd unit
-sudo cp netsonar.service /etc/systemd/system/
+sudo cp examples/systemd/netsonar.service /etc/systemd/system/netsonar.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now netsonar
 ```
 
 ### systemd Unit
 
-The included `netsonar.service` provides:
+The included [`examples/systemd/netsonar.service`](examples/systemd/netsonar.service) provides:
 
 - Runs as `netsonar` user (non-root)
 - `EnvironmentFile=-/etc/default/netsonar` for operator overrides

@@ -288,6 +288,8 @@ For strict "did the proxy ACL deny CONNECT?" checks, prefer the `proxy_connect` 
 
 This sends only an HTTP CONNECT request. Success means the proxy allowed the tunnel. No TLS handshake or HTTP request is performed through the tunnel.
 
+The `address` value is `host:port` because that is the request target form used by HTTP CONNECT, for example `CONNECT example.com:443 HTTP/1.1`. Do not use `http://example.com:80` or `https://example.com:443` here: URL syntax belongs to `http` and `http_body` probes, which make an HTTP request through the proxy. The `proxy_connect` probe tests only whether the proxy will open a raw tunnel to the named host and port.
+
 For a negative CONNECT policy test, make the expected proxy response explicit:
 
 ```yaml
