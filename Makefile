@@ -4,10 +4,12 @@ BINARY   := netsonar
 BINDIR   := bin
 PKG      := ./cmd/agent
 MODULE   := netsonar
+RELEASE_TMP := $(BINDIR)/release
 
-VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-REVISION   ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-BUILD_DATE ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
+VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+VERSION_NO_V := $(VERSION:v%=%)
+REVISION    ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_DATE  ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 
 LDFLAGS  := -s -w \
 	-X 'main.version=$(VERSION)' \
@@ -23,9 +25,25 @@ build:
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BINDIR)/$(BINARY) $(PKG)
 
 build-release:
-	mkdir -p $(BINDIR)
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(BINDIR)/$(BINARY)-linux-amd64 $(PKG)
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o $(BINDIR)/$(BINARY)-linux-arm64 $(PKG)
+	rm -rf $(RELEASE_TMP)
+	mkdir -p $(RELEASE_TMP)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(RELEASE_TMP)/$(BINARY)_linux_amd64 $(PKG)
+	mkdir -p $(RELEASE_TMP)/$(BINARY)_$(VERSION_NO_V)_linux_amd64
+	cp $(RELEASE_TMP)/$(BINARY)_linux_amd64 $(RELEASE_TMP)/$(BINARY)_$(VERSION_NO_V)_linux_amd64/$(BINARY)
+	cp packaging/README.release.md $(RELEASE_TMP)/$(BINARY)_$(VERSION_NO_V)_linux_amd64/README.md
+	cp LICENSE $(RELEASE_TMP)/$(BINARY)_$(VERSION_NO_V)_linux_amd64/LICENSE
+	cp examples/config.yaml $(RELEASE_TMP)/$(BINARY)_$(VERSION_NO_V)_linux_amd64/config.example.yaml
+	cp examples/systemd/netsonar.service $(RELEASE_TMP)/$(BINARY)_$(VERSION_NO_V)_linux_amd64/netsonar.service
+	tar -C $(RELEASE_TMP) -czf $(BINDIR)/$(BINARY)_$(VERSION_NO_V)_linux_amd64.tar.gz $(BINARY)_$(VERSION_NO_V)_linux_amd64
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o $(RELEASE_TMP)/$(BINARY)_linux_arm64 $(PKG)
+	mkdir -p $(RELEASE_TMP)/$(BINARY)_$(VERSION_NO_V)_linux_arm64
+	cp $(RELEASE_TMP)/$(BINARY)_linux_arm64 $(RELEASE_TMP)/$(BINARY)_$(VERSION_NO_V)_linux_arm64/$(BINARY)
+	cp packaging/README.release.md $(RELEASE_TMP)/$(BINARY)_$(VERSION_NO_V)_linux_arm64/README.md
+	cp LICENSE $(RELEASE_TMP)/$(BINARY)_$(VERSION_NO_V)_linux_arm64/LICENSE
+	cp examples/config.yaml $(RELEASE_TMP)/$(BINARY)_$(VERSION_NO_V)_linux_arm64/config.example.yaml
+	cp examples/systemd/netsonar.service $(RELEASE_TMP)/$(BINARY)_$(VERSION_NO_V)_linux_arm64/netsonar.service
+	tar -C $(RELEASE_TMP) -czf $(BINDIR)/$(BINARY)_$(VERSION_NO_V)_linux_arm64.tar.gz $(BINARY)_$(VERSION_NO_V)_linux_arm64
+	cd $(BINDIR) && sha256sum $(BINARY)_$(VERSION_NO_V)_linux_amd64.tar.gz $(BINARY)_$(VERSION_NO_V)_linux_arm64.tar.gz > checksums.txt
 
 test:
 	go test ./...
