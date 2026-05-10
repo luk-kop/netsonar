@@ -171,6 +171,31 @@ typical LAN/VPC paths. Add more for high-RTT or cross-region targets, and
 remember that `target.timeout` must also be `≤ target.interval` (validated at
 config load time).
 
+#### Troubleshooting: `probe_icmp_stddev_rtt_seconds` not in `/metrics`
+
+If the metric is missing for a target that is otherwise healthy
+(`probe_success = 1`, `probe_icmp_packet_loss_ratio = 0`), the cause is
+almost always `ICMPRepliesObserved < 2`. Check in this order:
+
+1. **Default `ping_count = 1`.** This is the most common cause. If
+   `probe_opts.ping_count` is not set explicitly for the target, the agent
+   sends a single echo per probe — and a stddev over one sample is undefined,
+   so the series is intentionally not emitted. Cross-check from `/metrics`
+   without reading the config: `probe_duration_seconds ≈ probe_icmp_avg_rtt_seconds`
+   confirms a single ping was sent. With `ping_count = 5, ping_interval = 1s`,
+   `probe_duration_seconds` would be at least ~4 s.
+2. **`probe_opts` indentation.** YAML silently ignores `ping_count` placed
+   outside the `probe_opts:` block. If raising `ping_count` does not change
+   `probe_duration_seconds` after a config reload, indentation is the
+   prime suspect.
+3. **`target.timeout` too tight for the sequence.** See the sizing rule
+   above. The probe completes early with `ICMPRepliesObserved` below
+   `ping_count`, and if it falls to 1 or 0 the stddev series disappears.
+4. **Packet loss across the sequence.** If `probe_icmp_packet_loss_ratio`
+   is high enough that fewer than two replies came back, stddev cannot be
+   computed. The avg_rtt and stddev metrics will toggle independently as
+   conditions change.
+
 ## MTU/PMTUD
 
 Detects path MTU by sending ICMP echo requests with the IPv4 DF-bit set, stepping down through configured payload sizes. Uses Linux unprivileged ICMP ping sockets and does not require `CAP_NET_RAW`; `net.ipv4.ping_group_range` must include the process effective or supplementary GID.
