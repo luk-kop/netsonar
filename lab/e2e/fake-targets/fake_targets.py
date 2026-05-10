@@ -23,6 +23,10 @@ class HTTPHandler(http.server.BaseHTTPRequestHandler):
         if self.path == "/error-with-healthy-body":
             self._write(500, b"healthy\n")
             return
+        if self.path == "/slow":
+            time.sleep(1)
+            self._write(200, b"slow\n")
+            return
         self._write(404, b"not found\n")
 
     def do_POST(self):
@@ -51,7 +55,10 @@ class HTTPHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/plain")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
 
 class ProxyHandler(socketserver.StreamRequestHandler):

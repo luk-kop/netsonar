@@ -778,6 +778,86 @@ func (p *blockingProber) Probe(_ context.Context, _ config.TargetConfig) probe.P
 	return probe.ProbeResult{Success: true, Duration: time.Millisecond}
 }
 
+type deadlineProber struct{}
+
+func (p *deadlineProber) Probe(ctx context.Context, _ config.TargetConfig) probe.ProbeResult {
+	start := time.Now()
+	<-ctx.Done()
+	return probe.ProbeResult{
+		Success:  false,
+		Duration: time.Since(start),
+		Error:    ctx.Err().Error(),
+	}
+}
+
+type fastSuccessProber struct{}
+
+func (p *fastSuccessProber) Probe(_ context.Context, _ config.TargetConfig) probe.ProbeResult {
+	return probe.ProbeResult{Success: true, Duration: time.Millisecond}
+}
+
+func gatheredGaugeValue(t *testing.T, me *metrics.MetricsExporter, metricName, targetName string) float64 {
+	t.Helper()
+	families, err := me.Registry().Gather()
+	if err != nil {
+		t.Fatalf("failed to gather metrics: %v", err)
+	}
+	for _, fam := range families {
+		if fam.GetName() != metricName {
+			continue
+		}
+		for _, metric := range fam.GetMetric() {
+			for _, label := range metric.GetLabel() {
+				if label.GetName() == "target_name" && label.GetValue() == targetName {
+					return metric.GetGauge().GetValue()
+				}
+			}
+		}
+	}
+	t.Fatalf("metric %s for target_name=%s not found", metricName, targetName)
+	return 0
+}
+
+func TestExecuteProbe_RecordsTimedOutWhenDeadlineExceeded(t *testing.T) {
+	me := metrics.NewMetricsExporter(nil, metrics.ExporterOptions{})
+	target := config.TargetConfig{
+		Name:      "deadline-test",
+		Address:   "10.0.0.1:80",
+		ProbeType: config.ProbeTypeTCP,
+		Interval:  time.Second,
+		Timeout:   20 * time.Millisecond,
+	}
+
+	executeProbe(context.Background(), target, &deadlineProber{}, me, &probeState{})
+
+	if got := gatheredGaugeValue(t, me, "probe_timed_out", "deadline-test"); got != 1 {
+		t.Fatalf("probe_timed_out = %f, want 1", got)
+	}
+	if got := gatheredGaugeValue(t, me, "probe_success", "deadline-test"); got != 0 {
+		t.Fatalf("probe_success = %f, want 0", got)
+	}
+}
+
+func TestExecuteProbe_RecordsNoTimedOutOnSuccess(t *testing.T) {
+	me := metrics.NewMetricsExporter(nil, metrics.ExporterOptions{})
+	target := config.TargetConfig{
+		Name:      "success-test",
+		Address:   "10.0.0.1:80",
+		ProbeType: config.ProbeTypeTCP,
+		Interval:  time.Second,
+		Timeout:   time.Second,
+	}
+
+	executeProbe(context.Background(), target, &fastSuccessProber{}, me, &probeState{})
+
+	if got := gatheredGaugeValue(t, me, "probe_timed_out", "success-test"); got != 0 {
+		t.Fatalf("probe_timed_out = %f, want 0", got)
+	}
+	if got := gatheredGaugeValue(t, me, "probe_success", "success-test"); got != 1 {
+		t.Fatalf("probe_success = %f, want 1", got)
+	}
+}
+
 func TestExecuteProbe_DiscardsResultAfterContextCancel(t *testing.T) {
 	// This test verifies that when the parent context is cancelled (e.g. by
 	// Reload removing a target) while a probe is in flight, the result is

@@ -3,6 +3,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"math"
 	"math/rand/v2"
@@ -270,11 +271,12 @@ func executeProbe(ctx context.Context, target config.TargetConfig, prober probe.
 	// Check parent context after Probe returns: if the target was removed or
 	// changed during a slow probe (Reload/Stop called cancel on ctx), discard
 	// the result so we don't recreate Prometheus series after DeleteTarget.
-	// Do NOT check probeCtx.Err() here — a probe timeout is a valid result
-	// that must be recorded.
+	// Do NOT discard on probeCtx.Err() here — a probe timeout is a valid
+	// result and is recorded below as result.TimedOut.
 	if ctx.Err() != nil {
 		return
 	}
+	result.TimedOut = errors.Is(probeCtx.Err(), context.DeadlineExceeded)
 	m.Record(target, result)
 	logProbeResult(target, result, state)
 }

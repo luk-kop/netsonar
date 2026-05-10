@@ -76,6 +76,9 @@ The following table shows which probe types emit each metric:
 |---|---|---|
 | `probe_success` | — | all |
 | `probe_duration_seconds` | — | all |
+| `probe_timeout_seconds` | — | all |
+| `probe_interval_seconds` | — | all |
+| `probe_timed_out` | — | all |
 | `probe_phase_duration_seconds` | — | tcp, http, tls_cert, proxy_connect |
 | `probe_http_status_code` | `http_` | http, http_body |
 | `probe_http_response_truncated` | `http_` | http |
@@ -98,6 +101,9 @@ The following table shows which probe types emit each metric:
 |-------------------------------------|-------|-----------------|------------------------------------------------|
 | `probe_success`                     | Gauge | common          | 1 if probe succeeded, 0 if failed              |
 | `probe_duration_seconds`            | Gauge | common          | Total probe duration                           |
+| `probe_timeout_seconds`             | Gauge | common          | Effective configured target timeout            |
+| `probe_interval_seconds`            | Gauge | common          | Effective configured target interval           |
+| `probe_timed_out`                   | Gauge | common          | 1 if the probe context deadline was exceeded, 0 otherwise |
 | `probe_phase_duration_seconds`      | Gauge | common + `phase`| Per-phase timing for probes with sub-phases    |
 | `probe_http_status_code`            | Gauge | common          | HTTP response status code                      |
 | `probe_proxy_connect_status_code`   | Gauge | common          | HTTP status code returned by the proxy to a CONNECT request |
@@ -192,7 +198,14 @@ Some probe metrics are meaningful for every probe result, while others are meani
 NetSonar therefore distinguishes between:
 
 - **always-emitted metrics** such as `probe_success` and `probe_duration_seconds`
+- **configuration metrics** such as `probe_timeout_seconds` and `probe_interval_seconds`, emitted for every active target before the first probe result
 - **conditionally emitted metrics** such as RTT, HTTP status, certificate expiry, DNS match result, and per-phase timings
+
+`probe_timed_out` is an always-emitted result metric. It is set by the scheduler
+when the per-probe context deadline is exceeded, not by comparing
+`probe_duration_seconds` to `probe_timeout_seconds`. Use it to distinguish
+deadline failures from fast failures such as DNS, TCP, TLS, proxy, HTTP
+validation, or permission errors.
 
 Conditionally emitted metrics follow **current-observation semantics**: they reflect only what was observed in the latest probe result. If the latest probe did not produce the underlying observation, the corresponding Prometheus series is deleted rather than retaining a stale value or exporting a placeholder zero.
 
@@ -234,6 +247,9 @@ Do not treat absence of a conditional value metric as a generic probe failure si
 |---|---|---|---|
 | `probe_success` | always | every probe result | unexpected for an active target |
 | `probe_duration_seconds` | always | every probe result | unexpected for an active target |
+| `probe_timeout_seconds` | config | active target is scheduled | unexpected for an active target |
+| `probe_interval_seconds` | config | active target is scheduled | unexpected for an active target |
+| `probe_timed_out` | always | every probe result | unexpected for an active target after first result |
 | `probe_phase_duration_seconds` | conditional | the phase was observed in the latest probe result | the phase was not reached or not observed in the latest probe result |
 | `probe_http_status_code` | conditional | an HTTP response was received in the latest probe result | no HTTP response was received in the latest probe result |
 | `probe_proxy_connect_status_code` | conditional | a proxy CONNECT response was received in the latest probe result | no proxy CONNECT response was received in the latest probe result (no proxy hop, or proxy connection failed before a response) |
