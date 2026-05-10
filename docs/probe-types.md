@@ -136,7 +136,7 @@ ICMP probes are IPv4-only in the current implementation. Literal IPv6 addresses 
 - name: "ssm-icmp"
   address: "ssm.eu-central-1.amazonaws.com"
   probe_type: icmp
-  timeout: 5s
+  timeout: 10s
   probe_opts:
     ping_count: 5                   # Number of ICMP echo requests
     ping_interval: 1.0              # Seconds between pings
@@ -148,6 +148,28 @@ ICMP probes are IPv4-only in the current implementation. Literal IPv6 addresses 
 |-----------------|----------------|---------|--------------------------------------------------------------------------------------------------------------|
 | `ping_count`    | int            | `1`     | Number of ICMP echo requests to send. Higher values increase RTT and loss accuracy at the cost of duration.  |
 | `ping_interval` | float seconds  | `1.0`   | Seconds between consecutive echo requests. Only meaningful when `ping_count > 1`.                            |
+
+### Sizing `target.timeout` for multi-ping sequences
+
+The full ICMP probe takes at least `(ping_count - 1) × ping_interval + Σ RTT`
+wall-clock seconds. The probe's context deadline is shared across all pings in
+the sequence, so set `target.timeout` with comfortable headroom over this
+minimum. If the deadline fires mid-sequence, only the early echoes complete
+and `ICMPRepliesObserved` ends up below `ping_count`. This affects two
+metrics, both of which use **current-observation semantics** (see
+[docs/metrics.md](./metrics.md)):
+
+- `probe_icmp_avg_rtt_seconds` requires `ICMPRepliesObserved ≥ 1` — deleted
+  from `/metrics` when no echo replies were received.
+- `probe_icmp_stddev_rtt_seconds` requires `ICMPRepliesObserved ≥ 2` —
+  deleted from `/metrics` when fewer than two replies were received. A common
+  symptom is the metric flickering in and out as borderline `target.timeout`
+  cuts off the last ping or two.
+
+Rule of thumb: `target.timeout ≥ (ping_count - 1) × ping_interval + 2s` for
+typical LAN/VPC paths. Add more for high-RTT or cross-region targets, and
+remember that `target.timeout` must also be `≤ target.interval` (validated at
+config load time).
 
 ## MTU/PMTUD
 
