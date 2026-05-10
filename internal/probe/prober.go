@@ -79,8 +79,13 @@ type ProbeResult struct {
 	// Duration is the wall-clock time of the entire probe execution.
 	Duration time.Duration
 
-	// TimedOut is true when the scheduler-observed probe context deadline was
-	// exceeded during this probe execution.
+	// TimedOut is true when the probe reached or exceeded its configured
+	// timeout. It may be set either by the prober itself (when its internal
+	// retry/echo budget concluded that all attempts timed out) or by the
+	// scheduler after Probe() returns (based on context deadline state or
+	// wall-clock elapsed time). Default false; probers without a meaningful
+	// internal timeout signal should leave it untouched and let the scheduler
+	// classify.
 	TimedOut bool
 
 	// Phases contains per-phase timing for probes that expose a sub-phase

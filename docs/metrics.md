@@ -103,7 +103,7 @@ The following table shows which probe types emit each metric:
 | `probe_duration_seconds`            | Gauge | common          | Total probe duration                           |
 | `probe_timeout_seconds`             | Gauge | common          | Effective configured target timeout            |
 | `probe_interval_seconds`            | Gauge | common          | Effective configured target interval           |
-| `probe_timed_out`                   | Gauge | common          | 1 if the probe context deadline was exceeded, 0 otherwise |
+| `probe_timed_out`                   | Gauge | common          | 1 if the probe reached or exceeded its configured timeout, 0 otherwise |
 | `probe_phase_duration_seconds`      | Gauge | common + `phase`| Per-phase timing for probes with sub-phases    |
 | `probe_http_status_code`            | Gauge | common          | HTTP response status code                      |
 | `probe_proxy_connect_status_code`   | Gauge | common          | HTTP status code returned by the proxy to a CONNECT request |
@@ -201,11 +201,22 @@ NetSonar therefore distinguishes between:
 - **configuration metrics** such as `probe_timeout_seconds` and `probe_interval_seconds`, emitted for every active target before the first probe result
 - **conditionally emitted metrics** such as RTT, HTTP status, certificate expiry, DNS match result, and per-phase timings
 
-`probe_timed_out` is an always-emitted result metric. It is set by the scheduler
-when the per-probe context deadline is exceeded, not by comparing
-`probe_duration_seconds` to `probe_timeout_seconds`. Use it to distinguish
-deadline failures from fast failures such as DNS, TCP, TLS, proxy, HTTP
-validation, or permission errors.
+`probe_timed_out` is an always-emitted result metric. It is set to 1 when any
+of three independent sources indicate the per-probe deadline was reached:
+
+1. The prober self-reported a timeout in `result.TimedOut` (e.g. an ICMP probe
+   concluding all echoes timed out within their per-attempt budget).
+2. `probeCtx.Err() == context.DeadlineExceeded` after `Probe()` returned
+   (strict context-state check).
+3. The wall-clock probe duration measured by the scheduler reached or exceeded
+   the configured timeout. This is a fallback for the race where Go's
+   `net.Dialer` internal deadline timer fires before `context.WithTimeout`'s
+   own cancel goroutine has updated `ctx.Err()` — observed in practice for TCP
+   probes against silently-dropping targets, where the dial returns an
+   `i/o timeout` error before the context state catches up.
+
+Use it to distinguish timeout failures from fast failures such as DNS, TCP RST,
+TLS handshake, proxy CONNECT, HTTP validation, or permission errors.
 
 Conditionally emitted metrics follow **current-observation semantics**: they reflect only what was observed in the latest probe result. If the latest probe did not produce the underlying observation, the corresponding Prometheus series is deleted rather than retaining a stale value or exporting a placeholder zero.
 
