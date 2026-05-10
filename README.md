@@ -40,7 +40,7 @@ Supported probe types: `tcp`, `http`, `icmp`, `mtu`, `dns`, `tls_cert`,
 
 ## Build
 
-Requires Go 1.26+. For linting: [golangci-lint](https://golangci-lint.run/welcome/install/).
+Requires Go 1.26.3+. For linting: [golangci-lint](https://golangci-lint.run/welcome/install/).
 
 ```bash
 cd netsonar
@@ -437,8 +437,9 @@ continues with the previous configuration:
 
 Probe failure reasons are written to the agent log with structured fields.
 Metrics intentionally expose only stable values such as `probe_success`,
-duration, status code, and probe-specific gauges; the raw error string is not
-exported as a Prometheus label because it can have high cardinality.
+duration, configured timeout, timeout status, status code, and probe-specific
+gauges; the raw error string is not exported as a Prometheus label because it
+can have high cardinality.
 
 The scheduler logs state changes per target:
 

@@ -66,6 +66,28 @@ targets:
 	}
 }
 
+func TestTargetConfigEqual_DetectsTimeoutAndIntervalChanges(t *testing.T) {
+	base := TargetConfig{
+		Name:      "target",
+		Address:   "example.com:443",
+		ProbeType: ProbeTypeTCP,
+		Interval:  30 * time.Second,
+		Timeout:   5 * time.Second,
+	}
+
+	timeoutChanged := base
+	timeoutChanged.Timeout = 6 * time.Second
+	if base.Equal(timeoutChanged) {
+		t.Fatal("TargetConfig.Equal returned true for targets differing only by Timeout")
+	}
+
+	intervalChanged := base
+	intervalChanged.Interval = 31 * time.Second
+	if base.Equal(intervalChanged) {
+		t.Fatal("TargetConfig.Equal returned true for targets differing only by Interval")
+	}
+}
+
 func TestLoadConfig_DefaultAgentListenAndMetricsPathApplied(t *testing.T) {
 	yaml := `
 agent:

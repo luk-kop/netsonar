@@ -79,6 +79,10 @@ type ProbeResult struct {
 	// Duration is the wall-clock time of the entire probe execution.
 	Duration time.Duration
 
+	// TimedOut is true when the scheduler-observed probe context deadline was
+	// exceeded during this probe execution.
+	TimedOut bool
+
 	// Phases contains per-phase timing for probes that expose a sub-phase
 	// breakdown. TCP and direct TLS cert emit dns_resolve for hostname
 	// targets, plus tcp_connect; direct TLS cert also emits tls_handshake.

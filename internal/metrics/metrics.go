@@ -32,6 +32,9 @@ type MetricsExporter struct {
 	// Probe metrics (common labels).
 	probeSuccess       *prometheus.GaugeVec
 	probeDuration      *prometheus.GaugeVec
+	probeTimeout       *prometheus.GaugeVec
+	probeInterval      *prometheus.GaugeVec
+	probeTimedOut      *prometheus.GaugeVec
 	probePhaseDuration *prometheus.GaugeVec
 
 	// HTTP-specific.
@@ -100,6 +103,21 @@ func NewMetricsExporter(tagKeys []string, opts ExporterOptions) *MetricsExporter
 		probeDuration: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "probe_duration_seconds",
 			Help: "Total probe duration in seconds.",
+		}, commonLabels),
+
+		probeTimeout: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "probe_timeout_seconds",
+			Help: "Effective configured timeout for this probe target in seconds.",
+		}, commonLabels),
+
+		probeInterval: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "probe_interval_seconds",
+			Help: "Effective configured interval for this probe target in seconds.",
+		}, commonLabels),
+
+		probeTimedOut: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "probe_timed_out",
+			Help: "1 if the scheduler-observed probe context deadline was exceeded, 0 otherwise.",
 		}, commonLabels),
 
 		probePhaseDuration: prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -202,6 +220,9 @@ func NewMetricsExporter(tagKeys []string, opts ExporterOptions) *MetricsExporter
 	reg.MustRegister(
 		m.probeSuccess,
 		m.probeDuration,
+		m.probeTimeout,
+		m.probeInterval,
+		m.probeTimedOut,
 		m.probePhaseDuration,
 		m.httpStatusCode,
 		m.proxyConnectStatusCode,
@@ -280,6 +301,11 @@ func (m *MetricsExporter) Record(target config.TargetConfig, result probe.ProbeR
 	}
 	m.probeSuccess.With(labels).Set(successVal)
 	m.probeDuration.With(labels).Set(result.Duration.Seconds())
+	timedOutVal := 0.0
+	if result.TimedOut {
+		timedOutVal = 1.0
+	}
+	m.probeTimedOut.With(labels).Set(timedOutVal)
 
 	// proxy_connect_status_code is only meaningful for probe types that can
 	// observe a proxy CONNECT response. Skip the Delete on probe types that
@@ -452,6 +478,9 @@ func (m *MetricsExporter) DeleteTarget(target config.TargetConfig) {
 
 	m.probeSuccess.Delete(labels)
 	m.probeDuration.Delete(labels)
+	m.probeTimeout.Delete(labels)
+	m.probeInterval.Delete(labels)
+	m.probeTimedOut.Delete(labels)
 	m.proxyConnectStatusCode.Delete(labels)
 	m.httpStatusCode.Delete(labels)
 	m.tlsCertExpiry.Delete(labels)
@@ -478,6 +507,8 @@ func (m *MetricsExporter) DeleteTarget(target config.TargetConfig) {
 // active targets even before the first increment occurs.
 func (m *MetricsExporter) EnsureTarget(target config.TargetConfig) {
 	labels := m.buildLabels(target)
+	m.probeTimeout.With(labels).Set(target.Timeout.Seconds())
+	m.probeInterval.With(labels).Set(target.Interval.Seconds())
 	m.probeSkippedOverlapTotal.With(labels)
 }
 

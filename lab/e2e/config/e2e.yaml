@@ -64,6 +64,17 @@ targets:
       service: fake-http
       suite: e2e
 
+  - name: http-timeout
+    address: "http://fake-targets:8080/slow"
+    probe_type: http
+    timeout: 200ms
+    probe_opts:
+      method: GET
+      expected_status_codes: [200]
+    tags:
+      service: fake-http
+      suite: e2e
+
   - name: http-upload-64k
     address: "http://fake-targets:8080/upload"
     probe_type: http

@@ -10,7 +10,11 @@ METRICS_URL = os.environ.get("METRICS_URL", "http://netsonar:9275/metrics")
 
 EXPECTATIONS = [
     ("probe_success", {"target_name": "tcp-open"}, 1.0),
+    ("probe_timeout_seconds", {"target_name": "tcp-open"}, 1.0),
+    ("probe_interval_seconds", {"target_name": "tcp-open"}, 2.0),
+    ("probe_timed_out", {"target_name": "tcp-open"}, 0.0),
     ("probe_success", {"target_name": "tcp-closed"}, 0.0),
+    ("probe_timed_out", {"target_name": "tcp-closed"}, 0.0),
     ("probe_success", {"target_name": "http-ok"}, 1.0),
     ("probe_http_status_code", {"target_name": "http-ok"}, 200.0),
     ("probe_success", {"target_name": "http-500-expected-200"}, 0.0),
@@ -18,6 +22,9 @@ EXPECTATIONS = [
     ("probe_success", {"target_name": "http-500-any-status"}, 1.0),
     ("probe_http_status_code", {"target_name": "http-500-any-status"}, 500.0),
     ("probe_success", {"target_name": "http-no-response"}, 0.0),
+    ("probe_success", {"target_name": "http-timeout"}, 0.0),
+    ("probe_timed_out", {"target_name": "http-timeout"}, 1.0),
+    ("probe_timeout_seconds", {"target_name": "http-timeout"}, 0.2),
     ("probe_success", {"target_name": "http-upload-64k"}, 1.0),
     ("probe_http_status_code", {"target_name": "http-upload-64k"}, 200.0),
     ("probe_success", {"target_name": "http-body-ok"}, 1.0),
@@ -44,6 +51,7 @@ EXPECTATIONS = [
     ("probe_success", {"target_name": "dns-localhost-mismatch"}, 0.0),
     ("probe_dns_result_match", {"target_name": "dns-localhost-mismatch"}, 0.0),
     ("probe_success", {"target_name": "icmp-fake-targets"}, 1.0),
+    ("probe_timeout_seconds", {"target_name": "icmp-fake-targets"}, 3.0),
     ("probe_icmp_packet_loss_ratio", {"target_name": "icmp-fake-targets"}, 0.0),
     ("probe_success", {"target_name": "icmp-single-reply"}, 1.0),
     ("probe_icmp_packet_loss_ratio", {"target_name": "icmp-single-reply"}, 0.0),
@@ -72,6 +80,8 @@ STATE_EXPECTATIONS = [
 
 ABSENT_EXPECTATIONS = [
     ("probe_http_status_code", {"target_name": "http-no-response"}),
+    ("probe_http_status_code", {"target_name": "http-timeout"}),
+    ("probe_http_response_truncated", {"target_name": "http-timeout"}),
     ("probe_http_response_truncated", {"target_name": "http-no-response"}),
     ("probe_tls_cert_expiry_timestamp_seconds", {"target_name": "tls-cert-connect-fail"}),
     ("probe_dns_result_match", {"target_name": "dns-fake-targets"}),

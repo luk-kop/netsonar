@@ -297,6 +297,12 @@
           "legendFormat": "Critical Failures",
           "refId": "A",
           "instant": true
+        },
+        {
+          "expr": "count(probe_timed_out{job=~\"$job\"} == 1) OR on() vector(0)",
+          "legendFormat": "Timed Out",
+          "refId": "B",
+          "instant": true
         }
       ]
     },
@@ -622,6 +628,135 @@
           {
             "matcher": {
               "id": "byName",
+              "options": "Time Limit"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Limit Used"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.width",
+                "value": 120
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "gradient"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 0.75
+                    },
+                    {
+                      "color": "red",
+                      "value": 0.95
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Timed Out"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "0": {
+                        "color": "transparent",
+                        "text": ""
+                      },
+                      "1": {
+                        "color": "red",
+                        "text": "YES"
+                      }
+                    },
+                    "type": "value"
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "transparent",
+                      "value": null
+                    },
+                    {
+                      "color": "red",
+                      "value": 1
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 110
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
               "options": "Status"
             },
             "properties": [
@@ -858,7 +993,7 @@
         }
       },
       "title": "All Probes — Status Table",
-      "description": "Current status of every configured probe target. Sorted by Status so failures appear first.\n\nColumn legend:\n- Status: probe outcome from probe_success. OK = succeeded, FAIL = failed. On FAIL, compare Total Probe Time against the target timeout to distinguish a full timeout from a fast fail (DNS/socket error).\n- Name / Probe / Path: target identity. Path = YES means the probe goes through an HTTP proxy (network_path=proxy); blank = direct.\n- Primary Latency: probe-type-specific latency (ICMP/MTU RTT, TCP connect, HTTP TTFB, TLS handshake, proxy CONNECT, DNS resolve). See Latency Signal for which metric produced the value. N/A = no usable timing signal (e.g., 100% ICMP packet loss).\n- Latency Signal: which metric or phase produced Primary Latency: icmp_rtt, tcp_connect, ttfb, tls_handshake, proxy_connect, or dns_resolve.\n- Total Probe Time: wall-clock duration of the full probe (probe_duration_seconds). For ICMP/MTU this runs in seconds by design, driven by ping intervals and retry budgets, not network speed. Not a health signal on its own; use Status + Primary Latency for health.",
+      "description": "Current status of every configured probe target. Sorted by Status so failures appear first.\n\nColumn legend:\n- Status: probe outcome from probe_success. OK = succeeded, FAIL = failed.\n- Timed Out: YES means the scheduler-observed probe deadline was exceeded. Blank means the latest result did not hit the timeout.\n- Total Probe Time: wall-clock duration of the full probe (probe_duration_seconds).\n- Time Limit: effective configured per-target timeout in seconds (probe_timeout_seconds).\n- Limit Used: Total Probe Time divided by Time Limit. This is a tuning signal, not the source of truth for timeout classification.\n- Name / Probe / Path: target identity. Path = YES means the probe goes through an HTTP proxy (network_path=proxy); blank = direct.\n- Primary Latency: probe-type-specific latency (ICMP/MTU RTT, TCP connect, HTTP TTFB, TLS handshake, proxy CONNECT, DNS resolve). See Latency Signal for which metric produced the value. N/A = no usable timing signal (e.g., 100% ICMP packet loss).\n- Latency Signal: which metric or phase produced Primary Latency: icmp_rtt, tcp_connect, ttfb, tls_handshake, proxy_connect, or dns_resolve.",
       "type": "table",
       "transformations": [
         {
@@ -876,59 +1011,119 @@
               "Time 1": true,
               "Time 2": true,
               "Time 3": true,
+              "Time 4": true,
+              "Time 5": true,
+              "Time 6": true,
               "__name__": true,
               "__name__ 1": true,
               "__name__ 2": true,
               "__name__ 3": true,
+              "__name__ 4": true,
+              "__name__ 5": true,
+              "__name__ 6": true,
               "job": true,
               "job 1": true,
               "job 2": true,
               "job 3": true,
+              "job 4": true,
+              "job 5": true,
+              "job 6": true,
               "instance": true,
               "instance 1": true,
               "instance 2": true,
               "instance 3": true,
+              "instance 4": true,
+              "instance 5": true,
+              "instance 6": true,
               "url": true,
               "url 1": true,
               "url 2": true,
               "url 3": true,
+              "url 4": true,
+              "url 5": true,
+              "url 6": true,
               "host 2": true,
               "host 3": true,
+              "host 4": true,
+              "host 5": true,
+              "host 6": true,
               "monitor": true,
               "monitor 1": true,
               "monitor 2": true,
               "monitor 3": true,
+              "monitor 4": true,
+              "monitor 5": true,
+              "monitor 6": true,
               "port 2": true,
               "port 3": true,
+              "port 4": true,
+              "port 5": true,
+              "port 6": true,
               "visibility": true,
               "visibility 1": true,
               "visibility 2": true,
               "visibility 3": true,
+              "visibility 4": true,
+              "visibility 5": true,
+              "visibility 6": true,
               "target_region 2": true,
               "target_region 3": true,
+              "target_region 4": true,
+              "target_region 5": true,
+              "target_region 6": true,
               "target_partition 2": true,
               "target_partition 3": true,
+              "target_partition 4": true,
+              "target_partition 5": true,
+              "target_partition 6": true,
               "target_account 2": true,
               "target_account 3": true,
+              "target_account 4": true,
+              "target_account 5": true,
+              "target_account 6": true,
               "scope 2": true,
               "scope 3": true,
+              "scope 4": true,
+              "scope 5": true,
+              "scope 6": true,
               "impact 2": true,
               "impact 3": true,
+              "impact 4": true,
+              "impact 5": true,
+              "impact 6": true,
               "service 2": true,
               "service 3": true,
+              "service 4": true,
+              "service 5": true,
+              "service 6": true,
               "provider": true,
               "provider 1": true,
               "provider 2": true,
               "provider 3": true,
+              "provider 4": true,
+              "provider 5": true,
+              "provider 6": true,
               "probe_type 2": true,
               "probe_type 3": true,
+              "probe_type 4": true,
+              "probe_type 5": true,
+              "probe_type 6": true,
               "target 2": true,
               "target 3": true,
+              "target 4": true,
+              "target 5": true,
+              "target 6": true,
               "target_name 1": true,
               "target_name 2": true,
               "target_name 3": true,
+              "target_name 4": true,
+              "target_name 5": true,
+              "target_name 6": true,
               "network_path 2": true,
-              "network_path 3": true
+              "network_path 3": true,
+              "network_path 4": true,
+              "network_path 5": true,
+              "network_path 6": true
             },
             "indexByName": {
               "Value #A": 0,
@@ -937,27 +1132,30 @@
               "probe_type 1": 2,
               "network_path": 3,
               "network_path 1": 3,
-              "Value #B": 4,
-              "phase": 5,
-              "Value #C": 6,
-              "service": 7,
-              "service 1": 7,
-              "target": 8,
-              "target 1": 8,
-              "host": 9,
-              "host 1": 9,
-              "port": 10,
-              "port 1": 10,
-              "scope": 11,
-              "scope 1": 11,
-              "target_region": 12,
-              "target_region 1": 12,
-              "target_partition": 13,
-              "target_partition 1": 13,
-              "target_account": 14,
-              "target_account 1": 14,
-              "impact": 15,
-              "impact 1": 15
+              "Value #D": 4,
+              "Value #C": 5,
+              "Value #E": 6,
+              "Value #F": 7,
+              "Value #B": 8,
+              "phase": 9,
+              "service": 10,
+              "service 1": 10,
+              "target": 11,
+              "target 1": 11,
+              "host": 12,
+              "host 1": 12,
+              "port": 13,
+              "port 1": 13,
+              "scope": 14,
+              "scope 1": 14,
+              "target_region": 15,
+              "target_region 1": 15,
+              "target_partition": 16,
+              "target_partition 1": 16,
+              "target_account": 17,
+              "target_account 1": 17,
+              "impact": 18,
+              "impact 1": 18
             },
             "renameByName": {
               "target_name": "Name",
@@ -983,6 +1181,9 @@
               "Value #B": "Primary Latency",
               "phase": "Latency Signal",
               "Value #C": "Total Probe Time",
+              "Value #D": "Timed Out",
+              "Value #E": "Time Limit",
+              "Value #F": "Limit Used",
               "host": "Host",
               "host 1": "Host",
               "target_account": "Account",
@@ -1010,6 +1211,27 @@
           "expr": "probe_duration_seconds{job=~\"$job\"}",
           "legendFormat": "",
           "refId": "C",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "probe_timed_out{job=~\"$job\"}",
+          "legendFormat": "",
+          "refId": "D",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "probe_timeout_seconds{job=~\"$job\"}",
+          "legendFormat": "",
+          "refId": "E",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "probe_duration_seconds{job=~\"$job\"} / on(job, target_name) group_left() probe_timeout_seconds{job=~\"$job\"}",
+          "legendFormat": "",
+          "refId": "F",
           "instant": true,
           "format": "table"
         }

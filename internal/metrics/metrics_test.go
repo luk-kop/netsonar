@@ -68,6 +68,7 @@ func TestNewMetricsExporter_RegistersAllMetrics(t *testing.T) {
 	target := makeTarget("reg-test", "10.0.0.1:443", config.ProbeTypeTCP, map[string]string{
 		"service": "test-svc",
 	})
+	m.EnsureTarget(target)
 	m.Record(target, probe.ProbeResult{Success: true, Duration: 42 * time.Millisecond})
 
 	families := gatherMetrics(t, m)
@@ -75,6 +76,9 @@ func TestNewMetricsExporter_RegistersAllMetrics(t *testing.T) {
 	expected := []string{
 		"probe_success",
 		"probe_duration_seconds",
+		"probe_timeout_seconds",
+		"probe_interval_seconds",
+		"probe_timed_out",
 		"netsonar_targets_total",
 		"netsonar_config_reload_timestamp_seconds",
 	}
@@ -662,6 +666,30 @@ func TestRecord_DurationValue(t *testing.T) {
 	val := families["probe_duration_seconds"].GetMetric()[0].GetGauge().GetValue()
 	if val != dur.Seconds() {
 		t.Errorf("probe_duration_seconds: got %f, want %f", val, dur.Seconds())
+	}
+}
+
+func TestRecord_TimedOutValue(t *testing.T) {
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
+	target := makeTarget("val-timeout", "10.0.0.1:80", config.ProbeTypeTCP, nil)
+
+	m.Record(target, probe.ProbeResult{
+		Success:  false,
+		Duration: 5 * time.Second,
+		TimedOut: true,
+		Error:    "context deadline exceeded",
+	})
+	families := gatherMetrics(t, m)
+	val := families["probe_timed_out"].GetMetric()[0].GetGauge().GetValue()
+	if val != 1.0 {
+		t.Errorf("probe_timed_out for timed-out probe: got %f, want 1.0", val)
+	}
+
+	m.Record(target, probe.ProbeResult{Success: true, Duration: 10 * time.Millisecond})
+	families = gatherMetrics(t, m)
+	val = families["probe_timed_out"].GetMetric()[0].GetGauge().GetValue()
+	if val != 0.0 {
+		t.Errorf("probe_timed_out for non-timeout probe: got %f, want 0.0", val)
 	}
 }
 
@@ -1540,6 +1568,7 @@ func TestDeleteTarget_RemovesAllSeries(t *testing.T) {
 		ICMPAvgRTT:          5 * time.Millisecond,
 		PacketLoss:          0,
 	}
+	m.EnsureTarget(target)
 	m.Record(target, result)
 
 	// Verify series exists before delete.
@@ -1566,6 +1595,15 @@ func TestDeleteTarget_RemovesAllSeries(t *testing.T) {
 		for _, metric := range fam.GetMetric() {
 			if labelValue(metric, "target_name") == "del-me" {
 				t.Error("probe_duration_seconds series for del-me still present after DeleteTarget")
+			}
+		}
+	}
+	for _, name := range []string{"probe_timeout_seconds", "probe_interval_seconds", "probe_timed_out"} {
+		if fam, ok := families[name]; ok {
+			for _, metric := range fam.GetMetric() {
+				if labelValue(metric, "target_name") == "del-me" {
+					t.Errorf("%s series for del-me still present after DeleteTarget", name)
+				}
 			}
 		}
 	}
@@ -1669,6 +1707,42 @@ func TestEnsureTarget_PreinitializesSkippedOverlapCounter(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected probe_skipped_overlap_total series for preinit-skip")
+	}
+}
+
+func TestEnsureTarget_EmitsConfigGauges(t *testing.T) {
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
+	target := makeTarget("preinit-config", "10.0.0.3", config.ProbeTypeTCP, nil)
+	target.Timeout = 7 * time.Second
+	target.Interval = 45 * time.Second
+
+	m.EnsureTarget(target)
+
+	families := gatherMetrics(t, m)
+	tests := []struct {
+		name string
+		want float64
+	}{
+		{name: "probe_timeout_seconds", want: 7},
+		{name: "probe_interval_seconds", want: 45},
+	}
+	for _, tt := range tests {
+		fam, ok := families[tt.name]
+		if !ok {
+			t.Fatalf("expected %s to exist after EnsureTarget", tt.name)
+		}
+		found := false
+		for _, metric := range fam.GetMetric() {
+			if labelValue(metric, "target_name") == "preinit-config" {
+				found = true
+				if got := metric.GetGauge().GetValue(); got != tt.want {
+					t.Errorf("%s = %f, want %f", tt.name, got, tt.want)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("expected %s series for preinit-config", tt.name)
+		}
 	}
 }
 
