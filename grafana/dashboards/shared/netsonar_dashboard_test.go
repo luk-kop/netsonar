@@ -3,6 +3,7 @@ package shared
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -103,6 +104,54 @@ func TestNetsonarDashboardSoftMaxOnlyOnSmoothedDurationPanels(t *testing.T) {
 	}
 }
 
+func TestNetsonarStatusTablePrimaryLatencyExcludesFailedResults(t *testing.T) {
+	dash := loadDashboard(t)
+	panel := findPanel(t, dash, 7)
+
+	target := findTarget(t, panel, "B")
+	if target.Expr[0] != '(' {
+		t.Fatalf("Primary Latency expr = %q, want parenthesized expression", target.Expr)
+	}
+	wantSuffix := `) unless on(job, target_name) (probe_success{job=~"$job"} == 0)`
+	if len(target.Expr) < len(wantSuffix) || target.Expr[len(target.Expr)-len(wantSuffix):] != wantSuffix {
+		t.Fatalf("Primary Latency expr = %q, want suffix %q", target.Expr, wantSuffix)
+	}
+	wantHTTPBodyFallback := `label_replace(probe_duration_seconds{job=~"$job", probe_type="http_body"}, "phase", "http_body_duration", "__name__", ".*")`
+	if !strings.Contains(target.Expr, wantHTTPBodyFallback) {
+		t.Fatalf("Primary Latency expr = %q, want http_body duration fallback %q", target.Expr, wantHTTPBodyFallback)
+	}
+
+	override := findOverride(t, panel, "Primary Latency")
+	mappings, ok := overridePropertyValue(override, "mappings").([]any)
+	if !ok || len(mappings) != 1 {
+		t.Fatalf("Primary Latency mappings = %#v, want one mapping", mappings)
+	}
+	mapping, ok := mappings[0].(map[string]any)
+	if !ok {
+		t.Fatalf("Primary Latency mapping = %#v, want object", mappings[0])
+	}
+	if got := mapping["type"]; got != "special" {
+		t.Fatalf("Primary Latency mapping type = %v, want special", got)
+	}
+	options, ok := mapping["options"].(map[string]any)
+	if !ok {
+		t.Fatalf("Primary Latency mapping options = %#v, want object", mapping["options"])
+	}
+	if got := options["match"]; got != "null+nan" {
+		t.Fatalf("Primary Latency mapping match = %v, want null+nan", got)
+	}
+	result, ok := options["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("Primary Latency mapping result = %#v, want object", options["result"])
+	}
+	if got := result["text"]; got != "N/A" {
+		t.Fatalf("Primary Latency mapping text = %v, want N/A", got)
+	}
+	if got := result["color"]; got != "text" {
+		t.Fatalf("Primary Latency mapping color = %v, want text", got)
+	}
+}
+
 func loadDashboard(t *testing.T) dashboardJSON {
 	t.Helper()
 
@@ -128,6 +177,39 @@ func findPanel(t *testing.T, dash dashboardJSON, id int) dashboardPanel {
 	}
 	t.Fatalf("panel %d not found", id)
 	return dashboardPanel{}
+}
+
+func findTarget(t *testing.T, panel dashboardPanel, refID string) dashboardTarget {
+	t.Helper()
+
+	for _, target := range panel.Targets {
+		if target.RefID == refID {
+			return target
+		}
+	}
+	t.Fatalf("target %q not found on panel %d", refID, panel.ID)
+	return dashboardTarget{}
+}
+
+func findOverride(t *testing.T, panel dashboardPanel, name string) fieldOverride {
+	t.Helper()
+
+	for _, override := range panel.FieldConfig.Overrides {
+		if override.Matcher.ID == "byName" && override.Matcher.Options == name {
+			return override
+		}
+	}
+	t.Fatalf("override %q not found on panel %d", name, panel.ID)
+	return fieldOverride{}
+}
+
+func overridePropertyValue(override fieldOverride, id string) any {
+	for _, property := range override.Properties {
+		if property.ID == id {
+			return property.Value
+		}
+	}
+	return nil
 }
 
 func assertTarget(t *testing.T, target dashboardTarget, refID, expr, legend string) {

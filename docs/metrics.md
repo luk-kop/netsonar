@@ -306,6 +306,7 @@ In dashboards and runbooks, NetSonar refers to this cross-probe value as **Prima
 | `tcp` | `probe_phase_duration_seconds{phase="tcp_connect"}` | TCP connect latency | No |
 | `dns` | `probe_dns_resolve_seconds` | DNS lookup latency | No |
 | `http` | `probe_phase_duration_seconds{phase="ttfb"}` | Request-to-first-byte latency | No |
+| `http_body` | `probe_duration_seconds` | Full request, capped body read, and body validation duration | No |
 | `tls_cert` | `probe_phase_duration_seconds{phase="tls_handshake"}` | TLS handshake latency | No |
 | `proxy_connect` | `probe_phase_duration_seconds{phase="proxy_connect"}` | Proxy CONNECT request/response latency | No |
 
@@ -315,6 +316,7 @@ Per-metric interpretation notes:
 - `probe_dns_resolve_seconds` measures DNS resolution time. It includes resolver behavior and lookup overhead, so it should not be treated as pure network RTT.
 - `tls_handshake` measures the TLS handshake phase. It is useful for diagnosing handshake slowness, but it is not RTT.
 - `ttfb` measures time from request-send readiness to first response byte. It includes server processing time and response-header travel time, so it must not be interpreted as RTT.
+- `http_body` probes do not currently emit HTTP phase timings. In the main status table, successful `http_body` probes therefore use `probe_duration_seconds` as the Primary Latency value and label it as `http_body_duration`.
 - `proxy_connect` measures CONNECT request/response latency through the proxy tunnel. It is useful for proxy-path diagnosis, not RTT estimation.
 - `probe_proxy_connect_status_code` records the HTTP status returned by the proxy to a CONNECT request. It is distinct from `probe_http_status_code`, which records the target HTTP response for `http` and `http_body`.
 
@@ -322,8 +324,9 @@ Per-metric interpretation notes:
 
 In the main Grafana status table:
 
-- **Primary Latency** is the numeric value shown for the target's main latency signal
-- **Latency Signal** identifies which metric or phase produced that value, such as `icmp_rtt`, `dns_resolve`, `tcp_connect`, `ttfb`, `tls_handshake`, or `proxy_connect`
+- **Primary Latency** is the numeric value shown for the target's main latency signal when the latest probe succeeded
+- **Latency Signal** identifies which metric or phase produced that value, such as `icmp_rtt`, `dns_resolve`, `tcp_connect`, `ttfb`, `http_body_duration`, `tls_handshake`, or `proxy_connect`
+- Failed probes show `Primary Latency = N/A` in the status table even when partial timing metrics exist. Use `Status`, `Timed Out`, `Total Probe Time`, and `Limit Used` to distinguish a timeout from a fast fail.
 
 ### Operator Guidance and Terminology
 
@@ -389,7 +392,7 @@ Because TPT for `icmp` and `mtu` is dominated by configured intervals and retry 
 
 - Treat `Status` and `Primary Latency` as the health signals for a target. TPT is diagnostic context, not a health indicator.
 - When alerting on slow probes, alert on `probe_duration_seconds` **per `probe_type`** with thresholds that match each probe's expected shape. Do not apply a single global threshold across probe types.
-- If `Status = FAIL` and `Primary Latency = N/A`, look at TPT to tell a full timeout (TPT near the timeout boundary) from a fast fail (TPT ≈ 0) without opening the details dashboard.
+- If `Status = FAIL` and `Primary Latency = N/A`, look at `Timed Out`, `Limit Used`, and TPT to tell a full timeout (TPT near the timeout boundary, `Limit Used` near 100%) from a fast fail (TPT ≈ 0) without opening the details dashboard.
 
 ### Probes Exceeding Interval (skipped cycles)
 

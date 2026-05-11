@@ -543,6 +543,21 @@
                 "value": "N/A"
               },
               {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "match": "null+nan",
+                      "result": {
+                        "color": "text",
+                        "text": "N/A"
+                      }
+                    },
+                    "type": "special"
+                  }
+                ]
+              },
+              {
                 "id": "unit",
                 "value": "s"
               },
@@ -993,7 +1008,7 @@
         }
       },
       "title": "All Probes — Status Table",
-      "description": "Current status of every configured probe target. Sorted by Status so failures appear first.\n\nColumn legend:\n- Status: latest probe outcome from probe_success. OK = succeeded, FAIL = failed.\n- Timed Out: YES means the latest probe reached or exceeded its configured timeout. Blank means the latest result did not hit the timeout.\n- Total Probe Time: wall-clock duration of the latest probe (probe_duration_seconds).\n- Time Limit: effective configured per-target timeout in seconds (probe_timeout_seconds).\n- Limit Used: latest Total Probe Time divided by Time Limit. This is a tuning signal, not the source of truth for timeout classification.\n- Name / Probe / Path: target identity. Path = YES means the probe goes through an HTTP proxy (network_path=proxy); blank = direct.\n- Primary Latency: probe-type-specific latency (ICMP/MTU RTT, TCP connect, HTTP TTFB, TLS handshake, proxy CONNECT, DNS resolve). See Latency Signal for which metric produced the value. N/A = no usable timing signal (e.g., 100% ICMP packet loss).\n- Latency Signal: which metric or phase produced Primary Latency: icmp_rtt, tcp_connect, ttfb, tls_handshake, proxy_connect, or dns_resolve.",
+      "description": "Current status of every configured probe target. Sorted by Status so failures appear first.\n\nColumn legend:\n- Status: latest probe outcome from probe_success. OK = succeeded, FAIL = failed.\n- Timed Out: YES means the latest probe reached or exceeded its configured timeout. Blank means the latest result did not hit the timeout.\n- Total Probe Time: wall-clock duration of the latest probe (probe_duration_seconds).\n- Time Limit: effective configured per-target timeout in seconds (probe_timeout_seconds).\n- Limit Used: latest Total Probe Time divided by Time Limit. This is a tuning signal, not the source of truth for timeout classification.\n- Name / Probe / Path: target identity. Path = YES means the probe goes through an HTTP proxy (network_path=proxy); blank = direct.\n- Primary Latency: probe-type-specific latency (ICMP/MTU RTT, TCP connect, HTTP TTFB, HTTP body total duration, TLS handshake, proxy CONNECT, DNS resolve). See Latency Signal for which metric produced the value. N/A = no usable timing signal (e.g., 100% ICMP packet loss).\n- Latency Signal: which metric or phase produced Primary Latency: icmp_rtt, tcp_connect, ttfb, http_body_duration, tls_handshake, proxy_connect, or dns_resolve.",
       "type": "table",
       "transformations": [
         {
@@ -1201,7 +1216,7 @@
           "format": "table"
         },
         {
-          "expr": "label_replace(probe_icmp_avg_rtt_seconds{job=~\"$job\"}, \"phase\", \"icmp_rtt\", \"__name__\", \".*\") or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"tcp\", phase=\"tcp_connect\"} or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"ttfb\"} or (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"tls_handshake\"} unless on(target_name) probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"ttfb\"}) or (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"tcp_connect\"} unless on(target_name) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"ttfb\"} or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"tls_handshake\"})) or (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"dns_resolve\"} unless on(target_name) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"ttfb\"} or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"tls_handshake\"} or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"tcp_connect\"})) or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"tls_cert\", phase=\"tls_handshake\"} or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"proxy_connect\", phase=\"proxy_connect\"} or label_replace(probe_dns_resolve_seconds{job=~\"$job\"}, \"phase\", \"dns_resolve\", \"__name__\", \".*\")",
+          "expr": "(label_replace(probe_icmp_avg_rtt_seconds{job=~\"$job\"}, \"phase\", \"icmp_rtt\", \"__name__\", \".*\") or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"tcp\", phase=\"tcp_connect\"} or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"ttfb\"} or label_replace(probe_duration_seconds{job=~\"$job\", probe_type=\"http_body\"}, \"phase\", \"http_body_duration\", \"__name__\", \".*\") or (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"tls_handshake\"} unless on(target_name) probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"ttfb\"}) or (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"tcp_connect\"} unless on(target_name) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"ttfb\"} or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"tls_handshake\"})) or (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"dns_resolve\"} unless on(target_name) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"ttfb\"} or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"tls_handshake\"} or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", phase=\"tcp_connect\"})) or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"tls_cert\", phase=\"tls_handshake\"} or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"proxy_connect\", phase=\"proxy_connect\"} or label_replace(probe_dns_resolve_seconds{job=~\"$job\"}, \"phase\", \"dns_resolve\", \"__name__\", \".*\")) unless on(job, target_name) (probe_success{job=~\"$job\"} == 0)",
           "legendFormat": "",
           "refId": "B",
           "instant": true,

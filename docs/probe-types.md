@@ -383,6 +383,8 @@ Direct probes emit `probe_phase_duration_seconds` with `phase="tcp_connect"` and
 
 HTTP request with regex or substring match on the response body. The probe succeeds (`probe_success=1`) when **both** conditions are met: the response body matches the configured pattern, and the response status code satisfies the `expected_status_codes` rule (empty list accepts any status; non-empty list requires the status code to be present). When body evaluation completes, the match result is also reported separately via `probe_http_body_match` for diagnostic visibility. If no HTTP response is received or the body cannot be evaluated, `probe_http_body_match` is absent. The agent reads at most 1 MiB of response body; larger responses fail the probe. Supports custom request headers via `headers` and optional proxy routing via `proxy_url`.
 
+`http_body` probes do not emit HTTP phase timings. In the main Grafana status table, successful `http_body` probes use the full `probe_duration_seconds` value as Primary Latency and label the Latency Signal as `http_body_duration`; failed `http_body` probes show Primary Latency as `N/A`.
+
 At least one of `body_match_regex` or `body_match_string` must be set — a target without either is rejected at config load time. `body_match_regex` must be a valid Go regular expression. It is validated when the config is loaded and compiled once when the target prober is created. If both `body_match_regex` and `body_match_string` are set, the regex takes precedence.
 
 ```yaml
