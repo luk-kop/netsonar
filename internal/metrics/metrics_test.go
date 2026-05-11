@@ -95,6 +95,7 @@ func TestNewMetricsExporter_HTTPMetricsRegistered(t *testing.T) {
 	target := makeTarget("http-reg", "https://example.com", config.ProbeTypeHTTP, map[string]string{
 		"service": "web",
 	})
+	target.ProbeOpts.TLSEmitCertMetrics = true
 	result := probe.ProbeResult{
 		Success:                 true,
 		Duration:                100 * time.Millisecond,
@@ -1046,6 +1047,107 @@ func TestRecord_TLSCertChainExpiryClearedOnShorterChain(t *testing.T) {
 	}
 }
 
+func TestRecord_HTTPTLSCertMetricsDefaultDisabled(t *testing.T) {
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
+	target := makeTarget("http-tls-default-disabled", "https://example.com", config.ProbeTypeHTTP, nil)
+
+	m.Record(target, probe.ProbeResult{
+		Success:              true,
+		Duration:             100 * time.Millisecond,
+		StatusCode:           200,
+		HTTPResponseReceived: true,
+		CertObserved:         true,
+		CertExpiry:           time.Date(2027, 6, 15, 12, 0, 0, 0, time.UTC),
+		TLSCertificates: []*x509.Certificate{
+			{NotAfter: time.Date(2027, 6, 15, 12, 0, 0, 0, time.UTC), RawIssuer: []byte("ca"), RawSubject: []byte("leaf")},
+		},
+	})
+
+	families := gatherMetrics(t, m)
+	if _, ok := families["probe_tls_cert_expiry_timestamp_seconds"]; ok {
+		t.Fatal("expected HTTP TLS cert expiry metric to be absent by default")
+	}
+	if _, ok := families["probe_tls_cert_chain_expiry_timestamp_seconds"]; ok {
+		t.Fatal("expected HTTP TLS cert chain expiry metric to be absent by default")
+	}
+}
+
+func TestRecord_HTTPTLSCertMetricsEnabled(t *testing.T) {
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
+	target := makeTarget("http-tls-enabled", "https://example.com", config.ProbeTypeHTTP, nil)
+	target.ProbeOpts.TLSEmitCertMetrics = true
+
+	expiry := time.Date(2027, 6, 15, 12, 0, 0, 0, time.UTC)
+	m.Record(target, probe.ProbeResult{
+		Success:              true,
+		Duration:             100 * time.Millisecond,
+		StatusCode:           200,
+		HTTPResponseReceived: true,
+		CertObserved:         true,
+		CertExpiry:           expiry,
+		TLSCertificates: []*x509.Certificate{
+			{NotAfter: expiry, RawIssuer: []byte("ca"), RawSubject: []byte("leaf")},
+		},
+	})
+
+	families := gatherMetrics(t, m)
+	if got := families["probe_tls_cert_expiry_timestamp_seconds"].GetMetric()[0].GetGauge().GetValue(); got != float64(expiry.Unix()) {
+		t.Errorf("HTTP cert expiry = %f, want %f", got, float64(expiry.Unix()))
+	}
+	if got := len(families["probe_tls_cert_chain_expiry_timestamp_seconds"].GetMetric()); got != 1 {
+		t.Fatalf("HTTP cert chain expiry series count = %d, want 1", got)
+	}
+}
+
+func TestRecord_HTTPTLSCertMetricsDisabledClearsStaleSeries(t *testing.T) {
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
+	target := makeTarget("http-tls-toggle", "https://example.com", config.ProbeTypeHTTP, map[string]string{
+		"service": "web",
+	})
+	target.ProbeOpts.TLSEmitCertMetrics = true
+
+	expiry := time.Date(2027, 6, 15, 12, 0, 0, 0, time.UTC)
+	result := probe.ProbeResult{
+		Success:              true,
+		Duration:             100 * time.Millisecond,
+		StatusCode:           200,
+		HTTPResponseReceived: true,
+		CertObserved:         true,
+		CertExpiry:           expiry,
+		TLSCertificates: []*x509.Certificate{
+			{NotAfter: expiry, RawIssuer: []byte("ca"), RawSubject: []byte("leaf")},
+		},
+	}
+	m.Record(target, result)
+
+	families := gatherMetrics(t, m)
+	if _, ok := families["probe_tls_cert_expiry_timestamp_seconds"]; !ok {
+		t.Fatal("expected cert expiry metric after HTTP cert metrics were enabled")
+	}
+	if _, ok := families["probe_tls_cert_chain_expiry_timestamp_seconds"]; !ok {
+		t.Fatal("expected cert chain expiry metric after HTTP cert metrics were enabled")
+	}
+
+	target.ProbeOpts.TLSEmitCertMetrics = false
+	m.Record(target, result)
+
+	families = gatherMetrics(t, m)
+	if fam, ok := families["probe_tls_cert_expiry_timestamp_seconds"]; ok {
+		for _, metric := range fam.GetMetric() {
+			if labelValue(metric, "target_name") == "http-tls-toggle" {
+				t.Error("stale HTTP cert expiry still present after tls_emit_cert_metrics=false")
+			}
+		}
+	}
+	if fam, ok := families["probe_tls_cert_chain_expiry_timestamp_seconds"]; ok {
+		for _, metric := range fam.GetMetric() {
+			if labelValue(metric, "target_name") == "http-tls-toggle" {
+				t.Error("stale HTTP cert chain expiry still present after tls_emit_cert_metrics=false")
+			}
+		}
+	}
+}
+
 func TestRecord_HTTPResponseTruncated(t *testing.T) {
 	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 	target := makeTarget("val-http-truncated", "https://example.com", config.ProbeTypeHTTP, nil)
@@ -1471,6 +1573,7 @@ func TestRecord_StaleCertExpiryCleared_HTTP(t *testing.T) {
 	target := makeTarget("stale-cert-http", "https://example.com", config.ProbeTypeHTTP, map[string]string{
 		"service": "web",
 	})
+	target.ProbeOpts.TLSEmitCertMetrics = true
 
 	// First: success with cert.
 	m.Record(target, probe.ProbeResult{

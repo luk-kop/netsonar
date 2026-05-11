@@ -151,6 +151,7 @@ type ProbeOptions struct {
 	ExpectedProxyConnectStatusCodes []int             `yaml:"expected_proxy_connect_status_codes"`
 	FollowRedirects                 bool              `yaml:"follow_redirects"`
 	TLSSkipVerify                   bool              `yaml:"tls_skip_verify"`
+	TLSEmitCertMetrics              bool              `yaml:"tls_emit_cert_metrics"`
 	ResponseBodyLimitBytes          int64             `yaml:"response_body_limit_bytes"`
 	RequestBodyBytes                int64             `yaml:"request_body_bytes"`
 
@@ -447,6 +448,45 @@ func validateProbeOpts(t TargetConfig) error {
 	}
 	if len(t.ProbeOpts.ExpectedProxyConnectStatusCodes) > 0 && t.ProbeType != ProbeTypeProxyConnect {
 		return fmt.Errorf("target %q: expected_proxy_connect_status_codes is supported only for probe_type 'proxy_connect'", t.Name)
+	}
+	if t.ProbeOpts.TLSEmitCertMetrics && t.ProbeType != ProbeTypeHTTP {
+		return fmt.Errorf("target %q: tls_emit_cert_metrics is supported only for probe_type 'http'", t.Name)
+	}
+	if t.ProbeOpts.Method != "" && t.ProbeType != ProbeTypeHTTP && t.ProbeType != ProbeTypeHTTPBody {
+		return fmt.Errorf("target %q: method is supported only for probe_type 'http' or 'http_body'", t.Name)
+	}
+	if len(t.ProbeOpts.Headers) > 0 && t.ProbeType != ProbeTypeHTTP && t.ProbeType != ProbeTypeHTTPBody {
+		return fmt.Errorf("target %q: headers is supported only for probe_type 'http' or 'http_body'", t.Name)
+	}
+	if t.ProbeOpts.FollowRedirects && t.ProbeType != ProbeTypeHTTP && t.ProbeType != ProbeTypeHTTPBody {
+		return fmt.Errorf("target %q: follow_redirects is supported only for probe_type 'http' or 'http_body'", t.Name)
+	}
+	if t.ProbeOpts.TLSSkipVerify && t.ProbeType != ProbeTypeHTTP && t.ProbeType != ProbeTypeHTTPBody && t.ProbeType != ProbeTypeTLSCert {
+		return fmt.Errorf("target %q: tls_skip_verify is supported only for probe_type 'http', 'http_body', or 'tls_cert'", t.Name)
+	}
+	if len(t.ProbeOpts.ExpectedStatusCodes) > 0 && t.ProbeType != ProbeTypeHTTP && t.ProbeType != ProbeTypeHTTPBody && t.ProbeType != ProbeTypeProxyConnect {
+		return fmt.Errorf("target %q: expected_status_codes is supported only for probe_type 'http' or 'http_body'", t.Name)
+	}
+	if t.ProbeOpts.ResponseBodyLimitBytes > 0 && t.ProbeType != ProbeTypeHTTP {
+		return fmt.Errorf("target %q: response_body_limit_bytes is supported only for probe_type 'http'", t.Name)
+	}
+	if (t.ProbeOpts.BodyMatchRegex != "" || t.ProbeOpts.BodyMatchString != "") && t.ProbeType != ProbeTypeHTTPBody {
+		return fmt.Errorf("target %q: body_match_regex and body_match_string are supported only for probe_type 'http_body'", t.Name)
+	}
+	if (t.ProbeOpts.PingCount != 0 || t.ProbeOpts.PingIntervalSec != 0) && t.ProbeType != ProbeTypeICMP {
+		return fmt.Errorf("target %q: ping_count and ping_interval are supported only for probe_type 'icmp'", t.Name)
+	}
+	if (len(t.ProbeOpts.ICMPPayloadSizes) > 0 ||
+		t.ProbeOpts.ExpectedMinMTU != 0 ||
+		t.ProbeOpts.MTURetries != 0 ||
+		t.ProbeOpts.MTUPerAttemptTimeout != 0) && t.ProbeType != ProbeTypeMTU {
+		return fmt.Errorf("target %q: icmp_payload_sizes, expected_min_mtu, mtu_retries, and mtu_per_attempt_timeout are supported only for probe_type 'mtu'", t.Name)
+	}
+	if (t.ProbeOpts.DNSQueryName != "" ||
+		t.ProbeOpts.DNSQueryType != "" ||
+		t.ProbeOpts.DNSServer != "" ||
+		len(t.ProbeOpts.DNSExpectedResults) > 0) && t.ProbeType != ProbeTypeDNS {
+		return fmt.Errorf("target %q: dns_query_name, dns_query_type, dns_server, and dns_expected are supported only for probe_type 'dns'", t.Name)
 	}
 
 	switch t.ProbeType {

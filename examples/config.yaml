@@ -85,6 +85,7 @@ targets:
       # headers:
       #   X-Custom: "value"
       follow_redirects: false
+      tls_emit_cert_metrics: true
       expected_status_codes: []
       # Optional. 0 or omitted uses the 1 MiB default response body read cap.
       # response_body_limit_bytes: 2097152
@@ -103,6 +104,7 @@ targets:
     probe_opts:
       method: GET
       follow_redirects: false
+      tls_emit_cert_metrics: true
       expected_status_codes: []
       # For authenticated proxies, use: http://user:pass@proxy:port
       proxy_url: "http://infra-proxy.example.internal:8888"

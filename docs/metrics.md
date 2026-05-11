@@ -61,7 +61,7 @@ The agent registers three dynamic labels: `service`, `scope`, `impact`. The `bas
 Probe metric names follow the pattern `probe_<domain>_<measurement>_<unit>`, where `<domain>` identifies **what is being measured**, not which probe type emits the metric.
 
 - **`probe_http_*`** — metrics about the HTTP protocol layer (status code, body match, response truncation).
-- **`probe_tls_*`** — metrics about TLS certificates. Emitted by both `http` and `tls_cert` probe types, because both observe TLS certificates during their operation.
+- **`probe_tls_*`** — metrics about TLS certificates. Emitted by `tls_cert` probes and by `http` probes when `probe_opts.tls_emit_cert_metrics: true`, because both observe TLS certificates during their operation.
 - **`probe_icmp_*`** — metrics about ICMP echo behaviour (RTT, packet loss). Emitted by both `icmp` and `mtu` probe types, because MTU probes use ICMP echo requests internally.
 - **`probe_mtu_*`** — metrics specific to path MTU discovery (discovered MTU bytes, state).
 - **`probe_dns_*`** — metrics about DNS resolution (resolve time, result match).
@@ -84,8 +84,8 @@ The following table shows which probe types emit each metric:
 | `probe_http_response_truncated` | `http_` | http |
 | `probe_http_body_match` | `http_` | http_body |
 | `probe_proxy_connect_status_code` | `proxy_` | proxy_connect, tls_cert (with `proxy_url`), http (with `proxy_url`, `https://` target), http_body (with `proxy_url`, `https://` target) |
-| `probe_tls_cert_expiry_timestamp_seconds` | `tls_` | http, tls_cert |
-| `probe_tls_cert_chain_expiry_timestamp_seconds` | `tls_` | http, tls_cert |
+| `probe_tls_cert_expiry_timestamp_seconds` | `tls_` | http (when `tls_emit_cert_metrics=true`), tls_cert |
+| `probe_tls_cert_chain_expiry_timestamp_seconds` | `tls_` | http (when `tls_emit_cert_metrics=true`), tls_cert |
 | `probe_icmp_packet_loss_ratio` | `icmp_` | icmp |
 | `probe_icmp_avg_rtt_seconds` | `icmp_` | icmp, mtu |
 | `probe_icmp_stddev_rtt_seconds` | `icmp_` | icmp |
@@ -225,7 +225,7 @@ This applies when zero would be misleading as an in-band sentinel. For example:
 - ICMP average RTT is meaningful only when at least one echo reply was received
 - ICMP RTT standard deviation is meaningful only when at least two echo replies were received
 - HTTP status code is meaningful only when an HTTP response was received
-- TLS certificate expiry is meaningful only when a certificate was observed
+- TLS certificate expiry is meaningful only when a certificate was observed and, for `http` probes, `tls_emit_cert_metrics` is enabled
 - DNS match result is meaningful only when the comparison was actually evaluated
 
 The RTT rules above apply to both ICMP and MTU probe paths, since MTU probing uses ICMP echo internally.
@@ -266,8 +266,8 @@ Do not treat absence of a conditional value metric as a generic probe failure si
 | `probe_proxy_connect_status_code` | conditional | a proxy CONNECT response was received in the latest probe result | no proxy CONNECT response was received in the latest probe result (no proxy hop, or proxy connection failed before a response) |
 | `probe_http_response_truncated` | conditional | truncation evaluation was performed in the latest probe result | truncation was not evaluable in the latest probe result |
 | `probe_http_body_match` | conditional | body evaluation was performed in the latest probe result | body evaluation was not performed in the latest probe result |
-| `probe_tls_cert_expiry_timestamp_seconds` | conditional | a certificate was observed in the latest probe result | no certificate was observed in the latest probe result |
-| `probe_tls_cert_chain_expiry_timestamp_seconds` | conditional | peer certificates were observed in the latest probe result | no peer certificates were observed in the latest probe result |
+| `probe_tls_cert_expiry_timestamp_seconds` | conditional | a certificate was observed in the latest probe result and, for `http` probes, `tls_emit_cert_metrics=true` | no certificate was observed in the latest probe result, or HTTP TLS cert metrics are disabled |
+| `probe_tls_cert_chain_expiry_timestamp_seconds` | conditional | peer certificates were observed in the latest probe result and, for `http` probes, `tls_emit_cert_metrics=true` | no peer certificates were observed in the latest probe result, or HTTP TLS cert metrics are disabled |
 | `probe_icmp_packet_loss_ratio` | always (ICMP probes) | every ICMP probe result | unexpected for an active ICMP target |
 | `probe_icmp_avg_rtt_seconds` | conditional | at least one ICMP echo reply was observed in the latest probe result | no RTT was observed in the latest probe result |
 | `probe_icmp_stddev_rtt_seconds` | conditional | at least two ICMP echo replies were observed in the latest probe result | RTT variation was not observable in the latest probe result |

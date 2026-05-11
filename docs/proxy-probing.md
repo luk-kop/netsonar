@@ -101,7 +101,7 @@ This means a proxy can successfully forward regular HTTP traffic to a domain whi
 This is the recommended approach for testing proxy connectivity because:
 
 - It tests the proxy the way clients actually use it (curl, wget, apt, application code)
-- It provides full HTTP metrics: status code, phase timing breakdown, and TLS certificate expiry
+- It provides full HTTP metrics: status code and phase timing breakdown, with TLS certificate expiry when `tls_emit_cert_metrics: true`
 - It works with standard forward proxy configurations without requiring special CONNECT allowlists
 
 ### TLS Certificate Probe with proxy_url
