@@ -1812,8 +1812,24 @@ targets:
 	}
 }
 
-func TestLoadConfig_HTTPRegexValidationDoesNotApplyToHTTPProbe(t *testing.T) {
-	yaml := `
+func TestLoadConfig_BodyMatchOptionsRejectedForHTTPProbe(t *testing.T) {
+	tests := []struct {
+		name string
+		opt  string
+	}{
+		{
+			name: "regex",
+			opt:  `body_match_regex: "[invalid(regex"`,
+		},
+		{
+			name: "string",
+			opt:  `body_match_string: ok`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			yaml := fmt.Sprintf(`
 agent:
   default_interval: 30s
 
@@ -1823,11 +1839,16 @@ targets:
     probe_type: http
     timeout: 5s
     probe_opts:
-      body_match_regex: "[invalid(regex"
-`
-	_, err := LoadConfig(writeConfigFile(t, yaml))
-	if err != nil {
-		t.Fatalf("expected no error because body_match_regex is only validated for http_body, got: %v", err)
+      %s
+`, tt.opt)
+			_, err := LoadConfig(writeConfigFile(t, yaml))
+			if err == nil {
+				t.Fatal("expected error for body match option on http, got nil")
+			}
+			if !strings.Contains(err.Error(), "body_match_regex") || !strings.Contains(err.Error(), "body_match_string") || !strings.Contains(err.Error(), "probe_type 'http_body'") {
+				t.Errorf("error = %q, want it to mention body match options and probe_type 'http_body'", err.Error())
+			}
+		})
 	}
 }
 
@@ -1906,6 +1927,136 @@ targets:
 	}
 	if !strings.Contains(err.Error(), "expected_status_codes") || !strings.Contains(err.Error(), "expected_proxy_connect_status_codes") {
 		t.Fatalf("error = %q, want it to mention both status fields", err.Error())
+	}
+}
+
+func TestLoadConfig_UnsupportedNonZeroProbeOptions(t *testing.T) {
+	tests := []struct {
+		name      string
+		probeType string
+		address   string
+		opts      string
+		want      string
+	}{
+		{
+			name:      "method on tcp",
+			probeType: "tcp",
+			address:   "example.com:443",
+			opts:      "      method: GET\n",
+			want:      "method",
+		},
+		{
+			name:      "headers on dns",
+			probeType: "dns",
+			address:   "8.8.8.8:53",
+			opts:      "      headers:\n        X-Test: value\n",
+			want:      "headers",
+		},
+		{
+			name:      "follow redirects on tls cert",
+			probeType: "tls_cert",
+			address:   "example.com:443",
+			opts:      "      follow_redirects: true\n",
+			want:      "follow_redirects",
+		},
+		{
+			name:      "tls skip verify on tcp",
+			probeType: "tcp",
+			address:   "example.com:443",
+			opts:      "      tls_skip_verify: true\n",
+			want:      "tls_skip_verify",
+		},
+		{
+			name:      "expected status codes on tls cert",
+			probeType: "tls_cert",
+			address:   "example.com:443",
+			opts:      "      expected_status_codes: [200]\n",
+			want:      "expected_status_codes",
+		},
+		{
+			name:      "response body limit on http body",
+			probeType: "http_body",
+			address:   "https://example.com",
+			opts: "      body_match_string: ok\n" +
+				"      response_body_limit_bytes: 1024\n",
+			want: "response_body_limit_bytes",
+		},
+		{
+			name:      "ping options on tcp",
+			probeType: "tcp",
+			address:   "example.com:443",
+			opts: "      ping_count: 3\n" +
+				"      ping_interval: 0.1\n",
+			want: "ping_count",
+		},
+		{
+			name:      "mtu options on icmp",
+			probeType: "icmp",
+			address:   "192.0.2.1",
+			opts: "      icmp_payload_sizes: [1472, 1372]\n" +
+				"      expected_min_mtu: 1400\n",
+			want: "icmp_payload_sizes",
+		},
+		{
+			name:      "dns options on http",
+			probeType: "http",
+			address:   "https://example.com",
+			opts: "      dns_query_name: example.com\n" +
+				"      dns_query_type: A\n",
+			want: "dns_query_name",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			yaml := fmt.Sprintf(`
+agent:
+  default_interval: 30s
+
+targets:
+  - name: %q
+    address: %q
+    probe_type: %s
+    timeout: 5s
+    probe_opts:
+%s`, tt.name, tt.address, tt.probeType, tt.opts)
+			_, err := LoadConfig(writeConfigFile(t, yaml))
+			if err == nil {
+				t.Fatalf("expected error for unsupported %s, got nil", tt.want)
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error = %q, want it to mention %s", err.Error(), tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadConfig_UnsupportedZeroValueProbeOptionsAccepted(t *testing.T) {
+	yaml := `
+agent:
+  default_interval: 30s
+
+targets:
+  - name: "tcp-zero-value-bools"
+    address: "example.com:443"
+    probe_type: tcp
+    timeout: 5s
+    probe_opts:
+      follow_redirects: false
+      tls_skip_verify: false
+      ping_count: 0
+      ping_interval: 0
+      icmp_payload_sizes: []
+      expected_min_mtu: 0
+      mtu_retries: 0
+      mtu_per_attempt_timeout: 0s
+      dns_query_name: ""
+      dns_query_type: ""
+      dns_server: ""
+      dns_expected: []
+`
+	if _, err := LoadConfig(writeConfigFile(t, yaml)); err != nil {
+		t.Fatalf("expected no error for unsupported zero-value options, got: %v", err)
 	}
 }
 
@@ -2179,6 +2330,72 @@ targets:
 		}
 		if got := cfg.Targets[0].ProbeOpts.RequestBodyBytes; got != 65536 {
 			t.Errorf("RequestBodyBytes = %d, want 65536", got)
+		}
+	})
+}
+
+func TestLoadConfig_HTTPEmitTLSCertMetrics(t *testing.T) {
+	t.Run("default false", func(t *testing.T) {
+		yaml := `
+agent:
+  default_interval: 30s
+
+targets:
+  - name: "http-default-tls-cert-metrics"
+    address: "https://example.com"
+    probe_type: http
+    timeout: 5s
+`
+		cfg, err := LoadConfig(writeConfigFile(t, yaml))
+		if err != nil {
+			t.Fatalf("expected no error for default tls_emit_cert_metrics, got: %v", err)
+		}
+		if cfg.Targets[0].ProbeOpts.TLSEmitCertMetrics {
+			t.Fatal("TLSEmitCertMetrics = true, want false by default")
+		}
+	})
+
+	t.Run("http true preserved", func(t *testing.T) {
+		yaml := `
+agent:
+  default_interval: 30s
+
+targets:
+  - name: "http-enabled-tls-cert-metrics"
+    address: "https://example.com"
+    probe_type: http
+    timeout: 5s
+    probe_opts:
+      tls_emit_cert_metrics: true
+`
+		cfg, err := LoadConfig(writeConfigFile(t, yaml))
+		if err != nil {
+			t.Fatalf("expected no error for tls_emit_cert_metrics on http, got: %v", err)
+		}
+		if !cfg.Targets[0].ProbeOpts.TLSEmitCertMetrics {
+			t.Fatal("TLSEmitCertMetrics = false, want true")
+		}
+	})
+
+	t.Run("non-http true rejected", func(t *testing.T) {
+		yaml := `
+agent:
+  default_interval: 30s
+
+targets:
+  - name: "tls-cert-with-http-cert-metrics"
+    address: "example.com:443"
+    probe_type: tls_cert
+    timeout: 5s
+    probe_opts:
+      tls_emit_cert_metrics: true
+`
+		_, err := LoadConfig(writeConfigFile(t, yaml))
+		if err == nil {
+			t.Fatal("expected error for tls_emit_cert_metrics on tls_cert, got nil")
+		}
+		if !strings.Contains(err.Error(), "tls_emit_cert_metrics") || !strings.Contains(err.Error(), "probe_type 'http'") {
+			t.Errorf("error = %q, want it to mention tls_emit_cert_metrics and probe_type 'http'", err.Error())
 		}
 	})
 }

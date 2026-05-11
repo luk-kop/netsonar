@@ -165,14 +165,22 @@ flowchart TD
 - `icmp` and `mtu` reject literal IPv6 addresses because these probes currently use IPv4-only ICMP sockets
 - `icmp_payload_sizes` must be sorted in descending order
 - `dns_query_type` must be one of: `A`, `AAAA`, `CNAME`
+- Non-zero ICMP options `ping_count` and `ping_interval` are supported only by `icmp`
+- Non-zero MTU options `icmp_payload_sizes`, `expected_min_mtu`, `mtu_retries`, and `mtu_per_attempt_timeout` are supported only by `mtu`
+- Non-empty DNS options `dns_query_name`, `dns_query_type`, `dns_server`, and `dns_expected` are supported only by `dns`
 - For `http` and `http_body`, `method` must be one of: `GET`, `HEAD`, `POST`; an empty value defaults to `GET`
 - For `http` and `http_body`, `headers` may define custom request headers as string key/value pairs
 - For `http` and `http_body`, every `expected_status_codes` value must be a valid HTTP status code in the range `100`-`599`; an empty list accepts any response that completes according to the probe's body-read semantics
+- Non-empty HTTP request options are rejected on unsupported probe types: `method`, `headers`, `follow_redirects: true`, and non-empty `expected_status_codes` are supported only by `http` and `http_body`
+- `tls_skip_verify: true` is supported only by `http`, `http_body`, and `tls_cert`
 - For `http`, `response_body_limit_bytes` must be >= 0. `0` or omitted uses the 1 MiB default; positive values set the capped response body read limit in bytes. Larger bodies do not fail the probe, and `probe_http_response_truncated` reports the truncation.
 - Large `response_body_limit_bytes` values are legal but increase bandwidth usage and can lengthen `probe_duration_seconds` and `probe_phase_duration_seconds{phase="transfer"}` for large responses.
+- Positive `response_body_limit_bytes` is supported only by `http`
 - For `http`, `request_body_bytes` must be >= 0 and <= 16777216 (16 MiB). `0` or omitted sends no generated request body; positive values require explicit `method: POST`.
 - `request_body_bytes` is rejected for `http_body` and all non-HTTP probe types.
+- `tls_emit_cert_metrics: true` is supported only for `http` probes. It emits `probe_tls_cert_*` metrics for HTTPS targets without changing TLS handshake or certificate verification behavior.
 - For `http_body`, `body_match_regex` must be a valid Go regular expression
+- `body_match_regex` and `body_match_string` are supported only by `http_body`
 - `proxy_url` is required when `probe_type` is `proxy_connect`; optional for `http`, `http_body`, and `tls_cert`; rejected when non-empty for `tcp`, `icmp`, `mtu`, and `dns`
 - For `proxy_connect`, `address` must be `host:port`, not a URL. CONNECT policy is host-and-port based and does not include an HTTP path.
 - For `proxy_connect`, `expected_proxy_connect_status_codes` may list valid HTTP status codes in the range `100`-`599`; when set, `probe_success=1` means the proxy returned one of those CONNECT response statuses. Use this for explicit negative tests such as expected Squid `403` denies.

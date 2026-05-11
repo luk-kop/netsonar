@@ -19,7 +19,7 @@ Emits `probe_phase_duration_seconds` with `phase="tcp_connect"`, plus `phase="dn
 
 ## HTTP/HTTPS
 
-Full HTTP request with `httptrace` phase breakdown (DNS resolve, TCP connect, TLS handshake, request write, TTFB, transfer). Extracts the earliest TLS certificate expiry from the peer chain for HTTPS targets. Supports optional proxy routing via `proxy_url`.
+Full HTTP request with `httptrace` phase breakdown (DNS resolve, TCP connect, TLS handshake, request write, TTFB, transfer). For HTTPS targets, can optionally emit TLS certificate expiry metrics from the observed peer chain. Supports optional proxy routing via `proxy_url`.
 
 The HTTP probe does not inspect response body content. It discards and reads at
 most the effective response body limit: `probe_opts.response_body_limit_bytes` when set,
@@ -41,6 +41,7 @@ Use `http_body` when response content must be validated.
       X-Custom: "value"
     follow_redirects: false         # Follow HTTP redirects (default: false)
     tls_skip_verify: false          # Skip TLS certificate verification
+    tls_emit_cert_metrics: false    # Emit TLS certificate metrics for HTTPS targets
     expected_status_codes: []       # Empty = accept any status code
     response_body_limit_bytes: 0    # 0/omitted = 1 MiB capped body read
     request_body_bytes: 0           # 0/omitted = no generated request body
@@ -55,6 +56,7 @@ Use `http_body` when response content must be validated.
 | `headers`                   | `map[string]string` | `{}`          | Custom request headers. Sent on every probe request.                                                                 |
 | `follow_redirects`          | bool                | `false`       | Follow 3xx redirects. When `false`, the redirect response is treated as the final response.                          |
 | `tls_skip_verify`           | bool                | `false`       | Skip TLS certificate verification on the **target** connection (HTTPS only). Does not apply to `https://` proxies.   |
+| `tls_emit_cert_metrics`     | bool                | `false`       | Emit `probe_tls_cert_*` metrics for HTTPS targets. This does not affect TLS handshake, certificate verification, or `tls_handshake` phase metrics. |
 | `expected_status_codes`     | `[]int`             | `[]`          | Allow-list of HTTP status codes that count as success. Empty list accepts any status. See subsection below.          |
 | `response_body_limit_bytes` | int                 | `0` (= 1 MiB) | Cap on response bytes read and discarded. `0` or omitted falls back to the 1 MiB built-in default.                   |
 | `request_body_bytes`        | int                 | `0`           | Generate an outbound request body of exactly this size. Requires `method: POST`. Capped at 16 MiB. See below.        |
@@ -468,7 +470,7 @@ Use `http` with `proxy_url` when:
 
 - Testing that a forward proxy can reach a target endpoint (the common case)
 - Verifying proxy connectivity for HTTP/HTTPS traffic as clients actually use it
-- You need full HTTP metrics (status code, phase timing, TLS certificate expiry)
+- You need full HTTP metrics (status code and phase timing, with TLS certificate expiry when `tls_emit_cert_metrics: true`)
 
 Use `tls_cert` with `proxy_url` when:
 

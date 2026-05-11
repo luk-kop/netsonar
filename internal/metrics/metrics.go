@@ -342,7 +342,11 @@ func (m *MetricsExporter) Record(target config.TargetConfig, result probe.ProbeR
 		} else {
 			m.httpStatusCode.Delete(labels)
 		}
-		m.recordTLSResult(result, labels)
+		if target.ProbeOpts.TLSEmitCertMetrics {
+			m.recordTLSResult(result, labels)
+		} else {
+			m.clearTLSResult(labels)
+		}
 		if result.HTTPTruncationEvaluated {
 			truncatedVal := 0.0
 			if result.HTTPResponseTruncated {
@@ -399,12 +403,10 @@ func (m *MetricsExporter) Record(target config.TargetConfig, result probe.ProbeR
 }
 
 func (m *MetricsExporter) recordTLSResult(result probe.ProbeResult, labels prometheus.Labels) {
-	m.tlsCertChainExpiry.DeletePartialMatch(labels)
+	m.clearTLSResult(labels)
 
 	if result.CertObserved {
 		m.tlsCertExpiry.With(labels).Set(float64(result.CertExpiry.Unix()))
-	} else {
-		m.tlsCertExpiry.Delete(labels)
 	}
 
 	for i, cert := range result.TLSCertificates {
@@ -416,6 +418,11 @@ func (m *MetricsExporter) recordTLSResult(result probe.ProbeResult, labels prome
 		certLabels["cert_role"] = certificateRole(i, cert)
 		m.tlsCertChainExpiry.With(certLabels).Set(float64(cert.NotAfter.Unix()))
 	}
+}
+
+func (m *MetricsExporter) clearTLSResult(labels prometheus.Labels) {
+	m.tlsCertExpiry.Delete(labels)
+	m.tlsCertChainExpiry.DeletePartialMatch(labels)
 }
 
 func certificateRole(index int, cert *x509.Certificate) string {
