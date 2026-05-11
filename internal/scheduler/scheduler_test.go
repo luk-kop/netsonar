@@ -858,6 +858,84 @@ func TestExecuteProbe_RecordsNoTimedOutOnSuccess(t *testing.T) {
 	}
 }
 
+func TestProbeTimedOut(t *testing.T) {
+	expiredCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	tests := []struct {
+		name    string
+		ctx     context.Context
+		timeout time.Duration
+		elapsed time.Duration
+		result  probe.ProbeResult
+		want    bool
+	}{
+		{
+			name:    "result already marked",
+			ctx:     context.Background(),
+			timeout: time.Second,
+			elapsed: time.Millisecond,
+			result:  probe.ProbeResult{TimedOut: true},
+			want:    true,
+		},
+		{
+			name:    "elapsed reached timeout",
+			ctx:     context.Background(),
+			timeout: time.Second,
+			elapsed: time.Second,
+			want:    true,
+		},
+		{
+			name:    "elapsed below timeout",
+			ctx:     context.Background(),
+			timeout: time.Second,
+			elapsed: time.Second - time.Nanosecond,
+			want:    false,
+		},
+		{
+			name:    "zero timeout does not infer from elapsed",
+			ctx:     context.Background(),
+			timeout: 0,
+			elapsed: time.Second,
+			want:    false,
+		},
+		{
+			name:    "cancelled parent context is not timeout",
+			ctx:     expiredCtx,
+			timeout: time.Second,
+			elapsed: time.Millisecond,
+			want:    false,
+		},
+	}
+
+	deadlineCtx, deadlineCancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer deadlineCancel()
+	<-deadlineCtx.Done()
+	tests = append(tests, struct {
+		name    string
+		ctx     context.Context
+		timeout time.Duration
+		elapsed time.Duration
+		result  probe.ProbeResult
+		want    bool
+	}{
+		name:    "context deadline exceeded",
+		ctx:     deadlineCtx,
+		timeout: time.Second,
+		elapsed: time.Millisecond,
+		want:    true,
+	})
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := probeTimedOut(tt.ctx, tt.timeout, tt.elapsed, tt.result)
+			if got != tt.want {
+				t.Fatalf("probeTimedOut() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestExecuteProbe_DiscardsResultAfterContextCancel(t *testing.T) {
 	// This test verifies that when the parent context is cancelled (e.g. by
 	// Reload removing a target) while a probe is in flight, the result is

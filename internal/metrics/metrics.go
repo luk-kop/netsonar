@@ -117,7 +117,7 @@ func NewMetricsExporter(tagKeys []string, opts ExporterOptions) *MetricsExporter
 
 		probeTimedOut: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "probe_timed_out",
-			Help: "1 if the scheduler-observed probe context deadline was exceeded, 0 otherwise.",
+			Help: "1 if the probe reached or exceeded its configured timeout, 0 otherwise.",
 		}, commonLabels),
 
 		probePhaseDuration: prometheus.NewGaugeVec(prometheus.GaugeOpts{

@@ -136,7 +136,7 @@ ICMP probes are IPv4-only in the current implementation. Literal IPv6 addresses 
 - name: "ssm-icmp"
   address: "ssm.eu-central-1.amazonaws.com"
   probe_type: icmp
-  timeout: 5s
+  timeout: 10s
   probe_opts:
     ping_count: 5                   # Number of ICMP echo requests
     ping_interval: 1.0              # Seconds between pings
@@ -148,6 +148,53 @@ ICMP probes are IPv4-only in the current implementation. Literal IPv6 addresses 
 |-----------------|----------------|---------|--------------------------------------------------------------------------------------------------------------|
 | `ping_count`    | int            | `1`     | Number of ICMP echo requests to send. Higher values increase RTT and loss accuracy at the cost of duration.  |
 | `ping_interval` | float seconds  | `1.0`   | Seconds between consecutive echo requests. Only meaningful when `ping_count > 1`.                            |
+
+### Sizing `target.timeout` for multi-ping sequences
+
+The full ICMP probe takes at least `(ping_count - 1) × ping_interval + Σ RTT`
+wall-clock seconds. The probe's context deadline is shared across all pings in
+the sequence, so set `target.timeout` with comfortable headroom over this
+minimum. If the deadline fires mid-sequence, only the early echoes complete
+and `ICMPRepliesObserved` ends up below `ping_count`. This affects two
+metrics, both of which use **current-observation semantics** (see
+[docs/metrics.md](./metrics.md)):
+
+- `probe_icmp_avg_rtt_seconds` requires `ICMPRepliesObserved ≥ 1` — deleted
+  from `/metrics` when no echo replies were received.
+- `probe_icmp_stddev_rtt_seconds` requires `ICMPRepliesObserved ≥ 2` —
+  deleted from `/metrics` when fewer than two replies were received. A common
+  symptom is the metric flickering in and out as borderline `target.timeout`
+  cuts off the last ping or two.
+
+Rule of thumb: `target.timeout ≥ (ping_count - 1) × ping_interval + 2s` for
+typical LAN/VPC paths. Add more for high-RTT or cross-region targets, and
+remember that `target.timeout` must also be `≤ target.interval` (validated at
+config load time).
+
+#### Troubleshooting: `probe_icmp_stddev_rtt_seconds` not in `/metrics`
+
+If the metric is missing for a target that is otherwise healthy
+(`probe_success = 1`, `probe_icmp_packet_loss_ratio = 0`), the cause is
+almost always `ICMPRepliesObserved < 2`. Check in this order:
+
+1. **Default `ping_count = 1`.** This is the most common cause. If
+   `probe_opts.ping_count` is not set explicitly for the target, the agent
+   sends a single echo per probe — and a stddev over one sample is undefined,
+   so the series is intentionally not emitted. Cross-check from `/metrics`
+   without reading the config: `probe_duration_seconds ≈ probe_icmp_avg_rtt_seconds`
+   confirms a single ping was sent. With `ping_count = 5, ping_interval = 1s`,
+   `probe_duration_seconds` would be at least ~4 s.
+2. **`probe_opts` indentation.** YAML silently ignores `ping_count` placed
+   outside the `probe_opts:` block. If raising `ping_count` does not change
+   `probe_duration_seconds` after a config reload, indentation is the
+   prime suspect.
+3. **`target.timeout` too tight for the sequence.** See the sizing rule
+   above. The probe completes early with `ICMPRepliesObserved` below
+   `ping_count`, and if it falls to 1 or 0 the stddev series disappears.
+4. **Packet loss across the sequence.** If `probe_icmp_packet_loss_ratio`
+   is high enough that fewer than two replies came back, stddev cannot be
+   computed. The avg_rtt and stddev metrics will toggle independently as
+   conditions change.
 
 ## MTU/PMTUD
 
@@ -335,6 +382,8 @@ Direct probes emit `probe_phase_duration_seconds` with `phase="tcp_connect"` and
 ## HTTP Body Validation
 
 HTTP request with regex or substring match on the response body. The probe succeeds (`probe_success=1`) when **both** conditions are met: the response body matches the configured pattern, and the response status code satisfies the `expected_status_codes` rule (empty list accepts any status; non-empty list requires the status code to be present). When body evaluation completes, the match result is also reported separately via `probe_http_body_match` for diagnostic visibility. If no HTTP response is received or the body cannot be evaluated, `probe_http_body_match` is absent. The agent reads at most 1 MiB of response body; larger responses fail the probe. Supports custom request headers via `headers` and optional proxy routing via `proxy_url`.
+
+`http_body` probes do not emit HTTP phase timings. In the main Grafana status table, successful `http_body` probes use the full `probe_duration_seconds` value as Primary Latency and label the Latency Signal as `http_body_duration`; failed `http_body` probes show Primary Latency as `N/A`.
 
 At least one of `body_match_regex` or `body_match_string` must be set — a target without either is rejected at config load time. `body_match_regex` must be a valid Go regular expression. It is validated when the config is loaded and compiled once when the target prober is created. If both `body_match_regex` and `body_match_string` are set, the regex takes precedence.
 

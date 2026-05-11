@@ -267,7 +267,9 @@ func executeProbe(ctx context.Context, target config.TargetConfig, prober probe.
 	probeCtx, cancel := context.WithTimeout(ctx, target.Timeout)
 	defer cancel()
 
+	probeStart := time.Now()
 	result := prober.Probe(probeCtx, target)
+	probeElapsed := time.Since(probeStart)
 	// Check parent context after Probe returns: if the target was removed or
 	// changed during a slow probe (Reload/Stop called cancel on ctx), discard
 	// the result so we don't recreate Prometheus series after DeleteTarget.
@@ -276,9 +278,30 @@ func executeProbe(ctx context.Context, target config.TargetConfig, prober probe.
 	if ctx.Err() != nil {
 		return
 	}
-	result.TimedOut = errors.Is(probeCtx.Err(), context.DeadlineExceeded)
+	result.TimedOut = probeTimedOut(probeCtx, target.Timeout, probeElapsed, result)
 	m.Record(target, result)
 	logProbeResult(target, result, state)
+}
+
+// probeTimedOut classifies a probe execution as timed out when any of three
+// independent sources indicate the per-probe deadline was reached:
+//
+//  1. The prober self-reported via result.TimedOut (e.g. ICMP after all
+//     echoes timed out within their per-attempt budget).
+//  2. probeCtx.Err() observed context.DeadlineExceeded (strict check).
+//  3. Wall-clock elapsed time reached the configured timeout. This is a
+//     fallback for the race where net.Dialer's internal deadline timer fires
+//     before context.WithTimeout's own cancel goroutine has updated
+//     ctx.Err() — observed in practice for TCP probes against
+//     silently-dropping targets, where the dial returns "i/o timeout" before
+//     the context state catches up. Without the wall-clock fallback, such
+//     probes flicker between TimedOut=1 and TimedOut=0 across runs even
+//     though every run hit the deadline.
+func probeTimedOut(probeCtx context.Context, timeout time.Duration, elapsed time.Duration, result probe.ProbeResult) bool {
+	if result.TimedOut || errors.Is(probeCtx.Err(), context.DeadlineExceeded) {
+		return true
+	}
+	return timeout > 0 && elapsed >= timeout
 }
 
 func logProbeResult(target config.TargetConfig, result probe.ProbeResult, state *probeState) {
