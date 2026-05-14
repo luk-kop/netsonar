@@ -91,11 +91,19 @@ type ProbeResult struct {
 	// Phases contains per-phase timing for probes that expose a sub-phase
 	// breakdown. TCP and direct TLS cert emit dns_resolve for hostname
 	// targets, plus tcp_connect; direct TLS cert also emits tls_handshake.
-	// HTTP uses dns_resolve, tcp_connect, tls_handshake, request_write,
-	// ttfb, and transfer. Proxy and TLS cert via proxy use proxy_dial,
-	// proxy_tls, and proxy_connect; TLS cert via proxy also adds the target
-	// tls_handshake.
-	// Nil for probe types without meaningful sub-phases.
+	// HTTP and http_body direct use dns_resolve for hostname targets,
+	// tcp_connect, tls_handshake for https targets, request_write, ttfb,
+	// and transfer. HTTP and http_body through a proxy use proxy_dial
+	// (includes proxy DNS), optional proxy_tls for https proxies,
+	// proxy_connect for https targets, target tls_handshake for https
+	// targets, plus request_write, ttfb, and transfer; tcp_connect and
+	// dns_resolve are not emitted on the proxy path. ICMP and MTU emit
+	// dns_resolve for hostname targets and nothing else (they do not
+	// expose connection-setup sub-phases). Proxy and TLS cert via proxy
+	// use proxy_dial, proxy_tls, and proxy_connect; TLS cert via proxy
+	// also adds the target tls_handshake.
+	// Nil for probe types without meaningful sub-phases, and nil when no
+	// phase was observed (e.g. ICMP with a literal IPv4 target).
 	Phases map[string]time.Duration
 
 	// StatusCode is the HTTP response status code (HTTP probes only).
@@ -210,6 +218,55 @@ func addObservedPhase(phases map[string]time.Duration, phase string, end, start 
 		return
 	}
 	phases[phase] = safeSub(end, start)
+}
+
+// ipv4ResolveResult carries the outcome of resolveIPv4. dnsStart and dnsEnd
+// are set only when a DNS lookup was actually performed (i.e. the input was
+// a hostname). For literal IPv4 inputs (including IPv4-mapped IPv6 such as
+// ::ffff:192.0.2.1) both timestamps stay zero so callers can tell the phase
+// apart from an observed lookup without an extra flag.
+type ipv4ResolveResult struct {
+	addr     *net.IPAddr
+	dnsStart time.Time
+	dnsEnd   time.Time
+}
+
+// resolveIPv4 resolves an address to a single IPv4 destination using a
+// context-aware lookup. Literal IPv4 addresses (including IPv4-mapped IPv6
+// forms like ::ffff:192.0.2.1, which To4() returns non-nil for) take a fast
+// path and no DNS phase is recorded. Pure literal IPv6 is rejected because
+// ICMP and MTU probers are IPv4-only. Hostnames go through
+// net.DefaultResolver.LookupIP(ctx, "ip4", host) so the lookup respects the
+// context deadline, and the first returned IPv4 address is used.
+//
+// On failure the returned error is suitable for wrapping at the call site
+// with the operator-facing prefix "resolve IPv4 address: ...". When the
+// failure happens during hostname lookup, dnsStart and dnsEnd are populated
+// so callers can still emit PhaseDNSResolve.
+func resolveIPv4(ctx context.Context, address string) (ipv4ResolveResult, error) {
+	var result ipv4ResolveResult
+
+	if ip := net.ParseIP(address); ip != nil {
+		if ipv4 := ip.To4(); ipv4 != nil {
+			result.addr = &net.IPAddr{IP: ipv4}
+			return result, nil
+		}
+		return result, fmt.Errorf("IPv6 literal %q is not supported (IPv4-only prober)", address)
+	}
+
+	result.dnsStart = time.Now()
+	ips, err := net.DefaultResolver.LookupIP(ctx, "ip4", address)
+	result.dnsEnd = time.Now()
+	if err != nil {
+		return result, err
+	}
+	for _, ip := range ips {
+		if ipv4 := ip.To4(); ipv4 != nil {
+			result.addr = &net.IPAddr{IP: ipv4}
+			return result, nil
+		}
+	}
+	return result, fmt.Errorf("no IPv4 address found for %q", address)
 }
 
 type splitDialResult struct {

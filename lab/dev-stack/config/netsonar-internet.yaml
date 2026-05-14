@@ -10,7 +10,7 @@ agent:
     - scope
     - impact
     - target_region
-    - target_partition
+    - target_type
     - target_account
 
 targets:
@@ -22,10 +22,10 @@ targets:
       expected_status_codes: [200]
     tags:
       service: public-web
-      scope: internet
+      scope: external
       impact: low
       target_region: global
-      target_partition: internet
+      target_type: public
       target_account: public
 
   - name: internet-example-tcp-443
@@ -33,10 +33,10 @@ targets:
     probe_type: tcp
     tags:
       service: public-web
-      scope: internet
+      scope: external
       impact: low
       target_region: global
-      target_partition: internet
+      target_type: public
       target_account: public
 
   - name: internet-cloudflare-tcp-cross-region
@@ -44,10 +44,10 @@ targets:
     probe_type: tcp
     tags:
       service: public-web
-      scope: cross-region
+      scope: external
       impact: low
       target_region: global
-      target_partition: internet
+      target_type: public
       target_account: public
 
   - name: internet-google-dns-tcp-aws-regional
@@ -55,10 +55,10 @@ targets:
     probe_type: tcp
     tags:
       service: public-dns
-      scope: aws-regional
+      scope: external
       impact: low
       target_region: global
-      target_partition: internet
+      target_type: public
       target_account: public
 
   - name: internet-example-tls-cert
@@ -66,10 +66,10 @@ targets:
     probe_type: tls_cert
     tags:
       service: public-web
-      scope: internet
+      scope: external
       impact: low
       target_region: global
-      target_partition: internet
+      target_type: public
       target_account: public
 
   - name: internet-cloudflare-dns-a
@@ -81,10 +81,10 @@ targets:
       dns_server: "1.1.1.1:53"
     tags:
       service: public-dns
-      scope: internet
+      scope: external
       impact: low
       target_region: global
-      target_partition: internet
+      target_type: public
       target_account: public
 
   - name: internet-cloudflare-dns-match
@@ -97,10 +97,10 @@ targets:
       dns_expected: ["1.0.0.1", "1.1.1.1"]
     tags:
       service: public-dns
-      scope: internet
+      scope: external
       impact: low
       target_region: global
-      target_partition: internet
+      target_type: public
       target_account: public
 
   - name: internet-cloudflare-mtu
@@ -115,10 +115,10 @@ targets:
       mtu_per_attempt_timeout: 750ms
     tags:
       service: public-mtu
-      scope: internet
+      scope: external
       impact: low
       target_region: global
-      target_partition: internet
+      target_type: public
       target_account: public
 
   - name: internet-google-mtu
@@ -133,10 +133,10 @@ targets:
       mtu_per_attempt_timeout: 750ms
     tags:
       service: public-mtu
-      scope: internet
+      scope: external
       impact: low
       target_region: global
-      target_partition: internet
+      target_type: public
       target_account: public
 
   - name: internet-quad9-mtu
@@ -151,10 +151,10 @@ targets:
       mtu_per_attempt_timeout: 750ms
     tags:
       service: public-mtu
-      scope: internet
+      scope: external
       impact: low
       target_region: global
-      target_partition: internet
+      target_type: public
       target_account: public
 
   - name: internet-ripe-ping-mtu
@@ -169,10 +169,10 @@ targets:
       mtu_per_attempt_timeout: 750ms
     tags:
       service: public-mtu
-      scope: internet
+      scope: external
       impact: low
       target_region: global
-      target_partition: internet
+      target_type: public
       target_account: public
 
   - name: internet-badssl-expired-http
@@ -183,10 +183,10 @@ targets:
       expected_status_codes: [200]
     tags:
       service: public-tls-badssl
-      scope: internet
+      scope: external
       impact: low
       target_region: global
-      target_partition: internet
+      target_type: public
       target_account: public
 
   - name: internet-badssl-wrong-host-http
@@ -197,10 +197,10 @@ targets:
       expected_status_codes: [200]
     tags:
       service: public-tls-badssl
-      scope: internet
+      scope: external
       impact: low
       target_region: global
-      target_partition: internet
+      target_type: public
       target_account: public
 
   - name: internet-badssl-self-signed-http
@@ -211,10 +211,10 @@ targets:
       expected_status_codes: [200]
     tags:
       service: public-tls-badssl
-      scope: internet
+      scope: external
       impact: low
       target_region: global
-      target_partition: internet
+      target_type: public
       target_account: public
 
   - name: internet-badssl-untrusted-root-http
@@ -225,10 +225,10 @@ targets:
       expected_status_codes: [200]
     tags:
       service: public-tls-badssl
-      scope: internet
+      scope: external
       impact: low
       target_region: global
-      target_partition: internet
+      target_type: public
       target_account: public
 
   - name: internet-badssl-expired-cert-inspect
@@ -238,8 +238,8 @@ targets:
       tls_skip_verify: true
     tags:
       service: public-tls-badssl
-      scope: internet
+      scope: external
       impact: low
       target_region: global
-      target_partition: internet
+      target_type: public
       target_account: public

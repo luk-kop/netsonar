@@ -49,12 +49,12 @@ In dynamic mode, the effective maximum number of labels per probe metric series 
 ```yaml
 targets:
   - name: api-gw
-    tags: { service: api-gw, scope: same-region, impact: critical }
-  - name: bastion-cn
-    tags: { service: bastion, scope: cross-region }
+    tags: { service: api-gw, scope: local, impact: critical }
+  - name: bastion-public
+    tags: { service: bastion, scope: external }
 ```
 
-The agent registers three dynamic labels: `service`, `scope`, `impact`. The `bastion-cn` target gets `impact=""` because it does not define that key.
+The agent registers three dynamic labels: `service`, `scope`, `impact`. The `bastion-public` target gets `impact=""` because it does not define that key.
 
 ## Metric Naming Convention
 
@@ -79,7 +79,7 @@ The following table shows which probe types emit each metric:
 | `probe_timeout_seconds` | — | all |
 | `probe_interval_seconds` | — | all |
 | `probe_timed_out` | — | all |
-| `probe_phase_duration_seconds` | — | tcp, http, tls_cert, proxy_connect |
+| `probe_phase_duration_seconds` | — | tcp, http, http_body, tls_cert, icmp, mtu, proxy_connect |
 | `probe_http_status_code` | `http_` | http, http_body |
 | `probe_http_response_truncated` | `http_` | http |
 | `probe_http_body_match` | `http_` | http_body |
@@ -168,26 +168,70 @@ The `probe_phase_duration_seconds` metric uses a `phase` label with these values
 
 | Phase           | Probe Type | Description                          |
 |-----------------|------------|--------------------------------------|
-| `dns_resolve`   | TCP, HTTP, TLS cert | DNS resolution time for hostname targets |
-| `tcp_connect`   | TCP, HTTP, TLS cert | TCP connection establishment         |
-| `tls_handshake` | HTTPS, TLS cert | TLS handshake with the target |
-| `request_write` | HTTP       | Request write time after connection/TLS readiness |
-| `ttfb`          | HTTP       | Time to first byte after request write — see note below |
-| `transfer`      | HTTP       | Body read time up to the effective response body limit |
+| `dns_resolve`   | TCP, HTTP (direct), http_body (direct), TLS cert (direct), ICMP, MTU | DNS resolution time for hostname targets |
+| `tcp_connect`   | TCP, HTTP (direct), http_body (direct), TLS cert (direct) | TCP connection establishment |
+| `tls_handshake` | HTTPS (http, http_body) direct and proxy path, TLS cert (direct and via proxy) | TLS handshake with the target |
+| `request_write` | HTTP, http_body (direct and proxy path) | Request write time after connection/TLS readiness |
+| `ttfb`          | HTTP, http_body (direct and proxy path) | Time to first byte after request write — see note below |
+| `transfer`      | HTTP, http_body (direct and proxy path) | Body read time up to the effective response body limit |
+
+### Phase Matrix by Probe Type
+
+This table is the canonical reference for which `phase` label values can be
+emitted by each probe type and path. Conditional phases are emitted only when
+that part of the probe was reached and applies to the target.
+
+| Probe type / path | Condition | Possible emitted phases |
+|---|---|---|
+| `tcp` | hostname target | `dns_resolve`, `tcp_connect` |
+| `tcp` | literal IP target | `tcp_connect` |
+| `http` direct | `http://` target | `dns_resolve` for hostname targets, `tcp_connect`, `request_write`, `ttfb`, `transfer` |
+| `http` direct | `https://` target | `dns_resolve` for hostname targets, `tcp_connect`, `tls_handshake`, `request_write`, `ttfb`, `transfer` |
+| `http` proxy | `http://` target, `http://` proxy | `proxy_dial`, `request_write`, `ttfb`, `transfer` |
+| `http` proxy | `http://` target, `https://` proxy | `proxy_dial`, `proxy_tls`, `request_write`, `ttfb`, `transfer` |
+| `http` proxy | `https://` target, `http://` proxy | `proxy_dial`, `proxy_connect`, `tls_handshake`, `request_write`, `ttfb`, `transfer` |
+| `http` proxy | `https://` target, `https://` proxy | `proxy_dial`, `proxy_tls`, `proxy_connect`, `tls_handshake`, `request_write`, `ttfb`, `transfer` |
+| `http_body` direct | `http://` target | `dns_resolve` for hostname targets, `tcp_connect`, `request_write`, `ttfb`, `transfer` |
+| `http_body` direct | `https://` target | `dns_resolve` for hostname targets, `tcp_connect`, `tls_handshake`, `request_write`, `ttfb`, `transfer` |
+| `http_body` proxy | `http://` target, `http://` proxy | `proxy_dial`, `request_write`, `ttfb`, `transfer` |
+| `http_body` proxy | `http://` target, `https://` proxy | `proxy_dial`, `proxy_tls`, `request_write`, `ttfb`, `transfer` |
+| `http_body` proxy | `https://` target, `http://` proxy | `proxy_dial`, `proxy_connect`, `tls_handshake`, `request_write`, `ttfb`, `transfer` |
+| `http_body` proxy | `https://` target, `https://` proxy | `proxy_dial`, `proxy_tls`, `proxy_connect`, `tls_handshake`, `request_write`, `ttfb`, `transfer` |
+| `tls_cert` direct | hostname target | `dns_resolve`, `tcp_connect`, `tls_handshake` |
+| `tls_cert` direct | literal IP target | `tcp_connect`, `tls_handshake` |
+| `tls_cert` proxy | `http://` proxy | `proxy_dial`, `proxy_connect`, `tls_handshake` |
+| `tls_cert` proxy | `https://` proxy | `proxy_dial`, `proxy_tls`, `proxy_connect`, `tls_handshake` |
+| `proxy_connect` | `http://` proxy | `proxy_dial`, `proxy_connect` |
+| `proxy_connect` | `https://` proxy | `proxy_dial`, `proxy_tls`, `proxy_connect` |
+| `dns` | any target | none; DNS duration is emitted as `probe_dns_resolve_seconds`, not `probe_phase_duration_seconds` |
+| `icmp` | hostname target | `dns_resolve` |
+| `icmp` | literal IP target | none |
+| `mtu` | hostname target | `dns_resolve` |
+| `mtu` | literal IP target | none |
+
+`request_write`, `ttfb`, and `transfer` appear only for probe types that perform
+an HTTP request/response exchange (`http` and `http_body`). TCP,
+`proxy_connect`, and `tls_cert` probes stop at lower protocol layers, so those
+HTTP exchange phases are not emitted for them.
 
 ### TTFB semantics
 
-`request_write` is measured from the moment the connection is ready to send the HTTP request (after TCP for plain HTTP, after TLS handshake for HTTPS) until the request has been written. For large generated request bodies, upload time appears in this phase.
+`request_write` is measured from the moment the connection is ready to send the HTTP request (after TCP for plain HTTP, after TLS handshake for HTTPS, or after the last proxy-setup phase on the proxy path) until the request has been written. For large generated request bodies, upload time appears in this phase.
 
 `ttfb` is measured from request write completion until the first byte of the response is received. It captures server processing time plus response-header wire time, and does **not** overlap with `tls_handshake` or `request_write`.
 
-Phases are non-overlapping: `dns_resolve + tcp_connect + tls_handshake + request_write + ttfb + transfer ≈ probe_duration_seconds`.
+Phases are non-overlapping: `dns_resolve + tcp_connect + tls_handshake + request_write + ttfb + transfer ≈ probe_duration_seconds` for direct probes; on the proxy path the equivalent sum substitutes `proxy_dial` (optionally `proxy_tls`, `proxy_connect`) for `tcp_connect` and `dns_resolve`.
+
+The `transfer` phase semantics differ slightly between `http` and `http_body`:
+`http` reads the response body up to the configurable `response_body_limit_bytes` (default 1 MiB) and reports truncation via `probe_http_response_truncated` without failing the probe. `http_body` reads up to a fixed 1 MiB limit and fails the probe when the response body exceeds that limit. In both cases the `transfer` phase measures the time spent reading the body up to the effective limit.
 
 | Phase           | Probe Type | Description                          |
 |-----------------|------------|--------------------------------------|
-| `proxy_dial`    | Proxy, TLS cert via proxy | TCP dial to the proxy                |
-| `proxy_tls`     | Proxy, TLS cert via proxy | TLS handshake with the proxy         |
-| `proxy_connect` | Proxy, TLS cert via proxy | CONNECT request and response         |
+| `proxy_dial`    | Proxy, HTTP/http_body via proxy, TLS cert via proxy | TCP dial to the proxy (includes proxy hostname DNS) |
+| `proxy_tls`     | Proxy, HTTP/http_body via proxy, TLS cert via proxy | TLS handshake with the proxy (only for `https://` proxies) |
+| `proxy_connect` | Proxy, HTTP/http_body via proxy (HTTPS targets only), TLS cert via proxy | CONNECT request write and response read |
+
+`tcp_connect` and `proxy_dial` are **mutually exclusive** for a single probe execution: direct probes emit `tcp_connect`, proxy-path probes emit `proxy_dial` instead. `dns_resolve` is not emitted for proxy-path `http`/`http_body` probes — proxy hostname resolution is included in `proxy_dial` and the target hostname is resolved by the proxy itself.
 
 Direct `tls_cert` probes emit `dns_resolve` for hostname targets, plus `tcp_connect` and `tls_handshake`. Direct TCP probes emit `dns_resolve` for hostname targets plus `tcp_connect`. `tls_cert` probes through a proxy emit the proxy tunnel phases plus `tls_handshake` for the target TLS handshake.
 
@@ -277,7 +321,7 @@ Do not treat absence of a conditional value metric as a generic probe failure si
 | `probe_dns_result_match` | conditional | DNS result comparison was evaluated in the latest probe result | DNS result comparison was not evaluated in the latest probe result |
 | `probe_skipped_overlap_total` | always | exported for active targets; increments when a stale tick is dropped | unexpected for an active target |
 
-## RTT and Primary Latency
+## RTT and Latency Interpretation
 
 ### Native RTT
 
@@ -293,22 +337,20 @@ Native RTT metrics in NetSonar are:
 
 `probe_duration_seconds` is **not** RTT. It measures the total wall-clock time of the whole probe execution.
 
-### Primary Latency Signals
+### Probe-Specific Latency Signals
 
-Some probe types do not expose strict RTT, but they do expose timings that are useful to operators as a primary latency signal.
+Several probe types expose timings that are useful to operators, but they are not a single cross-probe status-table column. The main Grafana status table shows status, timeout, total probe time, timeout limit, limit-used ratio, and target identity labels. Detailed latency attribution lives in the probe-specific phase, duration, and state panels.
 
-In dashboards and runbooks, NetSonar refers to this cross-probe value as **Primary Latency**. Technically, these timings are often **RTT-like** only in the loose operational sense that they help answer "where is the time going?" They are not strict RTT unless explicitly stated otherwise.
-
-| Probe Type | Metric / Phase | Operator interpretation | Strict RTT? |
-|---|---|---|---|
-| `icmp` | `probe_icmp_avg_rtt_seconds` | Network round-trip latency | Yes |
-| `mtu` | `probe_icmp_avg_rtt_seconds` | Network round-trip latency observed during MTU probing | Yes |
-| `tcp` | `probe_phase_duration_seconds{phase="tcp_connect"}` | TCP connect latency | No |
-| `dns` | `probe_dns_resolve_seconds` | DNS lookup latency | No |
-| `http` | `probe_phase_duration_seconds{phase="ttfb"}` | Request-to-first-byte latency | No |
-| `http_body` | `probe_duration_seconds` | Full request, capped body read, and body validation duration | No |
-| `tls_cert` | `probe_phase_duration_seconds{phase="tls_handshake"}` | TLS handshake latency | No |
-| `proxy_connect` | `probe_phase_duration_seconds{phase="proxy_connect"}` | Proxy CONNECT request/response latency | No |
+| Probe Type | Metric / Phase | Operator interpretation | Strict RTT? | Where to inspect |
+|---|---|---|---|---|
+| `icmp` | `probe_icmp_avg_rtt_seconds` | Network round-trip latency | Yes | ICMP RTT panels |
+| `mtu` | `probe_icmp_avg_rtt_seconds` | Network round-trip latency observed during MTU probing | Yes | MTU state and RTT-derived panels |
+| `tcp` | `probe_phase_duration_seconds{phase="tcp_connect"}` | TCP connect latency | No | TCP Phase Breakdown / TCP Phase Timing |
+| `dns` | `probe_dns_resolve_seconds` | DNS lookup latency | No | DNS Resolve Time |
+| `http` | `probe_phase_duration_seconds{phase="ttfb"}` | Request-to-first-byte latency | No | HTTP Phase Breakdown / HTTP Phase Timing |
+| `http_body` | `probe_phase_duration_seconds` and `probe_duration_seconds` | HTTP exchange, capped body read, and body validation duration | No | HTTP Response Body phase and duration panels |
+| `tls_cert` | `probe_phase_duration_seconds{phase="tls_handshake"}` | TLS handshake latency | No | TLS Cert Phase Breakdown / TLS Phase Timing |
+| `proxy_connect` | `probe_phase_duration_seconds{phase="proxy_connect"}` | Proxy CONNECT request/response latency | No | Proxy CONNECT Phase Breakdown / Phase Timing |
 
 Per-metric interpretation notes:
 
@@ -316,17 +358,11 @@ Per-metric interpretation notes:
 - `probe_dns_resolve_seconds` measures DNS resolution time. It includes resolver behavior and lookup overhead, so it should not be treated as pure network RTT.
 - `tls_handshake` measures the TLS handshake phase. It is useful for diagnosing handshake slowness, but it is not RTT.
 - `ttfb` measures time from request-send readiness to first response byte. It includes server processing time and response-header travel time, so it must not be interpreted as RTT.
-- `http_body` probes do not currently emit HTTP phase timings. In the main status table, successful `http_body` probes therefore use `probe_duration_seconds` as the Primary Latency value and label it as `http_body_duration`.
+- `http_body` probes emit the same per-phase timings as `http`; use those phase panels plus `probe_http_body_match` to diagnose validation failures.
 - `proxy_connect` measures CONNECT request/response latency through the proxy tunnel. It is useful for proxy-path diagnosis, not RTT estimation.
 - `probe_proxy_connect_status_code` records the HTTP status returned by the proxy to a CONNECT request. It is distinct from `probe_http_status_code`, which records the target HTTP response for `http` and `http_body`.
 
-`probe_icmp_stddev_rtt_seconds` is intentionally not part of the primary-latency mapping. It tracks RTT variation, not latency itself.
-
-In the main Grafana status table:
-
-- **Primary Latency** is the numeric value shown for the target's main latency signal when the latest probe succeeded
-- **Latency Signal** identifies which metric or phase produced that value, such as `icmp_rtt`, `dns_resolve`, `tcp_connect`, `ttfb`, `http_body_duration`, `tls_handshake`, or `proxy_connect`
-- Failed probes show `Primary Latency = N/A` in the status table even when partial timing metrics exist. Use `Status`, `Timed Out`, `Total Probe Time`, and `Limit Used` to distinguish a timeout from a fast fail.
+`probe_icmp_stddev_rtt_seconds` tracks RTT variation, not latency itself.
 
 ### Operator Guidance and Terminology
 
@@ -339,11 +375,11 @@ When reading dashboards and alerts:
 
 The main Grafana duration panels use a 5-minute rolling median per target. This
 keeps normal millisecond-range latency readable without letting a short outlier
-dominate the panel for several minutes. The panels use a linear axis with a 1s
-threshold line and a 1s soft maximum; Grafana can still extend the axis when
-samples exceed that value. The "Slowest HTTP Probes" panel intentionally
-remains raw `topk` data because its purpose is to surface outliers and
-timeouts.
+dominate the panel for several minutes. Threshold lines are hidden on median
+duration panels to keep the chart visually clean; use phase breakdown and phase
+timing panels for latency diagnosis. The "Slowest HTTP Probes" panel
+intentionally remains raw `topk` data because its purpose is to surface outliers
+and timeouts.
 
 A useful mental model is:
 
@@ -354,9 +390,7 @@ A useful mental model is:
 For consistent naming in dashboards and runbooks:
 
 - reserve **RTT** for ICMP-derived round-trip metrics
-- use **Primary Latency** for the operator-facing cross-probe latency value shown in dashboards
-- use **Latency Signal** for the metric or phase label that explains where the Primary Latency value came from
-- use **RTT-like** only as a technical explanatory term in documentation for non-RTT timings such as `tcp_connect`, `dns_resolve`, `tls_handshake`, `ttfb`, or `proxy_connect`
+- use **phase timing** for protocol-stage timings such as `tcp_connect`, `dns_resolve`, `tls_handshake`, `ttfb`, or `proxy_connect`
 - use **Total Probe Time** or **Probe Duration** for `probe_duration_seconds`
 
 ## Dashboard Interpretation
@@ -390,9 +424,9 @@ Because TPT for `icmp` and `mtu` is dominated by configured intervals and retry 
 
 **Operator guidance.**
 
-- Treat `Status` and `Primary Latency` as the health signals for a target. TPT is diagnostic context, not a health indicator.
+- Treat `Status` as the primary health signal for a target. TPT is diagnostic context, not a health indicator.
 - When alerting on slow probes, alert on `probe_duration_seconds` **per `probe_type`** with thresholds that match each probe's expected shape. Do not apply a single global threshold across probe types.
-- If `Status = FAIL` and `Primary Latency = N/A`, look at `Timed Out`, `Limit Used`, and TPT to tell a full timeout (TPT near the timeout boundary, `Limit Used` near 100%) from a fast fail (TPT ≈ 0) without opening the details dashboard.
+- If `Status = FAIL`, look at `Timed Out`, `Limit Used`, and TPT to tell a full timeout (TPT near the timeout boundary, `Limit Used` near 100%) from a fast fail (TPT ≈ 0) without opening the details dashboard.
 
 ### Probes Exceeding Interval (skipped cycles)
 
@@ -442,69 +476,69 @@ netsonar_targets_total 22
 
 # HELP probe_success 1 if the probe succeeded, 0 if it failed.
 # TYPE probe_success gauge
-probe_success{impact="critical",network_path="direct",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 1
-probe_success{impact="high",network_path="direct",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/error",target_account="dev-stack",target_name="http-500-expected-200",target_partition="dev",target_region="local"} 0
-probe_success{impact="high",network_path="proxy",probe_type="http",scope="same-region",service="fake-proxy",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-via-proxy",target_partition="dev",target_region="local"} 1
-probe_success{impact="high",network_path="proxy",probe_type="tls_cert",scope="same-region",service="fake-proxy",target="fake-targets:9443",target_account="dev-stack",target_name="tls-cert-via-proxy",target_partition="dev",target_region="local"} 1
-probe_success{impact="low",network_path="proxy",probe_type="proxy_connect",scope="same-region",service="fake-proxy",target="fake-targets:9001",target_account="dev-stack",target_name="proxy-connect-denied",target_partition="dev",target_region="local"} 1
-probe_success{impact="low",network_path="direct",probe_type="dns",scope="same-region",service="fake-dns",target="localhost",target_account="dev-stack",target_name="dns-localhost-mismatch",target_partition="dev",target_region="local"} 0
+probe_success{impact="critical",network_path="direct",probe_type="http",scope="local",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 1
+probe_success{impact="high",network_path="direct",probe_type="http",scope="local",service="fake-http",target="http://fake-targets:8080/error",target_account="dev-stack",target_name="http-500-expected-200",target_partition="dev",target_region="local"} 0
+probe_success{impact="high",network_path="proxy",probe_type="http",scope="local",service="fake-proxy",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-via-proxy",target_partition="dev",target_region="local"} 1
+probe_success{impact="high",network_path="proxy",probe_type="tls_cert",scope="local",service="fake-proxy",target="fake-targets:9443",target_account="dev-stack",target_name="tls-cert-via-proxy",target_partition="dev",target_region="local"} 1
+probe_success{impact="low",network_path="proxy",probe_type="proxy_connect",scope="local",service="fake-proxy",target="fake-targets:9001",target_account="dev-stack",target_name="proxy-connect-denied",target_partition="dev",target_region="local"} 1
+probe_success{impact="low",network_path="direct",probe_type="dns",scope="local",service="fake-dns",target="localhost",target_account="dev-stack",target_name="dns-localhost-mismatch",target_partition="dev",target_region="local"} 0
 
 # HELP probe_duration_seconds Total probe duration in seconds.
 # TYPE probe_duration_seconds gauge
-probe_duration_seconds{impact="critical",network_path="direct",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.008137887
+probe_duration_seconds{impact="critical",network_path="direct",probe_type="http",scope="local",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.008137887
 
-# HELP probe_phase_duration_seconds Per-phase timing for probes that expose sub-phase breakdowns (TCP: dns_resolve for hostname targets, tcp_connect; HTTP: dns_resolve, tcp_connect, tls_handshake, request_write, ttfb, transfer; TLS cert direct: dns_resolve for hostname targets, tcp_connect, tls_handshake; proxy_connect and TLS cert via proxy: proxy_dial, proxy_tls, proxy_connect; TLS cert via proxy also adds tls_handshake).
+# HELP probe_phase_duration_seconds Per-phase timing for probes that expose sub-phase breakdowns (TCP: dns_resolve for hostname targets, tcp_connect; HTTP and http_body direct: dns_resolve for hostname targets, tcp_connect, tls_handshake for https, request_write, ttfb, transfer; HTTP and http_body via proxy: proxy_dial, optional proxy_tls for https proxies, proxy_connect for https targets, tls_handshake for https targets, request_write, ttfb, transfer — tcp_connect and dns_resolve are not emitted on the proxy path; TLS cert direct: dns_resolve for hostname targets, tcp_connect, tls_handshake; ICMP and MTU: dns_resolve for hostname targets; proxy_connect and TLS cert via proxy: proxy_dial, proxy_tls, proxy_connect; TLS cert via proxy also adds tls_handshake).
 # TYPE probe_phase_duration_seconds gauge
-probe_phase_duration_seconds{impact="critical",network_path="direct",phase="dns_resolve",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.000777178
-probe_phase_duration_seconds{impact="critical",network_path="direct",phase="tcp_connect",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.000253737
-probe_phase_duration_seconds{impact="critical",network_path="direct",phase="ttfb",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.006660328
-probe_phase_duration_seconds{impact="critical",network_path="direct",phase="transfer",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.000389704
-probe_phase_duration_seconds{impact="low",network_path="proxy",phase="proxy_dial",probe_type="proxy_connect",scope="same-region",service="fake-proxy",target="fake-targets:9001",target_account="dev-stack",target_name="proxy-connect-denied",target_partition="dev",target_region="local"} 0.000412303
-probe_phase_duration_seconds{impact="low",network_path="proxy",phase="proxy_connect",probe_type="proxy_connect",scope="same-region",service="fake-proxy",target="fake-targets:9001",target_account="dev-stack",target_name="proxy-connect-denied",target_partition="dev",target_region="local"} 0.001874519
+probe_phase_duration_seconds{impact="critical",network_path="direct",phase="dns_resolve",probe_type="http",scope="local",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.000777178
+probe_phase_duration_seconds{impact="critical",network_path="direct",phase="tcp_connect",probe_type="http",scope="local",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.000253737
+probe_phase_duration_seconds{impact="critical",network_path="direct",phase="ttfb",probe_type="http",scope="local",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.006660328
+probe_phase_duration_seconds{impact="critical",network_path="direct",phase="transfer",probe_type="http",scope="local",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.000389704
+probe_phase_duration_seconds{impact="low",network_path="proxy",phase="proxy_dial",probe_type="proxy_connect",scope="local",service="fake-proxy",target="fake-targets:9001",target_account="dev-stack",target_name="proxy-connect-denied",target_partition="dev",target_region="local"} 0.000412303
+probe_phase_duration_seconds{impact="low",network_path="proxy",phase="proxy_connect",probe_type="proxy_connect",scope="local",service="fake-proxy",target="fake-targets:9001",target_account="dev-stack",target_name="proxy-connect-denied",target_partition="dev",target_region="local"} 0.001874519
 
 # HELP probe_http_status_code HTTP response status code.
 # TYPE probe_http_status_code gauge
-probe_http_status_code{impact="critical",network_path="direct",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 200
-probe_http_status_code{impact="high",network_path="direct",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/error",target_account="dev-stack",target_name="http-500-expected-200",target_partition="dev",target_region="local"} 500
+probe_http_status_code{impact="critical",network_path="direct",probe_type="http",scope="local",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 200
+probe_http_status_code{impact="high",network_path="direct",probe_type="http",scope="local",service="fake-http",target="http://fake-targets:8080/error",target_account="dev-stack",target_name="http-500-expected-200",target_partition="dev",target_region="local"} 500
 
 # HELP probe_proxy_connect_status_code HTTP status code returned by the proxy to a CONNECT request. Emitted by probe_type=proxy_connect, and by probe_type=http, http_body, or tls_cert when proxy_url targets an HTTPS destination that requires CONNECT.
 # TYPE probe_proxy_connect_status_code gauge
-probe_proxy_connect_status_code{impact="low",network_path="proxy",probe_type="proxy_connect",scope="same-region",service="fake-proxy",target="fake-targets:9001",target_account="dev-stack",target_name="proxy-connect-denied",target_partition="dev",target_region="local"} 403
+probe_proxy_connect_status_code{impact="low",network_path="proxy",probe_type="proxy_connect",scope="local",service="fake-proxy",target="fake-targets:9001",target_account="dev-stack",target_name="proxy-connect-denied",target_partition="dev",target_region="local"} 403
 
 # HELP probe_http_response_truncated 1 if the HTTP response body exceeded the effective response body limit, 0 otherwise.
 # TYPE probe_http_response_truncated gauge
-probe_http_response_truncated{impact="critical",network_path="direct",probe_type="http",scope="same-region",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0
+probe_http_response_truncated{impact="critical",network_path="direct",probe_type="http",scope="local",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0
 
 # HELP probe_tls_cert_chain_expiry_timestamp_seconds Unix timestamp in seconds of each TLS peer certificate expiry.
 # TYPE probe_tls_cert_chain_expiry_timestamp_seconds gauge
-probe_tls_cert_chain_expiry_timestamp_seconds{cert_index="0",cert_role="leaf",impact="high",network_path="proxy",probe_type="tls_cert",scope="same-region",service="fake-proxy",target="fake-targets:9443",target_account="dev-stack",target_name="tls-cert-via-proxy",target_partition="dev",target_region="local"} 2.091883319e+09
+probe_tls_cert_chain_expiry_timestamp_seconds{cert_index="0",cert_role="leaf",impact="high",network_path="proxy",probe_type="tls_cert",scope="local",service="fake-proxy",target="fake-targets:9443",target_account="dev-stack",target_name="tls-cert-via-proxy",target_partition="dev",target_region="local"} 2.091883319e+09
 # HELP probe_tls_cert_expiry_timestamp_seconds Unix timestamp in seconds of the earliest TLS peer certificate expiry.
 # TYPE probe_tls_cert_expiry_timestamp_seconds gauge
-probe_tls_cert_expiry_timestamp_seconds{impact="high",network_path="proxy",probe_type="tls_cert",scope="same-region",service="fake-proxy",target="fake-targets:9443",target_account="dev-stack",target_name="tls-cert-via-proxy",target_partition="dev",target_region="local"} 2.091883319e+09
+probe_tls_cert_expiry_timestamp_seconds{impact="high",network_path="proxy",probe_type="tls_cert",scope="local",service="fake-proxy",target="fake-targets:9443",target_account="dev-stack",target_name="tls-cert-via-proxy",target_partition="dev",target_region="local"} 2.091883319e+09
 
 # HELP probe_icmp_packet_loss_ratio ICMP packet loss ratio (0.0–1.0).
 # TYPE probe_icmp_packet_loss_ratio gauge
-probe_icmp_packet_loss_ratio{impact="high",network_path="direct",probe_type="icmp",scope="same-region",service="fake-icmp",target="fake-targets",target_account="dev-stack",target_name="icmp-fake-targets",target_partition="dev",target_region="local"} 0
+probe_icmp_packet_loss_ratio{impact="high",network_path="direct",probe_type="icmp",scope="local",service="fake-icmp",target="fake-targets",target_account="dev-stack",target_name="icmp-fake-targets",target_partition="dev",target_region="local"} 0
 # HELP probe_icmp_avg_rtt_seconds Average ICMP echo round-trip time in seconds.
 # TYPE probe_icmp_avg_rtt_seconds gauge
-probe_icmp_avg_rtt_seconds{impact="high",network_path="direct",probe_type="icmp",scope="same-region",service="fake-icmp",target="fake-targets",target_account="dev-stack",target_name="icmp-fake-targets",target_partition="dev",target_region="local"} 0.00010804
+probe_icmp_avg_rtt_seconds{impact="high",network_path="direct",probe_type="icmp",scope="local",service="fake-icmp",target="fake-targets",target_account="dev-stack",target_name="icmp-fake-targets",target_partition="dev",target_region="local"} 0.00010804
 # HELP probe_icmp_stddev_rtt_seconds Population standard deviation of ICMP echo round-trip time in seconds.
 # TYPE probe_icmp_stddev_rtt_seconds gauge
-probe_icmp_stddev_rtt_seconds{impact="high",network_path="direct",probe_type="icmp",scope="same-region",service="fake-icmp",target="fake-targets",target_account="dev-stack",target_name="icmp-fake-targets",target_partition="dev",target_region="local"} 2.3828e-05
+probe_icmp_stddev_rtt_seconds{impact="high",network_path="direct",probe_type="icmp",scope="local",service="fake-icmp",target="fake-targets",target_account="dev-stack",target_name="icmp-fake-targets",target_partition="dev",target_region="local"} 2.3828e-05
 
 # HELP probe_mtu_bytes Largest confirmed MTU size from the MTU probe in bytes.
 # TYPE probe_mtu_bytes gauge
-probe_mtu_bytes{impact="critical",network_path="direct",probe_type="mtu",scope="cross-region",service="fake-mtu",target="fake-targets",target_account="dev-stack-remote",target_name="mtu-fake-targets",target_partition="dev",target_region="eu-west-1"} 1500
+probe_mtu_bytes{impact="critical",network_path="direct",probe_type="mtu",scope="external",service="fake-mtu",target="fake-targets",target_account="dev-stack-remote",target_name="mtu-fake-targets",target_partition="dev",target_region="eu-west-1"} 1500
 # HELP probe_mtu_state MTU probe state as an info metric with state and detail labels (value is always 1).
 # TYPE probe_mtu_state gauge
-probe_mtu_state{detail="largest_size_confirmed",impact="critical",network_path="direct",probe_type="mtu",scope="cross-region",service="fake-mtu",state="ok",target="fake-targets",target_account="dev-stack-remote",target_name="mtu-fake-targets",target_partition="dev",target_region="eu-west-1"} 1
-probe_mtu_state{detail="local_message_too_large",impact="high",network_path="direct",probe_type="mtu",scope="same-region",service="fake-mtu",state="degraded",target="fake-targets",target_account="dev-stack",target_name="mtu-fake-targets-too-large",target_partition="dev",target_region="local"} 1
+probe_mtu_state{detail="largest_size_confirmed",impact="critical",network_path="direct",probe_type="mtu",scope="external",service="fake-mtu",state="ok",target="fake-targets",target_account="dev-stack-remote",target_name="mtu-fake-targets",target_partition="dev",target_region="eu-west-1"} 1
+probe_mtu_state{detail="local_message_too_large",impact="high",network_path="direct",probe_type="mtu",scope="local",service="fake-mtu",state="degraded",target="fake-targets",target_account="dev-stack",target_name="mtu-fake-targets-too-large",target_partition="dev",target_region="local"} 1
 
 # HELP probe_dns_resolve_seconds DNS resolution time in seconds.
 # TYPE probe_dns_resolve_seconds gauge
-probe_dns_resolve_seconds{impact="high",network_path="direct",probe_type="dns",scope="same-region",service="fake-dns",target="localhost",target_account="dev-stack",target_name="dns-localhost-match",target_partition="dev",target_region="local"} 0.000264605
+probe_dns_resolve_seconds{impact="high",network_path="direct",probe_type="dns",scope="local",service="fake-dns",target="localhost",target_account="dev-stack",target_name="dns-localhost-match",target_partition="dev",target_region="local"} 0.000264605
 # HELP probe_dns_result_match 1 if DNS result matches expected values, 0 otherwise.
 # TYPE probe_dns_result_match gauge
-probe_dns_result_match{impact="high",network_path="direct",probe_type="dns",scope="same-region",service="fake-dns",target="localhost",target_account="dev-stack",target_name="dns-localhost-match",target_partition="dev",target_region="local"} 1
-probe_dns_result_match{impact="low",network_path="direct",probe_type="dns",scope="same-region",service="fake-dns",target="localhost",target_account="dev-stack",target_name="dns-localhost-mismatch",target_partition="dev",target_region="local"} 0
+probe_dns_result_match{impact="high",network_path="direct",probe_type="dns",scope="local",service="fake-dns",target="localhost",target_account="dev-stack",target_name="dns-localhost-match",target_partition="dev",target_region="local"} 1
+probe_dns_result_match{impact="low",network_path="direct",probe_type="dns",scope="local",service="fake-dns",target="localhost",target_account="dev-stack",target_name="dns-localhost-mismatch",target_partition="dev",target_region="local"} 0
 ```

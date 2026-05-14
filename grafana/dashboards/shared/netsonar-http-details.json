@@ -219,11 +219,11 @@
         "tooltip": { "mode": "multi" }
       },
       "title": "HTTP Phase Timing — $target_name",
-      "description": "Stacked phase durations for the selected HTTP target. Phases are non-overlapping and sum ≈ probe_duration_seconds. Missing phases were not observed or do not apply.\n\nPhase legend:\n- dns_resolve: DNS lookup time for hostname targets.\n- tcp_connect: TCP connection establishment time.\n- tls_handshake: target TLS handshake time; absent for plain HTTP.\n- request_write: time from connection/TLS readiness to request write completion. Usually near-zero for GET/small requests; grows when request_body_bytes sends an upload payload.\n- ttfb: time from request write completion to first response byte.\n- transfer: response body read time up to response_body_limit_bytes.\n\nColors: dns_resolve (blue), tcp_connect (green), tls_handshake (yellow), request_write (cyan), ttfb (orange), transfer (purple).",
+      "description": "Stacked phase durations for the selected HTTP target. Phases are non-overlapping and sum ≈ probe_duration_seconds. Missing phases were not observed or do not apply.\n\nDirect-path phases:\n- dns_resolve: DNS lookup time for hostname targets.\n- tcp_connect: TCP connection establishment time.\n- tls_handshake: target TLS handshake time; absent for plain HTTP.\n- request_write: time from connection/TLS readiness to request write completion. Usually near-zero for GET/small requests; grows when request_body_bytes sends an upload payload.\n- ttfb: time from request write completion to first response byte.\n- transfer: response body read time up to response_body_limit_bytes.\n\nProxy-path additional phases (when probe has proxy_url set):\n- proxy_dial: TCP dial to the proxy (includes proxy DNS).\n- proxy_tls: TLS handshake with the proxy (only for https:// proxies).\n- proxy_connect: CONNECT request write and response read (only for https:// targets through a proxy).\n\nproxy_dial and tcp_connect are mutually exclusive for one probe execution, and dns_resolve is not emitted on the proxy path.",
       "type": "timeseries",
       "targets": [
         {
-          "expr": "probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", target_name=\"$target_name\"}",
+          "expr": "probe_phase_duration_seconds{job=~\"$job\", probe_type=~\"http|http_body\", target_name=\"$target_name\"}",
           "legendFormat": "{{phase}}",
           "refId": "A"
         }

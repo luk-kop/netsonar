@@ -47,13 +47,22 @@ func (p *ICMPProber) Probe(ctx context.Context, target config.TargetConfig) (res
 		pingInterval = time.Second
 	}
 
-	// Resolve the target address to an IPv4 address.
-	dst, err := net.ResolveIPAddr("ip4", target.Address)
+	// Resolve the target address to an IPv4 address. Emits PhaseDNSResolve
+	// only when the input was a hostname and a lookup was performed.
+	resolved, err := resolveIPv4(ctx, target.Address)
+	if resolved.dnsStart != (time.Time{}) {
+		phases := make(map[string]time.Duration, 1)
+		addObservedPhase(phases, PhaseDNSResolve, resolved.dnsEnd, resolved.dnsStart)
+		if len(phases) > 0 {
+			result.Phases = phases
+		}
+	}
 	if err != nil {
 		result.Error = fmt.Sprintf("resolve IPv4 address: %s", err)
 		result.PacketLoss = 1.0
 		return result
 	}
+	dst := resolved.addr
 
 	// Open an unprivileged ICMP connection (SOCK_DGRAM). This does not
 	// require CAP_NET_RAW — the kernel handles ICMP ID assignment and
@@ -72,9 +81,13 @@ func (p *ICMPProber) Probe(ctx context.Context, target config.TargetConfig) (res
 	// done by Seq + peer — the kernel already filters replies per socket.
 	icmpID := 0
 
+	phases := result.Phases
 	result = runICMPEchoSequence(ctx, pingCount, pingInterval, func(ctx context.Context, seq int) (time.Duration, bool, error) {
 		return p.sendEcho(ctx, conn, dst, icmpID, seq)
 	})
+	if phases != nil {
+		result.Phases = phases
+	}
 
 	return result
 }

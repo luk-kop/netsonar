@@ -9,7 +9,7 @@ agent:
     - scope
     - impact
     - target_region
-    - target_partition
+    - target_type
     - target_account
 
 targets:
@@ -21,10 +21,10 @@ targets:
       expected_status_codes: [200]
     tags:
       service: fake-http
-      scope: same-region
+      scope: local
       impact: critical
       target_region: local
-      target_partition: validation
+      target_type: private
       target_account: metrics-validation
 
   - name: https-ok
@@ -36,8 +36,8 @@ targets:
       tls_skip_verify: true
     tags:
       service: fake-https
-      scope: same-region
+      scope: local
       impact: critical
       target_region: local
-      target_partition: validation
+      target_type: private
       target_account: metrics-validation

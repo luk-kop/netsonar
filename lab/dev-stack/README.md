@@ -64,8 +64,8 @@ The Internet overlay keeps the default fake-local targets and adds a public
 smoke set:
 
 - HTTPS GET to `https://example.com/`
-- TCP connects to public HTTPS endpoints, labelled as `cross-region` and
-  `aws-regional` so those existing TCP dashboard panels have data
+- TCP connects to public HTTPS endpoints, labelled as `external` so the
+  External TCP dashboard panel has data
 - TLS certificate expiry check for `example.com:443`
 - DNS A lookup for `cloudflare.com` through `1.1.1.1:53`
 - DNS expected-result match for `one.one.one.one` through `1.1.1.1:53`
@@ -84,13 +84,12 @@ NetSonar code change. Keep `make lab-dev` as the deterministic local workflow
 and use `make lab-dev-internet` when you specifically want to validate egress.
 
 In the Internet config, `scope` values are dashboard demo labels. They do not
-mean the public target is truly in a same-region, cross-region, or AWS regional
-network path from your machine.
+mean the public target is truly on the local network from your machine.
 
-The merged Internet config includes TCP targets labelled `same-region`,
-`cross-region`, and `aws-regional` so the three TCP duration panels have data.
-The `same-region` TCP series comes from the base fake-local config; the
-cross-region and AWS regional series come from public Internet targets.
+The merged Internet config includes TCP targets labelled `local` and `external`
+so both TCP duration panels have data. The `local` TCP series comes from the
+base fake-local config; the `external` series comes from public Internet
+targets.
 
 The BadSSL HTTP targets are expected to report `probe_success=0` with TLS
 errors. They are included to make broken-certificate states visible in Grafana,
@@ -110,7 +109,7 @@ exercise dashboard filters, PromQL grouping, and reload behaviour locally.
 
 Included scenarios:
 
-- TCP open/closed targets, including a healthy `scope=cross-region` target.
+- TCP open/closed targets, including a healthy `scope=external` target.
 - HTTP success, expected status failure, and accept-any status handling.
 - HTTP body match, mismatch, and body match with unexpected status.
 - HTTP through a forward proxy (`http-via-proxy`) and raw `proxy_connect` probes (allow and expected-deny).
