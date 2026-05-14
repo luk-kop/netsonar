@@ -27,7 +27,14 @@ type proxyConnectResponse struct {
 // accumulated up to the failure point, the observed CONNECT response (if
 // any), closes any connection it opened, and a non-nil error. The caller
 // owns the returned connection on success and must close it.
-func dialProxyTunnel(ctx context.Context, proxyURL *url.URL, tunnelDest string) (net.Conn, map[string]time.Duration, proxyConnectResponse, error) {
+//
+// proxyTLSSkipVerify controls whether the proxy TLS hop (only for https://
+// proxy URLs) skips certificate verification. Callers routing through an
+// HTTPS proxy with a self-signed or untrusted certificate set this to true
+// to match the `tls_skip_verify` probe option; proxy_connect and tls_cert
+// preserve the original behavior (false) because they never exposed a
+// proxy-TLS skip knob.
+func dialProxyTunnel(ctx context.Context, proxyURL *url.URL, tunnelDest string, proxyTLSSkipVerify bool) (net.Conn, map[string]time.Duration, proxyConnectResponse, error) {
 	proxyAddr := hostPortForURL(proxyURL)
 	start := time.Now()
 	phases := make(map[string]time.Duration, 3)
@@ -50,7 +57,10 @@ func dialProxyTunnel(ctx context.Context, proxyURL *url.URL, tunnelDest string) 
 
 	if proxyURL.Scheme == "https" {
 		host, _, _ := net.SplitHostPort(proxyAddr)
-		tlsCfg := &tls.Config{ServerName: host}
+		tlsCfg := &tls.Config{
+			ServerName:         host,
+			InsecureSkipVerify: proxyTLSSkipVerify,
+		}
 		tlsConn := tls.Client(proxyConn, tlsCfg)
 		tlsStart := time.Now()
 		err := tlsConn.HandshakeContext(ctx)

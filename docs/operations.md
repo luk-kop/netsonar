@@ -97,13 +97,14 @@ resets when alerting on skipped overlaps.
 Two Grafana dashboards are provisioned from `grafana/dashboards/shared/`:
 
 - **NetSonar** (`netsonar.json`, uid `netsonar`) — overview of all probe types.
-  The HTTP section includes overview panels (topk, phase breakdown table, bar
-  gauge) that answer *"what is slow?"* across all HTTP targets.
+  The HTTP sections separate direct and proxy-path probes, and include duration,
+  status, phase breakdown, and phase timing panels that answer *"what is slow?"*
+  across HTTP targets.
 - **NetSonar — HTTP Details** (`netsonar-http-details.json`, uid
   `netsonar-http-details`) — per-target HTTP drill-down with duration stats,
   stacked phase timing, status codes, and success rate.
 
-Navigation: click a `target_name` cell in the **HTTP Phase Breakdown (current)**
+Navigation: click a target cell in the **HTTP Phase Breakdown (Direct)**
 panel on the main dashboard to jump to the details dashboard with that target
 pre-selected and the time range preserved. The details dashboard has a
 "← Back to Overview" link in the top bar.

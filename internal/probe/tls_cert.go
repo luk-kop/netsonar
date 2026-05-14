@@ -117,7 +117,7 @@ func (p *TLSCertProber) probeViaProxy(ctx context.Context, rawProxyURL, addr str
 	}
 
 	start := time.Now()
-	conn, phases, connectResp, err := dialProxyTunnel(ctx, proxyURL, addr)
+	conn, phases, connectResp, err := dialProxyTunnel(ctx, proxyURL, addr, false)
 	if len(phases) > 0 {
 		result.Phases = phases
 	}

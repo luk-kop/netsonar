@@ -122,7 +122,7 @@ func NewMetricsExporter(tagKeys []string, opts ExporterOptions) *MetricsExporter
 
 		probePhaseDuration: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "probe_phase_duration_seconds",
-			Help: "Per-phase timing for probes that expose sub-phase breakdowns (TCP: dns_resolve for hostname targets, tcp_connect; HTTP: dns_resolve, tcp_connect, tls_handshake, request_write, ttfb, transfer; TLS cert direct: dns_resolve for hostname targets, tcp_connect, tls_handshake; proxy_connect and TLS cert via proxy: proxy_dial, proxy_tls, proxy_connect; TLS cert via proxy also adds tls_handshake).",
+			Help: "Per-phase timing for probes that expose sub-phase breakdowns (TCP: dns_resolve for hostname targets, tcp_connect; HTTP and http_body direct: dns_resolve for hostname targets, tcp_connect, tls_handshake for https, request_write, ttfb, transfer; HTTP and http_body via proxy: proxy_dial, optional proxy_tls for https proxies, proxy_connect for https targets, tls_handshake for https targets, request_write, ttfb, transfer — tcp_connect and dns_resolve are not emitted on the proxy path; TLS cert direct: dns_resolve for hostname targets, tcp_connect, tls_handshake; ICMP and MTU: dns_resolve for hostname targets; proxy_connect and TLS cert via proxy: proxy_dial, proxy_tls, proxy_connect; TLS cert via proxy also adds tls_handshake).",
 		}, append(commonLabels, "phase")),
 
 		httpStatusCode: prometheus.NewGaugeVec(prometheus.GaugeOpts{

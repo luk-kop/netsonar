@@ -71,8 +71,10 @@ type mtuProbeBackend interface {
 //   - result.Error is non-empty when Success is false
 //
 // Loop invariant: all sizes[0..i-1] have failed (packet too large or unreachable)
-func (p *MTUProber) Probe(ctx context.Context, target config.TargetConfig) ProbeResult {
-	var result ProbeResult
+func (p *MTUProber) Probe(ctx context.Context, target config.TargetConfig) (result ProbeResult) {
+	start := time.Now()
+	defer func() { result.Duration = time.Since(start) }()
+
 	result.PathMTU = -1
 
 	sizes := target.ProbeOpts.ICMPPayloadSizes
@@ -84,8 +86,16 @@ func (p *MTUProber) Probe(ctx context.Context, target config.TargetConfig) Probe
 		return result
 	}
 
-	// Resolve the target address to an IPv4 address.
-	dst, err := net.ResolveIPAddr("ip4", target.Address)
+	// Resolve the target address to an IPv4 address. Emits PhaseDNSResolve
+	// only when the input was a hostname and a lookup was performed.
+	resolved, err := resolveIPv4(ctx, target.Address)
+	if resolved.dnsStart != (time.Time{}) {
+		phases := make(map[string]time.Duration, 1)
+		addObservedPhase(phases, PhaseDNSResolve, resolved.dnsEnd, resolved.dnsStart)
+		if len(phases) > 0 {
+			result.Phases = phases
+		}
+	}
 	if err != nil {
 		clearObservedICMPRTT(&result)
 		result.Error = fmt.Sprintf("resolve IPv4 address: %s", err)
@@ -93,11 +103,11 @@ func (p *MTUProber) Probe(ctx context.Context, target config.TargetConfig) Probe
 		result.MTUDetail = MTUDetailResolveError
 		return result
 	}
+	dst := resolved.addr
 
-	start := time.Now()
 	payloadResults := make([]mtuPayloadResult, 0, len(sizes))
 	if ctx.Err() != nil {
-		setMTUInconclusive(&result, start, nil, ctx.Err())
+		setMTUInconclusive(&result, nil, ctx.Err())
 		return result
 	}
 
@@ -110,10 +120,10 @@ func (p *MTUProber) Probe(ctx context.Context, target config.TargetConfig) Probe
 
 	sanity := p.probeSmallICMPEchoWithRetries(ctx, backend, dst, perAttemptTimeout, retries)
 	if sanity.status == mtuPayloadTimeout && ctx.Err() != nil {
-		setMTUInconclusive(&result, start, nil, ctx.Err())
+		setMTUInconclusive(&result, nil, ctx.Err())
 		return result
 	}
-	if handled := applySanityFailure(&result, sanity, start); handled {
+	if handled := applySanityFailure(&result, sanity); handled {
 		return result
 	}
 
@@ -127,7 +137,7 @@ func (p *MTUProber) Probe(ctx context.Context, target config.TargetConfig) Probe
 	// Step down through configured sizes (descending). Stop at first success.
 	for _, payloadSize := range sizes {
 		if ctx.Err() != nil {
-			setMTUInconclusive(&result, start, rttSamples, ctx.Err())
+			setMTUInconclusive(&result, rttSamples, ctx.Err())
 			return result
 		}
 
@@ -137,7 +147,7 @@ func (p *MTUProber) Probe(ctx context.Context, target config.TargetConfig) Probe
 			rttSamples = append(rttSamples, payloadResult.rtt)
 		}
 		if payloadResult.status == mtuPayloadTimeout && ctx.Err() != nil {
-			setMTUInconclusive(&result, start, rttSamples, ctx.Err())
+			setMTUInconclusive(&result, rttSamples, ctx.Err())
 			return result
 		}
 
@@ -148,7 +158,6 @@ func (p *MTUProber) Probe(ctx context.Context, target config.TargetConfig) Probe
 			result.Success = classification.success
 			result.MTUState = classification.state
 			result.MTUDetail = classification.detail
-			result.Duration = time.Since(start)
 			result.ICMPRepliesObserved = len(rttSamples)
 			result.ICMPAvgRTT = avgRTT(rttSamples)
 			if !classification.success {
@@ -157,7 +166,6 @@ func (p *MTUProber) Probe(ctx context.Context, target config.TargetConfig) Probe
 			return result
 
 		case mtuPayloadUnreachable:
-			result.Duration = time.Since(start)
 			result.Error = "destination unreachable"
 			result.MTUState = MTUStateUnreachable
 			result.MTUDetail = MTUDetailDestinationUnreach
@@ -166,7 +174,6 @@ func (p *MTUProber) Probe(ctx context.Context, target config.TargetConfig) Probe
 			return result
 
 		case mtuPayloadError:
-			result.Duration = time.Since(start)
 			if isPermissionError(payloadResult.err) {
 				result.Error = mtuPermissionDeniedError()
 				result.MTUState = MTUStateError
@@ -197,7 +204,6 @@ func (p *MTUProber) Probe(ctx context.Context, target config.TargetConfig) Probe
 	result.Success = classification.success
 	result.MTUState = classification.state
 	result.MTUDetail = classification.detail
-	result.Duration = time.Since(start)
 	result.ICMPRepliesObserved = len(rttSamples)
 	result.ICMPAvgRTT = avgRTT(rttSamples)
 	result.Error = "all MTU sizes failed — target unreachable or path MTU below minimum test size"
@@ -310,13 +316,12 @@ func classifyPayloadAttempts(attempts []mtuPayloadResult) mtuPayloadResult {
 	return mtuPayloadResult{status: mtuPayloadTimeout, payloadSize: payloadSize}
 }
 
-func applySanityFailure(result *ProbeResult, sanity mtuPayloadResult, start time.Time) bool {
+func applySanityFailure(result *ProbeResult, sanity mtuPayloadResult) bool {
 	switch sanity.status {
 	case mtuPayloadSuccess:
 		return false
 	case mtuPayloadUnreachable:
 		clearObservedICMPRTT(result)
-		result.Duration = time.Since(start)
 		result.PathMTU = -1
 		result.Error = "sanity check destination unreachable"
 		result.MTUState = MTUStateUnreachable
@@ -324,7 +329,6 @@ func applySanityFailure(result *ProbeResult, sanity mtuPayloadResult, start time
 		return true
 	case mtuPayloadError:
 		clearObservedICMPRTT(result)
-		result.Duration = time.Since(start)
 		result.PathMTU = -1
 		if isPermissionError(sanity.err) {
 			result.Error = mtuPermissionDeniedError()
@@ -342,7 +346,6 @@ func applySanityFailure(result *ProbeResult, sanity mtuPayloadResult, start time
 		return true
 	case mtuPayloadTimeout:
 		clearObservedICMPRTT(result)
-		result.Duration = time.Since(start)
 		result.PathMTU = -1
 		result.Error = "sanity check failed"
 		result.MTUState = MTUStateUnreachable
@@ -350,7 +353,6 @@ func applySanityFailure(result *ProbeResult, sanity mtuPayloadResult, start time
 		return true
 	default:
 		clearObservedICMPRTT(result)
-		result.Duration = time.Since(start)
 		result.PathMTU = -1
 		result.Error = "sanity check failed"
 		result.MTUState = MTUStateUnreachable
@@ -364,8 +366,7 @@ func clearObservedICMPRTT(result *ProbeResult) {
 	result.ICMPAvgRTT = 0
 }
 
-func setMTUInconclusive(result *ProbeResult, start time.Time, rttSamples []time.Duration, err error) {
-	result.Duration = time.Since(start)
+func setMTUInconclusive(result *ProbeResult, rttSamples []time.Duration, err error) {
 	result.PathMTU = -1
 	result.Success = false
 	result.MTUState = MTUStateDegraded

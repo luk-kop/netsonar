@@ -17,6 +17,12 @@ No `probe_opts` required.
 
 Emits `probe_phase_duration_seconds` with `phase="tcp_connect"`, plus `phase="dns_resolve"` for hostname targets.
 
+The TCP probe is intentionally connect-only: it opens a TCP connection and then
+stops. It does not perform a TLS handshake, send protocol payload bytes, wait
+for a banner, or read an application response. Because of that, TCP phase
+breakdowns have no `tls_handshake`, `request_write`, `ttfb`, or `transfer`
+phases.
+
 ## HTTP/HTTPS
 
 Full HTTP request with `httptrace` phase breakdown (DNS resolve, TCP connect, TLS handshake, request write, TTFB, transfer). For HTTPS targets, can optionally emit TLS certificate expiry metrics from the observed peer chain. Supports optional proxy routing via `proxy_url`.
@@ -55,7 +61,7 @@ Use `http_body` when response content must be validated.
 | `method`                    | string              | `GET`         | HTTP method. One of `GET`, `HEAD`, `POST`. Required to be `POST` when `request_body_bytes > 0`.                      |
 | `headers`                   | `map[string]string` | `{}`          | Custom request headers. Sent on every probe request.                                                                 |
 | `follow_redirects`          | bool                | `false`       | Follow 3xx redirects. When `false`, the redirect response is treated as the final response.                          |
-| `tls_skip_verify`           | bool                | `false`       | Skip TLS certificate verification on the **target** connection (HTTPS only). Does not apply to `https://` proxies.   |
+| `tls_skip_verify`           | bool                | `false`       | Skip TLS certificate verification on the **target** connection (HTTPS only). For `http` and `http_body`, it also applies to the proxy TLS connection when `proxy_url` uses `https://`. For `proxy_connect` and `tls_cert`, it applies only to the target; the proxy's TLS certificate is always validated. |
 | `tls_emit_cert_metrics`     | bool                | `false`       | Emit `probe_tls_cert_*` metrics for HTTPS targets. This does not affect TLS handshake, certificate verification, or `tls_handshake` phase metrics. |
 | `expected_status_codes`     | `[]int`             | `[]`          | Allow-list of HTTP status codes that count as success. Empty list accepts any status. See subsection below.          |
 | `response_body_limit_bytes` | int                 | `0` (= 1 MiB) | Cap on response bytes read and discarded. `0` or omitted falls back to the 1 MiB built-in default.                   |
@@ -123,8 +129,10 @@ For proxies that require Basic authentication, include credentials in the proxy 
 proxy_url: "http://username:password@infra-proxy.example.internal:8888"
 ```
 
-Skipping TLS verification for HTTPS proxies is not supported. `tls_skip_verify`
-applies to the target TLS connection, not to the proxy's own TLS certificate.
+For `http` and `http_body`, `tls_skip_verify` applies to both the target TLS
+connection and the proxy TLS connection when `proxy_url` uses `https://`. For
+`proxy_connect` and `tls_cert`, it applies only to the target TLS connection;
+the proxy's own TLS certificate is always validated.
 
 ## ICMP
 
@@ -271,6 +279,13 @@ For a detailed explanation of PMTUD, ICMP Destination Unreachable codes, PMTUD b
 
 DNS resolution with optional expected result validation. Measures resolution time and optionally verifies that the returned records match a configured set of expected values.
 
+Each DNS probe execution performs a resolver lookup. NetSonar does not keep an
+application-level DNS result cache for `probe_type: dns`. When `dns_server` is
+empty, the lookup uses the system resolver path, so operating-system, local
+forwarder, or upstream recursive resolver caching may still affect the observed
+latency and returned records. When `dns_server` is set, NetSonar sends the
+lookup through that configured resolver.
+
 ```yaml
 - name: "rds-dns"
   address: "rds-endpoint.eu-central-1.rds.amazonaws.com"
@@ -385,7 +400,9 @@ Direct probes emit `probe_phase_duration_seconds` with `phase="tcp_connect"` and
 
 HTTP request with regex or substring match on the response body. The probe succeeds (`probe_success=1`) when **both** conditions are met: the response body matches the configured pattern, and the response status code satisfies the `expected_status_codes` rule (empty list accepts any status; non-empty list requires the status code to be present). When body evaluation completes, the match result is also reported separately via `probe_http_body_match` for diagnostic visibility. If no HTTP response is received or the body cannot be evaluated, `probe_http_body_match` is absent. The agent reads at most 1 MiB of response body; larger responses fail the probe. Supports custom request headers via `headers` and optional proxy routing via `proxy_url`.
 
-`http_body` probes do not emit HTTP phase timings. In the main Grafana status table, successful `http_body` probes use the full `probe_duration_seconds` value as Primary Latency and label the Latency Signal as `http_body_duration`; failed `http_body` probes show Primary Latency as `N/A`.
+`http_body` probes emit the same per-phase timings as `http` through `probe_phase_duration_seconds` (`dns_resolve` for hostname targets, `tcp_connect`, `tls_handshake` for HTTPS targets, `request_write`, `ttfb`, `transfer`). Use the HTTP Response Body phase panels to distinguish request-write, TTFB, transfer, and proxy setup time. The main Grafana status table intentionally shows only status, timeout, total probe time, timeout limit, limit-used ratio, and target identity labels; detailed latency attribution lives in the probe-specific phase panels.
+
+The 1 MiB body cap is fixed for `http_body` (unlike `http`, which exposes the configurable `response_body_limit_bytes` and reports truncation via `probe_http_response_truncated` without failing). For `http_body` the `transfer` phase still measures body-read time, but a response body exceeding 1 MiB fails the probe instead of being truncated.
 
 At least one of `body_match_regex` or `body_match_string` must be set — a target without either is rejected at config load time. `body_match_regex` must be a valid Go regular expression. It is validated when the config is loaded and compiled once when the target prober is created. If both `body_match_regex` and `body_match_string` are set, the regex takes precedence.
 
@@ -460,7 +477,7 @@ Use `proxy_connect` when:
 - Verifying the proxy's CONNECT allowlist (positive and negative tests)
 - Measuring raw tunnel establishment time without TLS or HTTP overhead
 
-**`probe_type: http` with `proxy_url`** — sends a standard HTTP request routed through the proxy using Go's `http.Transport.Proxy`. For HTTPS targets, the transport internally performs CONNECT + TLS handshake + HTTP request as a single operation, which is the standard way clients (curl, wget, apt) use forward proxies.
+**`probe_type: http` with `proxy_url`** — sends a standard HTTP request routed through the configured proxy. For HTTPS targets the prober performs an explicit CONNECT + target TLS handshake + HTTP exchange and measures each step independently so CONNECT latency is visible. For plain HTTP targets the prober uses standard HTTP forward proxying (no CONNECT) — the proxy receives the HTTP request in absolute-URI form.
 
 For `http` and `http_body`, `expected_status_codes` always refers to the target HTTP response, not the proxy's CONNECT response. If an HTTPS proxy CONNECT happens, `probe_proxy_connect_status_code` is diagnostic only and does not change `probe_success`.
 
@@ -496,17 +513,28 @@ Use `tls_cert` with `proxy_url` when:
 
 ### Interpreting Metrics for Proxy-Path HTTP Probes
 
-When an HTTP probe uses `proxy_url`, the phase timing metrics reflect the full proxy path:
+When an `http` or `http_body` probe uses `proxy_url`, the phase timing metrics reflect the full proxy path. Phase emission depends on the combination of target URL scheme and proxy URL scheme. `tcp_connect` and `proxy_dial` are **mutually exclusive** per probe execution: direct probes emit `tcp_connect`, proxy-path probes emit `proxy_dial` instead. `dns_resolve` is **not** emitted for proxy-path `http`/`http_body` because proxy hostname resolution is included in `proxy_dial` and the target hostname is resolved by the proxy itself.
 
-| Phase | What It Measures (`network_path="proxy"`) |
-|---|---|
-| `tcp_connect` | TCP dial to proxy + CONNECT tunnel establishment to target |
-| `tls_handshake` | TLS handshake with the target (through the tunnel) |
-| `request_write` | Time from connection ready (after TLS for HTTPS) to request write completion |
-| `ttfb` | Time from request write completion to first response byte — does not include TLS handshake or request upload |
-| `transfer` | Response body read up to the effective response body limit (through the tunnel) |
+| Target URL  | Proxy URL   | Proxy Phases Emitted                                            | Target Phases Emitted |
+|-------------|-------------|-----------------------------------------------------------------|-----------------------|
+| `http://`   | `http://`   | `proxy_dial`                                                    | `request_write`, `ttfb`, `transfer` |
+| `http://`   | `https://`  | `proxy_dial`, `proxy_tls`                                       | `request_write`, `ttfb`, `transfer` |
+| `https://`  | `http://`   | `proxy_dial`, `proxy_connect`                                   | `tls_handshake`, `request_write`, `ttfb`, `transfer` |
+| `https://`  | `https://`  | `proxy_dial`, `proxy_tls`, `proxy_connect`                      | `tls_handshake`, `request_write`, `ttfb`, `transfer` |
 
-The `tcp_connect` phase is notably higher for proxy-path probes compared to direct ones because it includes both the connection to the proxy and the CONNECT handshake. This is expected and can be used to estimate proxy overhead by comparing `tcp_connect` of a proxy-path probe against a direct probe to the same target.
+Individual phase meaning when `network_path="proxy"`:
+
+| Phase            | What It Measures (`network_path="proxy"`) |
+|------------------|-------------------------------------------|
+| `proxy_dial`     | TCP dial to the proxy (includes proxy hostname DNS resolution) |
+| `proxy_tls`      | TLS handshake with the proxy (only for `https://` proxies) |
+| `proxy_connect`  | CONNECT request write + proxy response read (only for HTTPS targets through a proxy) |
+| `tls_handshake`  | TLS handshake with the target through the tunnel (only for HTTPS targets) |
+| `request_write`  | Time from connection ready to request write completion |
+| `ttfb`           | Time from request write completion to first response byte |
+| `transfer`       | Response body read up to the effective response body limit (through the tunnel) |
+
+CONNECT request/response latency is reported in `proxy_connect`, not `tcp_connect` — compare a proxy-path probe's `proxy_connect` against a `probe_type: proxy_connect` probe's `proxy_connect` to isolate target-side CONNECT handling from pure proxy overhead.
 
 When a `tls_cert` probe uses `proxy_url`, phase timing metrics show the CONNECT tunnel setup and target TLS handshake:
 
@@ -524,8 +552,9 @@ The agent automatically adds a `network_path` label to every probe metric: `"pro
 On the Grafana dashboard:
 
 - The "All Probes — Status Table" includes a "Path" column.
-- The "Proxy-Path HTTP Probes" section filters by `probe_type="http", network_path="proxy"`.
-- The "HTTP Phase Timing (Proxy Path)" panel shows HTTP phase timings for proxy-path HTTP probes.
+- The "HTTP Probes (Proxy)" section filters by `probe_type="http", network_path="proxy"`.
+- The "HTTP Phase Timing (Proxy)" panel shows HTTP phase timings for proxy-path HTTP probes.
+- The "HTTP Response Body Probes" section shows `probe_type="http_body"` status, body-match, duration, and phase panels.
 - The "Proxy CONNECT Probes" section filters by `probe_type="proxy_connect"`.
 - The "Proxy CONNECT Phase Timing" panel shows raw CONNECT probe phases: `proxy_dial`, `proxy_tls`, and `proxy_connect`.
 - PromQL filter: `probe_success{network_path="proxy"}` selects all proxy-path probes regardless of probe type or service name.

@@ -10,7 +10,7 @@ agent:
     - scope
     - impact
     - target_region
-    - target_partition
+    - target_type
     - target_account
 
 targets:
@@ -19,10 +19,10 @@ targets:
     probe_type: tcp
     tags:
       service: fake-tcp
-      scope: same-region
+      scope: local
       impact: high
       target_region: local
-      target_partition: dev
+      target_type: private
       target_account: dev-stack
 
   - name: tcp-cross-region-open
@@ -31,10 +31,10 @@ targets:
     interval: 10s
     tags:
       service: fake-tcp
-      scope: cross-region
+      scope: external
       impact: high
       target_region: eu-west-1
-      target_partition: dev
+      target_type: private
       target_account: dev-stack-remote
 
   - name: tcp-closed
@@ -42,10 +42,10 @@ targets:
     probe_type: tcp
     tags:
       service: fake-tcp
-      scope: same-region
+      scope: local
       impact: low
       target_region: local
-      target_partition: dev
+      target_type: private
       target_account: dev-stack
 
   - name: http-ok
@@ -56,10 +56,10 @@ targets:
       expected_status_codes: [200]
     tags:
       service: fake-http
-      scope: same-region
+      scope: local
       impact: critical
       target_region: local
-      target_partition: dev
+      target_type: private
       target_account: dev-stack
 
   - name: http-cross-region-ok
@@ -71,10 +71,10 @@ targets:
       expected_status_codes: [200]
     tags:
       service: fake-http
-      scope: cross-region
+      scope: external
       impact: critical
       target_region: eu-west-1
-      target_partition: dev
+      target_type: private
       target_account: dev-stack-remote
 
   - name: http-500-expected-200
@@ -85,10 +85,10 @@ targets:
       expected_status_codes: [200]
     tags:
       service: fake-http
-      scope: same-region
+      scope: local
       impact: high
       target_region: local
-      target_partition: dev
+      target_type: private
       target_account: dev-stack
 
   - name: http-500-any-status
@@ -99,10 +99,10 @@ targets:
       expected_status_codes: []
     tags:
       service: fake-http
-      scope: cross-region
+      scope: external
       impact: medium
       target_region: eu-west-1
-      target_partition: dev
+      target_type: private
       target_account: dev-stack-remote
 
   - name: http-timeout
@@ -114,10 +114,10 @@ targets:
       expected_status_codes: [200]
     tags:
       service: fake-http
-      scope: same-region
+      scope: local
       impact: high
       target_region: local
-      target_partition: dev
+      target_type: private
       target_account: dev-stack
 
   - name: http-upload-64k
@@ -129,10 +129,10 @@ targets:
       expected_status_codes: [200]
     tags:
       service: fake-http
-      scope: same-region
+      scope: local
       impact: medium
       target_region: local
-      target_partition: dev
+      target_type: private
       target_account: dev-stack
 
   - name: http-body-ok
@@ -144,10 +144,10 @@ targets:
       expected_status_codes: [200]
     tags:
       service: fake-http
-      scope: same-region
+      scope: local
       impact: critical
       target_region: local
-      target_partition: dev
+      target_type: private
       target_account: dev-stack
 
   - name: http-body-mismatch
@@ -159,10 +159,10 @@ targets:
       expected_status_codes: [200]
     tags:
       service: fake-http
-      scope: same-region
+      scope: local
       impact: high
       target_region: local
-      target_partition: dev
+      target_type: private
       target_account: dev-stack
 
   - name: http-body-bad-status
@@ -174,10 +174,10 @@ targets:
       expected_status_codes: [200]
     tags:
       service: fake-http
-      scope: same-region
+      scope: local
       impact: high
       target_region: local
-      target_partition: dev
+      target_type: private
       target_account: dev-stack
 
   - name: http-via-proxy
@@ -189,10 +189,26 @@ targets:
       proxy_url: "http://fake-targets:8888"
     tags:
       service: fake-proxy
-      scope: same-region
+      scope: local
       impact: high
       target_region: local
-      target_partition: dev
+      target_type: private
+      target_account: dev-stack
+
+  - name: http-https-via-proxy
+    address: "https://fake-targets:9443/ok"
+    probe_type: http
+    probe_opts:
+      method: GET
+      expected_status_codes: [200]
+      tls_skip_verify: true
+      proxy_url: "http://fake-targets:8888"
+    tags:
+      service: fake-proxy
+      scope: local
+      impact: high
+      target_region: local
+      target_type: private
       target_account: dev-stack
 
   - name: http-cross-region-via-proxy
@@ -205,10 +221,10 @@ targets:
       proxy_url: "http://fake-targets:8888"
     tags:
       service: fake-proxy
-      scope: cross-region
+      scope: external
       impact: high
       target_region: eu-west-1
-      target_partition: dev
+      target_type: private
       target_account: dev-stack-remote
 
   - name: proxy-connect-ok
@@ -218,10 +234,10 @@ targets:
       proxy_url: "http://fake-targets:8888"
     tags:
       service: fake-proxy
-      scope: same-region
+      scope: local
       impact: high
       target_region: local
-      target_partition: dev
+      target_type: private
       target_account: dev-stack
 
   - name: proxy-connect-denied
@@ -232,10 +248,10 @@ targets:
       expected_proxy_connect_status_codes: [403]
     tags:
       service: fake-proxy
-      scope: same-region
+      scope: local
       impact: low
       target_region: local
-      target_partition: dev
+      target_type: private
       target_account: dev-stack
 
   - name: tls-cert-via-proxy
@@ -246,10 +262,10 @@ targets:
       proxy_url: "http://fake-targets:8888"
     tags:
       service: fake-proxy
-      scope: same-region
+      scope: local
       impact: high
       target_region: local
-      target_partition: dev
+      target_type: private
       target_account: dev-stack
 
   - name: dns-fake-targets
@@ -260,10 +276,10 @@ targets:
       dns_query_type: A
     tags:
       service: fake-dns
-      scope: same-region
+      scope: local
       impact: high
       target_region: local
-      target_partition: dev
+      target_type: private
       target_account: dev-stack
 
   - name: dns-localhost-match
@@ -275,10 +291,10 @@ targets:
       dns_expected: ["127.0.0.1"]
     tags:
       service: fake-dns
-      scope: same-region
+      scope: local
       impact: high
       target_region: local
-      target_partition: dev
+      target_type: private
       target_account: dev-stack
 
   - name: dns-localhost-mismatch
@@ -290,10 +306,10 @@ targets:
       dns_expected: ["203.0.113.10"]
     tags:
       service: fake-dns
-      scope: same-region
+      scope: local
       impact: low
       target_region: local
-      target_partition: dev
+      target_type: private
       target_account: dev-stack
 
   - name: icmp-fake-targets
@@ -306,10 +322,10 @@ targets:
       ping_interval: 0.1
     tags:
       service: fake-icmp
-      scope: same-region
+      scope: local
       impact: high
       target_region: local
-      target_partition: dev
+      target_type: private
       target_account: dev-stack
 
   - name: mtu-fake-targets
@@ -324,10 +340,10 @@ targets:
       mtu_per_attempt_timeout: 500ms
     tags:
       service: fake-mtu
-      scope: cross-region
+      scope: external
       impact: critical
       target_region: eu-west-1
-      target_partition: dev
+      target_type: private
       target_account: dev-stack-remote
 
   # Sizes far exceed the Docker bridge MTU (1500), so the local kernel rejects
@@ -347,10 +363,10 @@ targets:
       mtu_per_attempt_timeout: 500ms
     tags:
       service: fake-mtu
-      scope: same-region
+      scope: local
       impact: high
       target_region: local
-      target_partition: dev
+      target_type: private
       target_account: dev-stack
 
   - name: mtu-unreachable
@@ -365,8 +381,8 @@ targets:
       mtu_per_attempt_timeout: 500ms
     tags:
       service: fake-mtu
-      scope: same-region
+      scope: local
       impact: low
       target_region: local
-      target_partition: dev
+      target_type: private
       target_account: dev-stack

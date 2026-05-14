@@ -96,12 +96,12 @@ This means a proxy can successfully forward regular HTTP traffic to a domain whi
 
 ### HTTP Probe with proxy_url (Recommended)
 
-`probe_type: http` with `proxy_url` in `probe_opts` sends a standard HTTP request routed through the proxy using Go's `http.Transport.Proxy`. For HTTPS targets, the transport internally performs CONNECT + TLS handshake + HTTP request as a single operation — exactly how real clients use forward proxies.
+`probe_type: http` with `proxy_url` in `probe_opts` sends a standard HTTP request routed through the proxy. For HTTPS targets the prober performs an explicit CONNECT + target TLS handshake + HTTP exchange, measuring each step independently so CONNECT latency is visible. For plain HTTP targets the prober uses standard HTTP forward proxying (no CONNECT) — the proxy receives the HTTP request in absolute-URI form.
 
 This is the recommended approach for testing proxy connectivity because:
 
 - It tests the proxy the way clients actually use it (curl, wget, apt, application code)
-- It provides full HTTP metrics: status code and phase timing breakdown, with TLS certificate expiry when `tls_emit_cert_metrics: true`
+- It provides full HTTP metrics: status code and phase timing breakdown (including explicit proxy-path phases), with TLS certificate expiry when `tls_emit_cert_metrics: true`
 - It works with standard forward proxy configurations without requiring special CONNECT allowlists
 
 ### TLS Certificate Probe with proxy_url
@@ -158,17 +158,26 @@ For `probe_type="proxy_connect"`, `network_path="proxy"` means the probe explici
 
 ### Phase Timing for Proxy-Path Probes
 
-When an HTTP probe uses `proxy_url`, the `probe_phase_duration_seconds` metric reflects the full proxy path:
+When an `http` or `http_body` probe uses `proxy_url`, the `probe_phase_duration_seconds` metric exposes explicit proxy-path phases. Phase emission depends on the combination of target URL scheme and proxy URL scheme. `tcp_connect` and `proxy_dial` are **mutually exclusive** per probe execution: direct probes emit `tcp_connect`, proxy-path probes emit `proxy_dial` instead. `dns_resolve` is not emitted on the proxy path — proxy hostname resolution is included in `proxy_dial` and the target hostname is resolved by the proxy itself.
 
-| Phase | Direct Probe | Proxy-Path Probe |
-|---|---|---|
-| `tcp_connect` | TCP handshake with target | TCP dial to proxy + CONNECT tunnel to target |
-| `tls_handshake` | TLS handshake with target | TLS handshake with target (through tunnel) |
-| `request_write` | Time from connection ready (after TLS) to request write completion | Same, through tunnel |
-| `ttfb` | Time from request write completion to first response byte; excludes TLS handshake and request upload | Same, through tunnel |
-| `transfer` | Response body read up to the effective response body limit | Response body read up to the effective response body limit (through tunnel) |
+| Target URL  | Proxy URL   | Proxy Phases Emitted                                            | Target Phases Emitted |
+|-------------|-------------|-----------------------------------------------------------------|-----------------------|
+| `http://`   | `http://`   | `proxy_dial`                                                    | `request_write`, `ttfb`, `transfer` |
+| `http://`   | `https://`  | `proxy_dial`, `proxy_tls`                                       | `request_write`, `ttfb`, `transfer` |
+| `https://`  | `http://`   | `proxy_dial`, `proxy_connect`                                   | `tls_handshake`, `request_write`, `ttfb`, `transfer` |
+| `https://`  | `https://`  | `proxy_dial`, `proxy_tls`, `proxy_connect`                      | `tls_handshake`, `request_write`, `ttfb`, `transfer` |
 
-The key difference is `tcp_connect`: for proxy-path probes it includes both the connection to the proxy server and the CONNECT handshake to establish the tunnel. This phase is notably higher for proxy-path probes and represents the proxy overhead.
+Individual phase meaning when `network_path="proxy"`:
+
+| Phase | Meaning |
+|---|---|
+| `proxy_dial` | TCP dial to the proxy (includes proxy hostname DNS resolution) |
+| `proxy_tls` | TLS handshake with the proxy (only for `https://` proxies) |
+| `proxy_connect` | CONNECT request write and proxy response read (only for HTTPS targets through a proxy) |
+| `tls_handshake` | TLS handshake with the target through the tunnel (only for HTTPS targets) |
+| `request_write` | Time from connection ready to request write completion |
+| `ttfb` | Time from request write completion to first response byte |
+| `transfer` | Response body read up to the effective response body limit (through the tunnel) |
 
 For `tls_cert` probes over `network_path="proxy"`, phases are split more explicitly:
 
@@ -181,14 +190,16 @@ For `tls_cert` probes over `network_path="proxy"`, phases are split more explici
 
 ### Comparing Direct vs Proxy Path
 
-To estimate proxy overhead, compare the `tcp_connect` phase of a proxy-path probe against a direct probe to the same or similar target:
+To estimate proxy overhead, compare `proxy_dial + proxy_connect` of a proxy-path probe against `tcp_connect` of a direct probe to the same or similar target:
 
 ```promql
 # Direct tcp_connect (baseline)
 probe_phase_duration_seconds{target_name="ssm-http", phase="tcp_connect"}
 
-# Proxy-path tcp_connect (includes proxy overhead)
-probe_phase_duration_seconds{target_name="ssm-http-via-proxy", phase="tcp_connect"}
+# Proxy-path proxy hop time (dial + CONNECT)
+sum by (target_name) (
+  probe_phase_duration_seconds{target_name="ssm-http-via-proxy", phase=~"proxy_dial|proxy_connect"}
+)
 ```
 
 The difference approximates the proxy's processing time for CONNECT establishment.
@@ -200,11 +211,13 @@ The Grafana dashboard separates direct and proxy-path probes to avoid misleading
 | Section | Content | Filter |
 |---|---|---|
 | All Probes — Status Table | All probes with a "Path" column | None (shows everything) |
-| HTTP/HTTPS Probes (Direct) | Direct HTTP duration, status codes, and phase timing | `probe_type="http", network_path="direct"` |
-| HTTP Body Probes | Body match, HTTP status codes, and duration | `probe_type="http_body"` |
-| Proxy-Path HTTP Probes | Proxy-path HTTP status, duration, and HTTP phase timing | `probe_type="http", network_path="proxy"` |
-| TLS Certificate Probes | Certificate expiry, including proxy-path certificate checks | `probe_type="tls_cert"` |
-| Proxy CONNECT Probes | Raw CONNECT success, duration, and proxy phase timing | `probe_type="proxy_connect"` |
+| HTTP Probes (Direct) | Direct HTTP duration, status codes, truncation, and phase panels | `probe_type="http", network_path="direct"` |
+| HTTP Probes (Proxy) | Proxy-path HTTP duration and phase panels | `probe_type="http", network_path="proxy"` |
+| HTTP Response Body Probes | Body match, HTTP status codes, duration, and phase panels | `probe_type="http_body"` |
+| Proxy CONNECT Probes | Raw CONNECT success, duration, status, and proxy phase panels | `probe_type="proxy_connect"` |
+| TCP Connectivity | TCP duration and phase panels | `probe_type="tcp"` |
+| DNS Resolution | DNS duration and result-match panels | `probe_type="dns"` |
+| TLS Certificate Expiry | Certificate expiry, chain details, and TLS cert phase panels | `probe_type="tls_cert"` |
 
 This separation prevents proxy-path probes (with inherently higher latency due to the proxy hop) from distorting the Y-axis scale of direct probe charts.
 
@@ -242,7 +255,7 @@ open proxy.
     follow_redirects: false
     expected_status_codes: [200]
   tags:
-    scope: same-region
+    scope: external
     service: egress-proxy
     impact: high
 ```
@@ -262,7 +275,7 @@ Success means: proxy accepted the connection, established a CONNECT tunnel to th
     follow_redirects: false
     expected_status_codes: [200]
   tags:
-    scope: same-region
+    scope: external
     service: egress-proxy
     impact: high
 ```
@@ -281,7 +294,7 @@ For strict "did the proxy ACL deny CONNECT?" checks, prefer the `proxy_connect` 
   probe_opts:
     proxy_url: "http://fwd-proxy.example.internal:8888"
   tags:
-    scope: same-region
+    scope: external
     service: egress-proxy
     impact: high
 ```
@@ -329,13 +342,15 @@ probe_opts:
   proxy_url: "http://username:password@proxy.example.internal:8888"
 ```
 
-For `http` and `http_body` probes, Go's HTTP transport uses those credentials when routing requests through the proxy. For `proxy_connect` and `tls_cert` probes, the agent sends them on the CONNECT request as a `Proxy-Authorization: Basic ...` header. A username without a password is encoded as an empty password (`username:`).
+For `http` and `http_body` probes, the agent sends those credentials as a `Proxy-Authorization: Basic ...` header on the forwarded request (plain `http://` target) or on the `CONNECT` request (HTTPS target). For `proxy_connect` and `tls_cert` probes, the agent sends them on the CONNECT request. A username without a password is encoded as an empty password (`username:`).
 
 Avoid committing real proxy passwords to shared configuration files. Prefer deployment-time secret injection or file permissions that limit access to the agent configuration.
 
-NetSonar does not support skipping TLS verification for HTTPS proxies. The
-`tls_skip_verify` option applies to the target TLS connection, not to the
-proxy's own TLS certificate.
+For `http` and `http_body` probes, the `tls_skip_verify` option applies to both
+the proxy TLS connection (when `proxy_url` uses `https://`) and the target TLS
+connection, matching the previous transport-based behavior. For `proxy_connect`
+and `tls_cert` probes, `tls_skip_verify` applies only to the target TLS
+connection; the proxy's own TLS certificate is always validated.
 
 ## Troubleshooting
 
@@ -345,7 +360,7 @@ proxy's own TLS certificate.
 | Proxy-path probe gets `407 Proxy Authentication Required` | Proxy requires credentials and `proxy_url` has no `user:pass@` userinfo, or the credentials are wrong | Set `proxy_url` to `http://user:pass@proxy:port` or fix the deployed secret |
 | `probe_type: http` with `proxy_url` fails, direct HTTP to same target works | Proxy blocks the target domain or the proxy is unreachable | Check proxy allowlist; verify proxy host:port is reachable from the agent |
 | `probe_type: tls_cert` with `proxy_url` reports a different certificate than direct probing | TLS inspection or a proxy-specific trust path is in use | Treat the metric as the certificate observed from the proxy-path workload path; compare proxy policy and issuer details |
-| `tcp_connect` phase is very high for proxy-path probes | Expected — includes proxy dial + CONNECT handshake | Compare against direct probes to estimate proxy overhead |
+| `tcp_connect` is very high for proxy-path probes | Expected on older NetSonar releases that hid CONNECT latency; newer releases emit `proxy_dial` + `proxy_connect` instead and do not emit `tcp_connect` on the proxy path | Use the proxy-path phase matrix above to interpret per-phase timing |
 | `proxy_dial` is high for `probe_type: proxy_connect` | Slow or congested path to the proxy | Check network path and proxy listener saturation |
 | `proxy_connect` is high for `probe_type: proxy_connect` | Proxy is slow to accept or authorize CONNECT | Check proxy policy, authentication backend, and proxy logs |
 | Proxy-path probe shows `probe_success=0` | Proxy closed the connection, returned a non-200 CONNECT response, rejected authentication, or blocked the target | Check agent logs for `probe failed`, check proxy logs, and try `curl -x proxy:port https://target` from the agent host |

@@ -3,7 +3,6 @@ package shared
 import (
 	"encoding/json"
 	"os"
-	"strings"
 	"testing"
 )
 
@@ -12,16 +11,45 @@ type dashboardJSON struct {
 }
 
 type dashboardPanel struct {
-	ID          int               `json:"id"`
-	Title       string            `json:"title"`
-	Targets     []dashboardTarget `json:"targets"`
-	FieldConfig fieldConfig       `json:"fieldConfig"`
+	ID              int                       `json:"id"`
+	Title           string                    `json:"title"`
+	Type            string                    `json:"type"`
+	Targets         []dashboardTarget         `json:"targets"`
+	FieldConfig     fieldConfig               `json:"fieldConfig"`
+	Options         panelOptions              `json:"options"`
+	Transformations []dashboardTransformation `json:"transformations"`
 }
 
 type dashboardTarget struct {
 	Expr         string `json:"expr"`
 	LegendFormat string `json:"legendFormat"`
 	RefID        string `json:"refId"`
+}
+
+type panelOptions struct {
+	Legend  legendOptions  `json:"legend"`
+	Tooltip tooltipOptions `json:"tooltip"`
+}
+
+type legendOptions struct {
+	DisplayMode string   `json:"displayMode"`
+	Placement   string   `json:"placement"`
+	Calcs       []string `json:"calcs"`
+}
+
+type tooltipOptions struct {
+	Mode string `json:"mode"`
+}
+
+type dashboardTransformation struct {
+	ID      string               `json:"id"`
+	Options transformationOption `json:"options"`
+}
+
+type transformationOption struct {
+	ExcludeByName map[string]bool   `json:"excludeByName"`
+	IndexByName   map[string]int    `json:"indexByName"`
+	RenameByName  map[string]string `json:"renameByName"`
 }
 
 type fieldConfig struct {
@@ -71,11 +99,11 @@ func TestNetsonarDashboardDurationPanelsUseMedianSeries(t *testing.T) {
 			median: `quantile_over_time(0.5, probe_duration_seconds{job=~"$job", probe_type="http", network_path="direct"}[5m])`,
 		},
 		78: {
-			title:  "HTTP Body Duration median (5m)",
+			title:  "HTTP Response Body Duration median (5m)",
 			median: `quantile_over_time(0.5, probe_duration_seconds{job=~"$job", probe_type="http_body"}[5m])`,
 		},
 		83: {
-			title:  "Proxy-Path HTTP Duration median (5m)",
+			title:  "HTTP Duration median (5m) (Proxy)",
 			median: `quantile_over_time(0.5, probe_duration_seconds{job=~"$job", probe_type="http", network_path="proxy"}[5m])`,
 		},
 	}
@@ -104,51 +132,221 @@ func TestNetsonarDashboardSoftMaxOnlyOnSmoothedDurationPanels(t *testing.T) {
 	}
 }
 
-func TestNetsonarStatusTablePrimaryLatencyExcludesFailedResults(t *testing.T) {
+func TestNetsonarStatusTableDoesNotExposePrimaryLatencyColumns(t *testing.T) {
 	dash := loadDashboard(t)
 	panel := findPanel(t, dash, 7)
 
-	target := findTarget(t, panel, "B")
-	if target.Expr[0] != '(' {
-		t.Fatalf("Primary Latency expr = %q, want parenthesized expression", target.Expr)
+	for _, target := range panel.Targets {
+		if target.RefID == "B" {
+			t.Fatalf("status table still has Primary Latency target B: %q", target.Expr)
+		}
 	}
-	wantSuffix := `) unless on(job, target_name) (probe_success{job=~"$job"} == 0)`
-	if len(target.Expr) < len(wantSuffix) || target.Expr[len(target.Expr)-len(wantSuffix):] != wantSuffix {
-		t.Fatalf("Primary Latency expr = %q, want suffix %q", target.Expr, wantSuffix)
+	for _, forbidden := range []string{"Primary Latency", "Latency Signal"} {
+		if hasOverride(panel, forbidden) {
+			t.Fatalf("status table still has override for %q", forbidden)
+		}
 	}
-	wantHTTPBodyFallback := `label_replace(probe_duration_seconds{job=~"$job", probe_type="http_body"}, "phase", "http_body_duration", "__name__", ".*")`
-	if !strings.Contains(target.Expr, wantHTTPBodyFallback) {
-		t.Fatalf("Primary Latency expr = %q, want http_body duration fallback %q", target.Expr, wantHTTPBodyFallback)
+}
+
+func TestNetsonarStatusTableHidesDuplicateJoinedTagColumns(t *testing.T) {
+	dash := loadDashboard(t)
+	panel := findPanel(t, dash, 7)
+	organize := firstOrganize(t, panel)
+	excluded := organize.Options.ExcludeByName
+
+	for _, name := range []string{"target_type 1", "target_type 2", "target_type 3", "target_type 4", "target_type 5", "target_type 6"} {
+		if !excluded[name] {
+			t.Fatalf("status table does not exclude duplicate joined tag column %q", name)
+		}
+	}
+	if excluded["target_type"] {
+		t.Fatal("status table excludes base target_type column, want exactly one visible Target Type column")
+	}
+	if got := organize.Options.IndexByName["target_type"]; got != 17 {
+		t.Fatalf("target_type index = %d, want 17", got)
+	}
+	if got := organize.Options.RenameByName["target_type"]; got != "Target Type" {
+		t.Fatalf("target_type rename = %q, want Target Type", got)
+	}
+}
+
+func TestNetsonarDashboardTLSCertificatePhasePanels(t *testing.T) {
+	dash := loadDashboard(t)
+
+	breakdown := findPanel(t, dash, 207)
+	if breakdown.Title != "TLS Cert Phase Breakdown" || breakdown.Type != "table" {
+		t.Fatalf("panel 207 = %q/%q, want TLS Cert Phase Breakdown/table", breakdown.Title, breakdown.Type)
+	}
+	assertTarget(t, breakdown.Targets[0], "A", `label_join(probe_phase_duration_seconds{job=~"$job", probe_type="tls_cert"}, "target_path", " / ", "target_name", "network_path") or label_replace(label_join(sum by (target_name, network_path) (probe_phase_duration_seconds{job=~"$job", probe_type="tls_cert"}), "target_path", " / ", "target_name", "network_path"), "phase", "total_phases", "__name__", ".*")`, "")
+
+	timing := findPanel(t, dash, 208)
+	if timing.Title != "TLS Phase Timing" || timing.Type != "timeseries" {
+		t.Fatalf("panel 208 = %q/%q, want TLS Phase Timing/timeseries", timing.Title, timing.Type)
+	}
+	assertTarget(t, timing.Targets[0], "A", `probe_phase_duration_seconds{job=~"$job", probe_type="tls_cert"}`, "{{target_name}} - {{network_path}} - {{phase}}")
+}
+
+func TestNetsonarDashboardProbeSectionsHavePhasePanels(t *testing.T) {
+	dash := loadDashboard(t)
+
+	expected := map[int]struct {
+		title  string
+		kind   string
+		expr   string
+		legend string
+	}{
+		201: {
+			title: "HTTP Phase Breakdown (Direct)",
+			kind:  "table",
+			expr:  `probe_phase_duration_seconds{job=~"$job", probe_type="http", network_path="direct"} or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~"$job", probe_type="http", network_path="direct"}), "phase", "total_phases", "__name__", ".*")`,
+		},
+		206: {
+			title:  "HTTP Phase Timing (Direct)",
+			kind:   "timeseries",
+			expr:   `probe_phase_duration_seconds{job=~"$job", probe_type="http", network_path="direct"}`,
+			legend: "{{target_name}} - {{phase}}",
+		},
+		204: {
+			title: "HTTP Phase Breakdown (Proxy)",
+			kind:  "table",
+			expr:  `probe_phase_duration_seconds{job=~"$job", probe_type="http", network_path="proxy"} or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~"$job", probe_type="http", network_path="proxy"}), "phase", "total_phases", "__name__", ".*")`,
+		},
+		205: {
+			title:  "HTTP Phase Timing (Proxy)",
+			kind:   "timeseries",
+			expr:   `probe_phase_duration_seconds{job=~"$job", probe_type="http", network_path="proxy"}`,
+			legend: "{{target_name}} - {{phase}}",
+		},
+		209: {
+			title: "HTTP Response Body Phase Breakdown",
+			kind:  "table",
+			expr:  `label_join(probe_phase_duration_seconds{job=~"$job", probe_type="http_body"}, "target_path", " / ", "target_name", "network_path") or label_replace(label_join(sum by (target_name, network_path) (probe_phase_duration_seconds{job=~"$job", probe_type="http_body"}), "target_path", " / ", "target_name", "network_path"), "phase", "total_phases", "__name__", ".*")`,
+		},
+		210: {
+			title:  "HTTP Response Body Phase Timing",
+			kind:   "timeseries",
+			expr:   `probe_phase_duration_seconds{job=~"$job", probe_type="http_body"}`,
+			legend: "{{target_name}} - {{network_path}} - {{phase}}",
+		},
+		211: {
+			title: "Proxy CONNECT Phase Breakdown",
+			kind:  "table",
+			expr:  `probe_phase_duration_seconds{job=~"$job", probe_type="proxy_connect"} or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~"$job", probe_type="proxy_connect"}), "phase", "total_phases", "__name__", ".*")`,
+		},
+		77: {
+			title:  "Proxy CONNECT Phase Timing",
+			kind:   "timeseries",
+			expr:   `probe_phase_duration_seconds{job=~"$job", probe_type="proxy_connect"}`,
+			legend: "{{target_name}} — {{phase}}",
+		},
+		212: {
+			title: "TCP Phase Breakdown",
+			kind:  "table",
+			expr:  `probe_phase_duration_seconds{job=~"$job", probe_type="tcp"} or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~"$job", probe_type="tcp"}), "phase", "total_phases", "__name__", ".*")`,
+		},
+		213: {
+			title:  "TCP Phase Timing",
+			kind:   "timeseries",
+			expr:   `probe_phase_duration_seconds{job=~"$job", probe_type="tcp"}`,
+			legend: "{{target_name}} - {{phase}}",
+		},
+		207: {
+			title: "TLS Cert Phase Breakdown",
+			kind:  "table",
+			expr:  `label_join(probe_phase_duration_seconds{job=~"$job", probe_type="tls_cert"}, "target_path", " / ", "target_name", "network_path") or label_replace(label_join(sum by (target_name, network_path) (probe_phase_duration_seconds{job=~"$job", probe_type="tls_cert"}), "target_path", " / ", "target_name", "network_path"), "phase", "total_phases", "__name__", ".*")`,
+		},
+		208: {
+			title:  "TLS Phase Timing",
+			kind:   "timeseries",
+			expr:   `probe_phase_duration_seconds{job=~"$job", probe_type="tls_cert"}`,
+			legend: "{{target_name}} - {{network_path}} - {{phase}}",
+		},
 	}
 
-	override := findOverride(t, panel, "Primary Latency")
-	mappings, ok := overridePropertyValue(override, "mappings").([]any)
-	if !ok || len(mappings) != 1 {
-		t.Fatalf("Primary Latency mappings = %#v, want one mapping", mappings)
+	for id, want := range expected {
+		panel := findPanel(t, dash, id)
+		if panel.Title != want.title || panel.Type != want.kind {
+			t.Fatalf("panel %d = %q/%q, want %q/%q", id, panel.Title, panel.Type, want.title, want.kind)
+		}
+		assertTarget(t, panel.Targets[0], "A", want.expr, want.legend)
 	}
-	mapping, ok := mappings[0].(map[string]any)
-	if !ok {
-		t.Fatalf("Primary Latency mapping = %#v, want object", mappings[0])
+}
+
+func TestNetsonarDashboardPhaseTimingPanelsUseTableLegend(t *testing.T) {
+	dash := loadDashboard(t)
+
+	wantCalcs := []string{"mean", "max", "lastNotNull"}
+	for _, id := range []int{206, 205, 210, 77, 213, 208} {
+		panel := findPanel(t, dash, id)
+		if panel.Options.Legend.DisplayMode != "table" {
+			t.Fatalf("panel %d %q legend displayMode = %q, want table", id, panel.Title, panel.Options.Legend.DisplayMode)
+		}
+		if panel.Options.Legend.Placement != "bottom" {
+			t.Fatalf("panel %d %q legend placement = %q, want bottom", id, panel.Title, panel.Options.Legend.Placement)
+		}
+		if len(panel.Options.Legend.Calcs) != len(wantCalcs) {
+			t.Fatalf("panel %d %q legend calcs = %#v, want %#v", id, panel.Title, panel.Options.Legend.Calcs, wantCalcs)
+		}
+		for i, want := range wantCalcs {
+			if panel.Options.Legend.Calcs[i] != want {
+				t.Fatalf("panel %d %q legend calcs = %#v, want %#v", id, panel.Title, panel.Options.Legend.Calcs, wantCalcs)
+			}
+		}
+		if panel.Options.Tooltip.Mode != "multi" {
+			t.Fatalf("panel %d %q tooltip mode = %q, want multi", id, panel.Title, panel.Options.Tooltip.Mode)
+		}
 	}
-	if got := mapping["type"]; got != "special" {
-		t.Fatalf("Primary Latency mapping type = %v, want special", got)
+}
+
+func TestNetsonarDashboardTLSCertificateExpirySortColumnFirst(t *testing.T) {
+	dash := loadDashboard(t)
+
+	for _, id := range []int{60, 61} {
+		panel := findPanel(t, dash, id)
+		index := firstOrganizeIndex(t, panel)
+		if got := index["Value"]; got != 0 {
+			t.Fatalf("panel %d Value column index = %d, want 0", id, got)
+		}
 	}
-	options, ok := mapping["options"].(map[string]any)
-	if !ok {
-		t.Fatalf("Primary Latency mapping options = %#v, want object", mapping["options"])
+}
+
+func TestNetsonarDashboardTCPPanelsUseCurrentScopeValues(t *testing.T) {
+	dash := loadDashboard(t)
+
+	expected := map[int]struct {
+		title string
+		expr  string
+	}{
+		10: {
+			title: "TCP Duration — Local",
+			expr:  `probe_duration_seconds{job=~"$job", probe_type="tcp", scope="local"}`,
+		},
+		11: {
+			title: "TCP Duration — External",
+			expr:  `probe_duration_seconds{job=~"$job", probe_type="tcp", scope="external"}`,
+		},
+		12: {
+			title: "TCP Duration — All Targets",
+			expr:  `probe_duration_seconds{job=~"$job", probe_type="tcp"}`,
+		},
 	}
-	if got := options["match"]; got != "null+nan" {
-		t.Fatalf("Primary Latency mapping match = %v, want null+nan", got)
+
+	for id, want := range expected {
+		panel := findPanel(t, dash, id)
+		if panel.Title != want.title {
+			t.Fatalf("panel %d title = %q, want %q", id, panel.Title, want.title)
+		}
+		assertTarget(t, panel.Targets[0], "A", want.expr, "{{target_name}}")
 	}
-	result, ok := options["result"].(map[string]any)
-	if !ok {
-		t.Fatalf("Primary Latency mapping result = %#v, want object", options["result"])
-	}
-	if got := result["text"]; got != "N/A" {
-		t.Fatalf("Primary Latency mapping text = %v, want N/A", got)
-	}
-	if got := result["color"]; got != "text" {
-		t.Fatalf("Primary Latency mapping color = %v, want text", got)
+}
+
+func TestNetsonarDashboardMTUStatusColumnFirst(t *testing.T) {
+	dash := loadDashboard(t)
+	panel := findPanel(t, dash, 43)
+	index := firstOrganizeIndex(t, panel)
+
+	if got := index["Value #B"]; got != 0 {
+		t.Fatalf("panel 43 Status column index = %d, want 0", got)
 	}
 }
 
@@ -167,6 +365,24 @@ func loadDashboard(t *testing.T) dashboardJSON {
 	return dash
 }
 
+func firstOrganizeIndex(t *testing.T, panel dashboardPanel) map[string]int {
+	t.Helper()
+
+	return firstOrganize(t, panel).Options.IndexByName
+}
+
+func firstOrganize(t *testing.T, panel dashboardPanel) dashboardTransformation {
+	t.Helper()
+
+	for _, transformation := range panel.Transformations {
+		if transformation.ID == "organize" {
+			return transformation
+		}
+	}
+	t.Fatalf("panel %d has no organize transformation", panel.ID)
+	return dashboardTransformation{}
+}
+
 func findPanel(t *testing.T, dash dashboardJSON, id int) dashboardPanel {
 	t.Helper()
 
@@ -179,37 +395,13 @@ func findPanel(t *testing.T, dash dashboardJSON, id int) dashboardPanel {
 	return dashboardPanel{}
 }
 
-func findTarget(t *testing.T, panel dashboardPanel, refID string) dashboardTarget {
-	t.Helper()
-
-	for _, target := range panel.Targets {
-		if target.RefID == refID {
-			return target
-		}
-	}
-	t.Fatalf("target %q not found on panel %d", refID, panel.ID)
-	return dashboardTarget{}
-}
-
-func findOverride(t *testing.T, panel dashboardPanel, name string) fieldOverride {
-	t.Helper()
-
+func hasOverride(panel dashboardPanel, name string) bool {
 	for _, override := range panel.FieldConfig.Overrides {
 		if override.Matcher.ID == "byName" && override.Matcher.Options == name {
-			return override
+			return true
 		}
 	}
-	t.Fatalf("override %q not found on panel %d", name, panel.ID)
-	return fieldOverride{}
-}
-
-func overridePropertyValue(override fieldOverride, id string) any {
-	for _, property := range override.Properties {
-		if property.ID == id {
-			return property.Value
-		}
-	}
-	return nil
+	return false
 }
 
 func assertTarget(t *testing.T, target dashboardTarget, refID, expr, legend string) {
@@ -236,8 +428,8 @@ func assertLatencyPanelStyle(t *testing.T, panel dashboardPanel) {
 	if got := nestedString(t, custom["scaleDistribution"], "type"); got != "linear" {
 		t.Fatalf("panel %d scaleDistribution.type = %q, want linear", panel.ID, got)
 	}
-	if got := nestedString(t, custom["thresholdsStyle"], "mode"); got != "line" {
-		t.Fatalf("panel %d thresholdsStyle.mode = %q, want line", panel.ID, got)
+	if got := nestedString(t, custom["thresholdsStyle"], "mode"); got != "off" {
+		t.Fatalf("panel %d thresholdsStyle.mode = %q, want off", panel.ID, got)
 	}
 
 	thresholds := panel.FieldConfig.Defaults.Thresholds

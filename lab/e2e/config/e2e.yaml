@@ -130,6 +130,18 @@ targets:
       service: fake-proxy
       suite: e2e
 
+  - name: http-https-via-proxy
+    address: "https://fake-targets:9443/ok"
+    probe_type: http
+    probe_opts:
+      method: GET
+      expected_status_codes: [200]
+      tls_skip_verify: true
+      proxy_url: "http://fake-targets:8888"
+    tags:
+      service: fake-proxy
+      suite: e2e
+
   - name: proxy-connect-ok
     address: "fake-targets:9000"
     probe_type: proxy_connect

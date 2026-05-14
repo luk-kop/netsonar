@@ -28,21 +28,6 @@ var (
 	httpRequestBodyPattern     []byte
 )
 
-type proxyConnectStatusCapture struct {
-	statusCode int
-	observed   bool
-}
-
-type proxyConnectStatusCaptureKey struct{}
-
-func captureProxyConnectStatus(ctx context.Context, _ *url.URL, _ *http.Request, resp *http.Response) error {
-	if capture, ok := ctx.Value(proxyConnectStatusCaptureKey{}).(*proxyConnectStatusCapture); ok && resp != nil {
-		capture.statusCode = resp.StatusCode
-		capture.observed = true
-	}
-	return nil
-}
-
 func requestBodyReader(n int64) io.Reader {
 	httpRequestBodyPatternOnce.Do(func() {
 		httpRequestBodyPattern = bytes.Repeat([]byte("n"), int(config.MaxHTTPRequestBodyBytes))
@@ -57,9 +42,18 @@ type HTTPProber struct {
 	// DisableKeepAlives to ensure each probe creates a fresh connection
 	// for accurate connection-establishment measurements.
 	client *http.Client
-	// useProxy is true when the prober was constructed with a non-empty
-	// proxyURL, so a CONNECT response can be observed and is worth capturing.
-	useProxy bool
+	// tlsSkipVerify is retained so the proxy-path code can re-derive a
+	// tls.Config per probe without reading back into the transport.
+	tlsSkipVerify bool
+	// followRedirects is retained so the proxy-path code can match the
+	// direct-path CheckRedirect contract (follow 3xx like http.Client's
+	// default, or stop at first response when false).
+	followRedirects bool
+	// proxyURL, when non-nil, routes every probe through an explicit
+	// proxy-aware code path that measures proxy phases (proxy_dial,
+	// proxy_tls, proxy_connect) instead of hiding them inside Go's
+	// default http.Transport.
+	proxyURL *url.URL
 }
 
 // NewHTTPProber creates an HTTPProber with a transport configured for
@@ -71,11 +65,6 @@ func NewHTTPProber(tlsSkipVerify bool, followRedirects bool, proxyURL string) *H
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: tlsSkipVerify,
 		},
-	}
-
-	if proxyURL != "" {
-		transport.Proxy = http.ProxyURL(mustProxyURL("NewHTTPProber", proxyURL))
-		transport.OnProxyConnectResponse = captureProxyConnectStatus
 	}
 
 	client := &http.Client{
@@ -90,7 +79,17 @@ func NewHTTPProber(tlsSkipVerify bool, followRedirects bool, proxyURL string) *H
 		}
 	}
 
-	return &HTTPProber{client: client, useProxy: proxyURL != ""}
+	var parsedProxy *url.URL
+	if proxyURL != "" {
+		parsedProxy = mustProxyURL("NewHTTPProber", proxyURL)
+	}
+
+	return &HTTPProber{
+		client:          client,
+		tlsSkipVerify:   tlsSkipVerify,
+		followRedirects: followRedirects,
+		proxyURL:        parsedProxy,
+	}
 }
 
 // Probe executes a full HTTP request against target.Address with httptrace
@@ -112,6 +111,13 @@ func NewHTTPProber(tlsSkipVerify bool, followRedirects bool, proxyURL string) *H
 //   - The response body is read up to defaultResponseBodyLimit (1 MiB) and closed
 //   - result.Error is non-empty when Success is false
 func (p *HTTPProber) Probe(ctx context.Context, target config.TargetConfig) ProbeResult {
+	if p.proxyURL != nil {
+		return p.probeViaProxy(ctx, target)
+	}
+	return p.probeDirect(ctx, target)
+}
+
+func (p *HTTPProber) probeDirect(ctx context.Context, target config.TargetConfig) ProbeResult {
 	var result ProbeResult
 
 	method := target.ProbeOpts.Method
@@ -145,11 +151,6 @@ func (p *HTTPProber) Probe(ctx context.Context, target config.TargetConfig) Prob
 		body = requestBodyReader(target.ProbeOpts.RequestBodyBytes)
 	}
 	reqCtx := httptrace.WithClientTrace(ctx, trace)
-	var connectCapture *proxyConnectStatusCapture
-	if p.useProxy {
-		connectCapture = &proxyConnectStatusCapture{}
-		reqCtx = context.WithValue(reqCtx, proxyConnectStatusCaptureKey{}, connectCapture)
-	}
 
 	req, err := http.NewRequestWithContext(
 		reqCtx,
@@ -172,10 +173,6 @@ func (p *HTTPProber) Probe(ctx context.Context, target config.TargetConfig) Prob
 
 	start := time.Now()
 	resp, err := p.client.Do(req)
-	if connectCapture != nil && connectCapture.observed {
-		result.ProxyConnectResponseReceived = true
-		result.ProxyConnectStatusCode = connectCapture.statusCode
-	}
 	if err != nil {
 		result.Duration = time.Since(start)
 		result.Error = err.Error()
@@ -232,6 +229,226 @@ func (p *HTTPProber) Probe(ctx context.Context, target config.TargetConfig) Prob
 	}
 
 	return result
+}
+
+// probeViaProxy executes an HTTP probe routed through p.proxyURL using an
+// explicit proxy-aware code path. This is required so per-phase timing
+// includes proxy_dial, optional proxy_tls, and for HTTPS targets
+// proxy_connect and tls_handshake, rather than hiding CONNECT latency
+// inside Go's default http.Transport.
+//
+// When p.followRedirects is true, 3xx responses trigger a follow-up
+// exchange through the same proxy (up to proxyRedirectLimit hops). The
+// reported Phases reflect the final hop only, matching the direct path
+// where httptrace fires on every hop and the last hop wins. When
+// p.followRedirects is false, a 3xx response is returned as-is and
+// success is evaluated against expected_status_codes.
+func (p *HTTPProber) probeViaProxy(ctx context.Context, target config.TargetConfig) ProbeResult {
+	var result ProbeResult
+	start := time.Now()
+
+	currentURL, err := url.Parse(target.Address)
+	if err != nil {
+		result.Duration = time.Since(start)
+		result.Error = fmt.Sprintf("parse target URL: %s", err.Error())
+		return result
+	}
+
+	method := target.ProbeOpts.Method
+	if method == "" {
+		method = http.MethodGet
+	}
+
+	headers := target.ProbeOpts.Headers
+	var requestBody io.Reader
+	if target.ProbeOpts.RequestBodyBytes > 0 {
+		requestBody = requestBodyReader(target.ProbeOpts.RequestBodyBytes)
+		if headers == nil || headers["Content-Type"] == "" {
+			merged := make(map[string]string, len(headers)+1)
+			for k, v := range headers {
+				merged[k] = v
+			}
+			merged["Content-Type"] = "application/octet-stream"
+			headers = merged
+		}
+	}
+
+	var exchange proxyHTTPExchangeResult
+	currentMethod := method
+	currentHeaders := headers
+	currentBody := requestBody
+	hop := 0
+	for {
+		exchange = executeProxyHTTPExchange(ctx, p.proxyURL, currentURL, currentMethod, currentHeaders, currentBody, p.tlsSkipVerify)
+
+		if exchange.connectResp.Observed && !result.ProxyConnectResponseReceived {
+			// Preserve the first observed CONNECT status — subsequent
+			// hops may not go through CONNECT (e.g. redirect from
+			// https:// to http://) and overwriting with zero would hide
+			// the initial CONNECT diagnostic.
+			result.ProxyConnectResponseReceived = true
+			result.ProxyConnectStatusCode = exchange.connectResp.StatusCode
+		}
+
+		if exchange.err != nil {
+			result.Duration = time.Since(start)
+			result.Error = exchange.err.Error()
+			result.Phases = buildProxyPhases(exchange.phases, exchange.setupEnd,
+				exchange.wroteRequest, exchange.gotFirstByte, time.Time{})
+			return result
+		}
+
+		if !p.followRedirects || !isRedirect(exchange.resp.StatusCode) {
+			break
+		}
+		next, shouldFollow, err := resolveRedirect(currentURL, exchange.resp)
+		if !shouldFollow {
+			break
+		}
+		_ = exchange.resp.Body.Close()
+		if err != nil {
+			result.Duration = time.Since(start)
+			result.Error = fmt.Sprintf("following redirect: %s", err.Error())
+			return result
+		}
+		if hop >= proxyRedirectLimit-1 {
+			result.Duration = time.Since(start)
+			result.Error = "stopped after 10 redirects"
+			result.Phases = buildProxyPhases(exchange.phases, exchange.setupEnd,
+				exchange.wroteRequest, exchange.gotFirstByte, time.Time{})
+			return result
+		}
+		currentMethod, currentBody, currentHeaders = redirectedRequest(
+			currentMethod,
+			exchange.resp.StatusCode,
+			headers,
+			target.ProbeOpts.RequestBodyBytes,
+		)
+		currentURL = next
+		hop++
+	}
+
+	resp := exchange.resp
+	defer func() { _ = resp.Body.Close() }()
+
+	result.HTTPResponseReceived = true
+	result.StatusCode = resp.StatusCode
+	if resp.TLS != nil && len(resp.TLS.PeerCertificates) > 0 {
+		setTLSCertificateResult(&result, resp.TLS.PeerCertificates)
+	}
+
+	effectiveLimit := target.ProbeOpts.ResponseBodyLimitBytes
+	if effectiveLimit <= 0 {
+		effectiveLimit = defaultResponseBodyLimit
+	}
+
+	bytesRead, err := io.Copy(io.Discard, io.LimitReader(resp.Body, effectiveLimit+1))
+	transferEnd := time.Now()
+	if err != nil {
+		result.Duration = transferEnd.Sub(start)
+		result.Error = fmt.Sprintf("reading response body: %s", err.Error())
+		result.Phases = buildProxyPhases(exchange.phases, exchange.setupEnd,
+			exchange.wroteRequest, exchange.gotFirstByte, transferEnd)
+		return result
+	}
+	result.HTTPTruncationEvaluated = true
+	if bytesRead > effectiveLimit {
+		result.HTTPResponseTruncated = true
+	}
+
+	result.Duration = transferEnd.Sub(start)
+	result.Phases = buildProxyPhases(exchange.phases, exchange.setupEnd,
+		exchange.wroteRequest, exchange.gotFirstByte, transferEnd)
+
+	if len(target.ProbeOpts.ExpectedStatusCodes) > 0 {
+		if slices.Contains(target.ProbeOpts.ExpectedStatusCodes, resp.StatusCode) {
+			result.Success = true
+		} else {
+			result.Error = "unexpected status code"
+		}
+	} else {
+		result.Success = true
+	}
+
+	return result
+}
+
+// proxyRedirectLimit caps redirect following on the proxy path. Go's
+// default http.Client uses 10; we match that for parity with direct-path
+// behavior.
+const proxyRedirectLimit = 10
+
+func isRedirect(code int) bool {
+	switch code {
+	case http.StatusMovedPermanently,
+		http.StatusFound,
+		http.StatusSeeOther,
+		http.StatusTemporaryRedirect,
+		http.StatusPermanentRedirect:
+		return true
+	}
+	return false
+}
+
+// resolveRedirect resolves a 3xx response's Location header against the
+// previous request URL. An empty Location means "do not follow"; Go's
+// net/http client treats such 3xx responses as final responses.
+func resolveRedirect(base *url.URL, resp *http.Response) (*url.URL, bool, error) {
+	loc := resp.Header.Get("Location")
+	if loc == "" {
+		return nil, false, nil
+	}
+	parsed, err := base.Parse(loc)
+	if err != nil {
+		return nil, true, fmt.Errorf("parse Location %q: %s", loc, err.Error())
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return nil, true, fmt.Errorf("unsupported redirect scheme %q", parsed.Scheme)
+	}
+	return parsed, true, nil
+}
+
+func redirectedRequest(
+	currentMethod string,
+	statusCode int,
+	initialHeaders map[string]string,
+	requestBodyBytes int64,
+) (string, io.Reader, map[string]string) {
+	switch statusCode {
+	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther:
+		if currentMethod != http.MethodGet && currentMethod != http.MethodHead {
+			return http.MethodGet, nil, stripRequestBodyHeaders(initialHeaders)
+		}
+		return currentMethod, nil, stripRequestBodyHeaders(initialHeaders)
+	case http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
+		if currentMethod == http.MethodPost && requestBodyBytes > 0 {
+			return currentMethod, requestBodyReader(requestBodyBytes), initialHeaders
+		}
+		if currentMethod == http.MethodGet || currentMethod == http.MethodHead {
+			return currentMethod, nil, stripRequestBodyHeaders(initialHeaders)
+		}
+		return currentMethod, nil, initialHeaders
+	}
+	return currentMethod, nil, initialHeaders
+}
+
+// stripRequestBodyHeaders returns a copy of headers with body-specific
+// entries removed. Redirects are followed with GET and no body, so any
+// Content-Type/Content-Length originally added for a POST should not be
+// carried along.
+func stripRequestBodyHeaders(headers map[string]string) map[string]string {
+	if len(headers) == 0 {
+		return headers
+	}
+	out := make(map[string]string, len(headers))
+	for k, v := range headers {
+		switch http.CanonicalHeaderKey(k) {
+		case "Content-Type", "Content-Length":
+			continue
+		}
+		out[k] = v
+	}
+	return out
 }
 
 // buildPhases constructs the phase duration map from the recorded timestamps.

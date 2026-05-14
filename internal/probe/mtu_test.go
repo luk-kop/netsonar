@@ -126,7 +126,6 @@ func TestClassifyPayloadAttempts(t *testing.T) {
 }
 
 func TestApplySanityFailure(t *testing.T) {
-	start := time.Now()
 	permissionErr := &os.PathError{Op: "listen", Path: "ip4:icmp", Err: os.ErrPermission}
 
 	tests := []struct {
@@ -175,7 +174,7 @@ func TestApplySanityFailure(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var result ProbeResult
 			result.PathMTU = -1
-			handled := applySanityFailure(&result, tt.sanity, start)
+			handled := applySanityFailure(&result, tt.sanity)
 			if handled != tt.wantHandle {
 				t.Fatalf("handled = %v, want %v", handled, tt.wantHandle)
 			}

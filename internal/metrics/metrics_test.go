@@ -150,8 +150,11 @@ func TestNewMetricsExporter_ProbePhaseDurationHelpMentionsCurrentEmitters(t *tes
 
 	wantSnippets := []string{
 		"TCP: dns_resolve for hostname targets, tcp_connect",
-		"HTTP: dns_resolve, tcp_connect, tls_handshake, request_write, ttfb, transfer",
+		"HTTP and http_body direct: dns_resolve for hostname targets, tcp_connect, tls_handshake for https, request_write, ttfb, transfer",
+		"HTTP and http_body via proxy: proxy_dial",
+		"tcp_connect and dns_resolve are not emitted on the proxy path",
 		"TLS cert direct: dns_resolve for hostname targets, tcp_connect, tls_handshake",
+		"ICMP and MTU: dns_resolve for hostname targets",
 		"proxy_connect and TLS cert via proxy: proxy_dial, proxy_tls, proxy_connect",
 		"TLS cert via proxy also adds tls_handshake",
 	}

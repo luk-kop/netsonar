@@ -9,11 +9,12 @@ The [`../examples/config.yaml`](../examples/config.yaml) and [`../grafana/dashbo
 | Tag Key in Config    | Dashboard Column | Description                                      |
 |----------------------|------------------|--------------------------------------------------|
 | `service`            | Service          | Logical service name (e.g. `api-pub`, `rds`)     |
-| `scope`              | Scope            | Network scope (`same-region`, `cross-region`, `aws-regional`) |
+| `scope`              | Scope            | Network scope (`local`, `external`)              |
 | `impact`             | Impact           | Business impact level (`critical`, `high`, `medium`, `low`) |
 | `target_region`      | Region           | Target's cloud region (e.g. `eu-central-1`)      |
 | `target_partition`   | Partition        | Network partition (e.g. `global`, `china`)        |
 | `target_account`     | Account          | Account or environment identifier                |
+| `target_type`        | Target Type      | Target class such as `private` or `public`       |
 
 If you add, remove, or rename tag keys in your config, update the dashboard transformations accordingly — otherwise columns will appear empty or extra labels will be hidden.
 
@@ -104,11 +105,12 @@ targets:
     timeout: 3s                                                         # Override agent default_timeout (must be ≤ interval)
     tags:                                                               # Prometheus labels (dynamic, max 20)
       service: api-gw-pub
-      scope: same-region
+      scope: local
       impact: critical
       target_region: eu-central-1
       target_partition: global
       target_account: ep-devops-eu1
+      target_type: private
     probe_opts:                                                         # Probe-type-specific options
       # (see Probe Types section)
 ```
@@ -187,7 +189,7 @@ flowchart TD
 - `expected_status_codes` is rejected for `proxy_connect`; it applies only to target HTTP responses from `http` and `http_body` probes.
 - When set, `proxy_url` must be `http://[user:pass@]host[:port]` or `https://[user:pass@]host[:port]`; paths other than `/`, query strings, fragments, invalid ports, relative URLs, and non-HTTP schemes are rejected
 - If `proxy_url` includes `user:pass@`, the credentials are used for proxy Basic authentication; `proxy_connect` and `tls_cert` probes over `network_path="proxy"` send them as `Proxy-Authorization` on the CONNECT request
-- Skipping TLS verification for HTTPS proxies is not supported. `tls_skip_verify` applies to the target TLS connection, not to the proxy's own TLS certificate.
+- For `http` and `http_body`, `tls_skip_verify` applies to both the target TLS connection and the proxy TLS connection when `proxy_url` uses `https://`. For `proxy_connect` and `tls_cert`, it applies only to the target TLS connection; the proxy's own TLS certificate is always validated.
 - `mtu_retries` must be ≥ 1 when specified
 - `mtu_per_attempt_timeout` must be > 0 and ≤ `timeout` when specified
 - `icmp_payload_sizes` values must be > 0
