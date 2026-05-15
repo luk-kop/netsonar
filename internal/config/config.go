@@ -494,6 +494,9 @@ func validateProbeOpts(t TargetConfig) error {
 		if err := validateProxyURLUnsupported(t); err != nil {
 			return err
 		}
+		if err := validateTCPAddress(t); err != nil {
+			return err
+		}
 	case ProbeTypeHTTP, ProbeTypeHTTPBody:
 		if err := validateHTTPMethod(t); err != nil {
 			return err
@@ -559,6 +562,21 @@ func validateProbeOpts(t TargetConfig) error {
 		if err := validateExpectedProxyConnectStatusCodes(t); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validateTCPAddress(t TargetConfig) error {
+	if strings.Contains(t.Address, "://") {
+		return fmt.Errorf("target %q: probe_type 'tcp' address must be host:port", t.Name)
+	}
+	host, port, err := net.SplitHostPort(t.Address)
+	if err != nil || host == "" || port == "" {
+		return fmt.Errorf("target %q: probe_type 'tcp' address must be host:port", t.Name)
+	}
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 1 || portNumber > 65535 {
+		return fmt.Errorf("target %q: probe_type 'tcp' address port must be in range 1-65535", t.Name)
 	}
 	return nil
 }

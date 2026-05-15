@@ -129,27 +129,12 @@ func (p *HTTPBodyProber) probeDirect(ctx context.Context, target config.TargetCo
 
 	// Phase timing anchors. Zero-valued times indicate the phase did not
 	// occur (e.g. tls_handshake on plain HTTP, or dns_resolve for literal
-	// IP hosts).
-	var (
-		dnsStart, dnsEnd         time.Time
-		connectStart, connectEnd time.Time
-		tlsStart, tlsEnd         time.Time
-		wroteRequest             time.Time
-		gotFirstByte             time.Time
-	)
+	// IP hosts). httptrace callbacks may fire concurrently from net/http
+	// transport goroutines, so the timings are guarded by a mutex and read
+	// via snapshot after client.Do returns.
+	timings := &httpTraceTimings{}
 
-	trace := &httptrace.ClientTrace{
-		DNSStart:             func(_ httptrace.DNSStartInfo) { dnsStart = time.Now() },
-		DNSDone:              func(_ httptrace.DNSDoneInfo) { dnsEnd = time.Now() },
-		ConnectStart:         func(_, _ string) { connectStart = time.Now() },
-		ConnectDone:          func(_, _ string, _ error) { connectEnd = time.Now() },
-		TLSHandshakeStart:    func() { tlsStart = time.Now() },
-		TLSHandshakeDone:     func(_ tls.ConnectionState, _ error) { tlsEnd = time.Now() },
-		WroteRequest:         func(_ httptrace.WroteRequestInfo) { wroteRequest = time.Now() },
-		GotFirstResponseByte: func() { gotFirstByte = time.Now() },
-	}
-
-	reqCtx := httptrace.WithClientTrace(ctx, trace)
+	reqCtx := httptrace.WithClientTrace(ctx, timings.trace())
 	req, err := http.NewRequestWithContext(reqCtx, method, target.Address, nil)
 	if err != nil {
 		result.Error = fmt.Sprintf("creating request: %s", err.Error())
@@ -163,8 +148,7 @@ func (p *HTTPBodyProber) probeDirect(ctx context.Context, target config.TargetCo
 	resp, err := p.client.Do(req)
 	if err != nil {
 		result.Error = fmt.Sprintf("http request: %s", err.Error())
-		result.Phases = buildPhases(dnsStart, dnsEnd, connectStart, connectEnd,
-			tlsStart, tlsEnd, wroteRequest, gotFirstByte, time.Time{})
+		result.Phases = buildPhasesFromSnapshot(timings.snapshot(), time.Time{})
 		return result
 	}
 
@@ -176,15 +160,13 @@ func (p *HTTPBodyProber) probeDirect(ctx context.Context, target config.TargetCo
 
 	if err != nil {
 		result.Error = fmt.Sprintf("reading response body: %s", err.Error())
-		result.Phases = buildPhases(dnsStart, dnsEnd, connectStart, connectEnd,
-			tlsStart, tlsEnd, wroteRequest, gotFirstByte, transferEnd)
+		result.Phases = buildPhasesFromSnapshot(timings.snapshot(), transferEnd)
 		return result
 	}
 
 	if int64(len(body)) > maxHTTPBodyBytes {
 		result.Error = fmt.Sprintf("response body exceeds %d byte limit", maxHTTPBodyBytes)
-		result.Phases = buildPhases(dnsStart, dnsEnd, connectStart, connectEnd,
-			tlsStart, tlsEnd, wroteRequest, gotFirstByte, transferEnd)
+		result.Phases = buildPhasesFromSnapshot(timings.snapshot(), transferEnd)
 		return result
 	}
 
@@ -193,8 +175,7 @@ func (p *HTTPBodyProber) probeDirect(ctx context.Context, target config.TargetCo
 	statusMatch := len(target.ProbeOpts.ExpectedStatusCodes) == 0 ||
 		slices.Contains(target.ProbeOpts.ExpectedStatusCodes, resp.StatusCode)
 	result.Success = result.BodyMatch && statusMatch
-	result.Phases = buildPhases(dnsStart, dnsEnd, connectStart, connectEnd,
-		tlsStart, tlsEnd, wroteRequest, gotFirstByte, transferEnd)
+	result.Phases = buildPhasesFromSnapshot(timings.snapshot(), transferEnd)
 
 	if !result.Success {
 		switch {

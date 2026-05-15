@@ -1145,6 +1145,40 @@ targets:
 	}
 }
 
+func TestLoadConfig_TCPRequiresHostPortAddress(t *testing.T) {
+	tests := []struct {
+		name    string
+		address string
+		want    string
+	}{
+		{"missing-port", "example.com", "host:port"},
+		{"url-syntax", "https://example.com:443", "host:port"},
+		{"invalid-port", "example.com:70000", "1-65535"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			yaml := fmt.Sprintf(`
+agent:
+  default_interval: 30s
+
+targets:
+  - name: "tcp-%s"
+    address: "%s"
+    probe_type: tcp
+    timeout: 5s
+`, tt.name, tt.address)
+			_, err := LoadConfig(writeConfigFile(t, yaml))
+			if err == nil {
+				t.Fatal("expected TCP address validation error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %q, want it to contain %q", err.Error(), tt.want)
+			}
+		})
+	}
+}
+
 // httpBodyMatchOpt returns a YAML probe_opts snippet that satisfies the
 // http_body body-matcher requirement. Returns empty string for other types.
 func httpBodyMatchOpt(probeType string) string {
@@ -1249,11 +1283,12 @@ func TestLoadConfig_ProxyURLEmptyAllowedForUnsupportedProbeTypes(t *testing.T) {
 	tests := []struct {
 		name      string
 		probeType string
+		address   string
 	}{
-		{"tcp", "tcp"},
-		{"icmp", "icmp"},
-		{"mtu", "mtu"},
-		{"dns", "dns"},
+		{"tcp", "tcp", "example.com:443"},
+		{"icmp", "icmp", "example.com"},
+		{"mtu", "mtu", "example.com"},
+		{"dns", "dns", "example.com"},
 	}
 
 	for _, tt := range tests {
@@ -1264,12 +1299,12 @@ agent:
 
 targets:
   - name: "%s-empty-proxy-url"
-    address: "example.com"
+    address: "%s"
     probe_type: %s
     timeout: 5s
     probe_opts:
       proxy_url: ""
-`, tt.probeType, tt.probeType)
+`, tt.probeType, tt.address, tt.probeType)
 			_, err := LoadConfig(writeConfigFile(t, yaml))
 			if err != nil {
 				t.Fatalf("expected no error for empty proxy_url on %s, got: %v", tt.probeType, err)
