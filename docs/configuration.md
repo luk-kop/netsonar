@@ -185,6 +185,7 @@ flowchart TD
 - `body_match_regex` and `body_match_string` are supported only by `http_body`
 - `proxy_url` is required when `probe_type` is `proxy_connect`; optional for `http`, `http_body`, and `tls_cert`; rejected when non-empty for `tcp`, `icmp`, `mtu`, and `dns`
 - For `proxy_connect`, `address` must be `host:port`, not a URL. CONNECT policy is host-and-port based and does not include an HTTP path.
+- For `tcp`, `address` must be `host:port` with port in range `1`-`65535`. URL syntax is rejected.
 - For `proxy_connect`, `expected_proxy_connect_status_codes` may list valid HTTP status codes in the range `100`-`599`; when set, `probe_success=1` means the proxy returned one of those CONNECT response statuses. Use this for explicit negative tests such as expected Squid `403` denies.
 - `expected_status_codes` is rejected for `proxy_connect`; it applies only to target HTTP responses from `http` and `http_body` probes.
 - When set, `proxy_url` must be `http://[user:pass@]host[:port]` or `https://[user:pass@]host[:port]`; paths other than `/`, query strings, fragments, invalid ports, relative URLs, and non-HTTP schemes are rejected

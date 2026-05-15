@@ -117,13 +117,13 @@ func (p *TLSCertProber) probeViaProxy(ctx context.Context, rawProxyURL, addr str
 	}
 
 	start := time.Now()
-	conn, phases, connectResp, err := dialProxyTunnel(ctx, proxyURL, addr, false)
-	if len(phases) > 0 {
-		result.Phases = phases
+	tunnel, err := dialProxyTunnel(ctx, proxyURL, addr, false)
+	if len(tunnel.phases) > 0 {
+		result.Phases = tunnel.phases
 	}
-	if connectResp.Observed {
+	if tunnel.connectResp.Observed {
 		result.ProxyConnectResponseReceived = true
-		result.ProxyConnectStatusCode = connectResp.StatusCode
+		result.ProxyConnectStatusCode = tunnel.connectResp.StatusCode
 	}
 	if err != nil {
 		result.Duration = time.Since(start)
@@ -131,7 +131,7 @@ func (p *TLSCertProber) probeViaProxy(ctx context.Context, rawProxyURL, addr str
 		return result
 	}
 
-	tlsConn := tls.Client(conn, tlsCfg)
+	tlsConn := tls.Client(tunnel.conn, tlsCfg)
 	defer func() { _ = tlsConn.Close() }()
 
 	tlsStart := time.Now()

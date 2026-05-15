@@ -50,30 +50,30 @@ func (p *ProxyProber) Probe(ctx context.Context, target config.TargetConfig) (re
 	}
 
 	start := time.Now()
-	proxyConn, phases, connectResp, err := dialProxyTunnel(ctx, proxyURL, tunnelDest, false)
+	tunnel, err := dialProxyTunnel(ctx, proxyURL, tunnelDest, false)
 	result.Duration = time.Since(start)
-	if len(phases) > 0 {
-		result.Phases = phases
+	if len(tunnel.phases) > 0 {
+		result.Phases = tunnel.phases
 	}
-	if connectResp.Observed {
+	if tunnel.connectResp.Observed {
 		result.ProxyConnectResponseReceived = true
-		result.ProxyConnectStatusCode = connectResp.StatusCode
+		result.ProxyConnectStatusCode = tunnel.connectResp.StatusCode
 	}
 	if err != nil {
-		if connectResp.Observed && slices.Contains(target.ProbeOpts.ExpectedProxyConnectStatusCodes, connectResp.StatusCode) {
+		if tunnel.connectResp.Observed && slices.Contains(target.ProbeOpts.ExpectedProxyConnectStatusCodes, tunnel.connectResp.StatusCode) {
 			result.Success = true
 			return result
 		}
 		result.Error = err.Error()
 		return result
 	}
-	defer func() { _ = proxyConn.Close() }()
+	defer func() { _ = tunnel.conn.Close() }()
 
 	if len(target.ProbeOpts.ExpectedProxyConnectStatusCodes) > 0 {
-		if slices.Contains(target.ProbeOpts.ExpectedProxyConnectStatusCodes, connectResp.StatusCode) {
+		if slices.Contains(target.ProbeOpts.ExpectedProxyConnectStatusCodes, tunnel.connectResp.StatusCode) {
 			result.Success = true
 		} else {
-			result.Error = fmt.Sprintf("unexpected proxy CONNECT status %d", connectResp.StatusCode)
+			result.Error = fmt.Sprintf("unexpected proxy CONNECT status %d", tunnel.connectResp.StatusCode)
 		}
 		return result
 	}

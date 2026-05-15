@@ -126,31 +126,16 @@ func (p *HTTPProber) probeDirect(ctx context.Context, target config.TargetConfig
 	}
 
 	// Phase timing anchors. Zero-valued times indicate the phase did not
-	// occur (e.g. tls_handshake on plain HTTP).
-	var (
-		dnsStart, dnsEnd         time.Time
-		connectStart, connectEnd time.Time
-		tlsStart, tlsEnd         time.Time
-		wroteRequest             time.Time
-		gotFirstByte             time.Time
-	)
-
-	trace := &httptrace.ClientTrace{
-		DNSStart:             func(_ httptrace.DNSStartInfo) { dnsStart = time.Now() },
-		DNSDone:              func(_ httptrace.DNSDoneInfo) { dnsEnd = time.Now() },
-		ConnectStart:         func(_, _ string) { connectStart = time.Now() },
-		ConnectDone:          func(_, _ string, _ error) { connectEnd = time.Now() },
-		TLSHandshakeStart:    func() { tlsStart = time.Now() },
-		TLSHandshakeDone:     func(_ tls.ConnectionState, _ error) { tlsEnd = time.Now() },
-		WroteRequest:         func(_ httptrace.WroteRequestInfo) { wroteRequest = time.Now() },
-		GotFirstResponseByte: func() { gotFirstByte = time.Now() },
-	}
+	// occur (e.g. tls_handshake on plain HTTP). httptrace callbacks may fire
+	// concurrently from net/http transport goroutines, so the timings are
+	// guarded by a mutex and read via snapshot after client.Do returns.
+	timings := &httpTraceTimings{}
 
 	var body io.Reader
 	if target.ProbeOpts.RequestBodyBytes > 0 {
 		body = requestBodyReader(target.ProbeOpts.RequestBodyBytes)
 	}
-	reqCtx := httptrace.WithClientTrace(ctx, trace)
+	reqCtx := httptrace.WithClientTrace(ctx, timings.trace())
 
 	req, err := http.NewRequestWithContext(
 		reqCtx,
@@ -176,8 +161,7 @@ func (p *HTTPProber) probeDirect(ctx context.Context, target config.TargetConfig
 	if err != nil {
 		result.Duration = time.Since(start)
 		result.Error = err.Error()
-		result.Phases = buildPhases(dnsStart, dnsEnd, connectStart, connectEnd,
-			tlsStart, tlsEnd, wroteRequest, gotFirstByte, time.Time{})
+		result.Phases = buildPhasesFromSnapshot(timings.snapshot(), time.Time{})
 		return result
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -202,8 +186,7 @@ func (p *HTTPProber) probeDirect(ctx context.Context, target config.TargetConfig
 		transferEnd := time.Now()
 		result.Duration = transferEnd.Sub(start)
 		result.Error = fmt.Sprintf("reading response body: %s", err.Error())
-		result.Phases = buildPhases(dnsStart, dnsEnd, connectStart, connectEnd,
-			tlsStart, tlsEnd, wroteRequest, gotFirstByte, transferEnd)
+		result.Phases = buildPhasesFromSnapshot(timings.snapshot(), transferEnd)
 		return result
 	}
 	result.HTTPTruncationEvaluated = true
@@ -213,8 +196,7 @@ func (p *HTTPProber) probeDirect(ctx context.Context, target config.TargetConfig
 	transferEnd := time.Now()
 
 	result.Duration = transferEnd.Sub(start)
-	result.Phases = buildPhases(dnsStart, dnsEnd, connectStart, connectEnd,
-		tlsStart, tlsEnd, wroteRequest, gotFirstByte, transferEnd)
+	result.Phases = buildPhasesFromSnapshot(timings.snapshot(), transferEnd)
 
 	// Determine success based on expected status codes.
 	if len(target.ProbeOpts.ExpectedStatusCodes) > 0 {

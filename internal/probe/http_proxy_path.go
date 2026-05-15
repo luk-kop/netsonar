@@ -71,8 +71,8 @@ func setupProxyTLSConn(
 	tlsSkipVerify bool,
 ) (net.Conn, proxyPhaseTrace, error) {
 	tunnelDest := hostPortForTargetURL(targetURL)
-	proxyConn, phases, connectResp, err := dialProxyTunnel(ctx, proxyURL, tunnelDest, tlsSkipVerify)
-	trace := proxyPhaseTrace{phases: phases, connectResp: connectResp}
+	tunnel, err := dialProxyTunnel(ctx, proxyURL, tunnelDest, tlsSkipVerify)
+	trace := proxyPhaseTrace{phases: tunnel.phases, connectResp: tunnel.connectResp}
 	if err != nil {
 		return nil, trace, err
 	}
@@ -81,7 +81,7 @@ func setupProxyTLSConn(
 	// dialProxyTunnel may have installed a deadline to cap CONNECT
 	// timing against ctx.Deadline(); callers will re-apply their own
 	// deadline for the request write/read.
-	_ = proxyConn.SetDeadline(time.Time{})
+	_ = tunnel.conn.SetDeadline(time.Time{})
 
 	host, _, err := net.SplitHostPort(tunnelDest)
 	if err != nil {
@@ -91,13 +91,13 @@ func setupProxyTLSConn(
 		ServerName:         host,
 		InsecureSkipVerify: tlsSkipVerify,
 	}
-	tlsConn := tls.Client(proxyConn, tlsCfg)
+	tlsConn := tls.Client(tunnel.conn, tlsCfg)
 	tlsStart := time.Now()
 	err = tlsConn.HandshakeContext(ctx)
 	tlsEnd := time.Now()
 	addObservedPhase(trace.phases, PhaseTLSHandshake, tlsEnd, tlsStart)
 	if err != nil {
-		_ = proxyConn.Close()
+		_ = tunnel.conn.Close()
 		return nil, trace, fmt.Errorf("tls handshake: %s", err.Error())
 	}
 	trace.setupEnd = tlsEnd
@@ -218,7 +218,6 @@ type proxyHTTPExchangeResult struct {
 	wroteRequest time.Time
 	gotFirstByte time.Time
 	connectResp  proxyConnectResponse
-	errPhase     string // "setup", "write", "read", or empty on success
 	err          error
 }
 
@@ -245,7 +244,6 @@ func executeProxyHTTPExchange(
 	result.setupEnd = trace.setupEnd
 	result.connectResp = trace.connectResp
 	if err != nil {
-		result.errPhase = "setup"
 		result.err = err
 		return result
 	}
@@ -265,7 +263,6 @@ func executeProxyHTTPExchange(
 
 	req, err := http.NewRequestWithContext(ctx, method, targetURL.String(), requestBody)
 	if err != nil {
-		result.errPhase = "setup"
 		result.err = fmt.Errorf("creating request: %s", err.Error())
 		return result
 	}
@@ -295,7 +292,6 @@ func executeProxyHTTPExchange(
 		wroteRequest := time.Now()
 		result.wroteRequest = wroteRequest
 		addObservedPhase(result.phases, PhaseRequestWrite, wroteRequest, trace.setupEnd)
-		result.errPhase = "write"
 		result.err = fmt.Errorf("writing request: %s", err.Error())
 		return result
 	}
@@ -310,7 +306,6 @@ func executeProxyHTTPExchange(
 	result.gotFirstByte = gotFirstByte
 	if err != nil {
 		addObservedPhase(result.phases, PhaseTTFB, gotFirstByte, wroteRequest)
-		result.errPhase = "read"
 		result.err = fmt.Errorf("reading response: %s", err.Error())
 		return result
 	}
