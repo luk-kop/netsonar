@@ -135,6 +135,7 @@ Each probe type with full YAML examples, options, and behaviour details — see 
 
 Additional deep-dives:
 
+- [Resolver selection and DNS caching behavior](docs/probe-types.md#resolver-selection)
 - [MTU/PMTUD internals](docs/mtu-pmtud.md)
 - [MTU measurement options](docs/mtu-measurement-options.md)
 - [HTTP request payload probes](docs/http-request-payload-probe.md)

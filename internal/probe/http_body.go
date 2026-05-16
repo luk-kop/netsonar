@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptrace"
 	"net/url"
@@ -19,16 +20,22 @@ import (
 
 // HTTPBodyProber probes an HTTP endpoint and validates the response body
 // against a configured regex or substring pattern.
+//
+// HTTPBodyProber holds only static, immutable configuration. The actual
+// *http.Client and *http.Transport are constructed per call to Probe so
+// that concurrent invocations on the same prober — which the scheduler
+// performs across targets that share a probe type — never share a
+// Transport whose RoundTrip path is parameterized by per-target settings
+// (currently the per-target DNS resolver).
 type HTTPBodyProber struct {
-	client                 *http.Client
+	tlsConfig              *tls.Config
 	compiledBodyMatchRegex *regexp.Regexp
 	regexCompileErr        error
 	// tlsSkipVerify is retained so the proxy-path code can re-derive a
 	// tls.Config per probe without reading back into the transport.
 	tlsSkipVerify bool
-	// followRedirects is retained so the proxy-path code can match the
-	// direct-path CheckRedirect contract (follow 3xx like http.Client's
-	// default, or stop at first response when false).
+	// followRedirects controls the CheckRedirect closure on the per-call
+	// http.Client. The proxy-path code mirrors the same contract.
 	followRedirects bool
 	// proxyURL, when non-nil, routes every probe through an explicit
 	// proxy-aware code path that measures proxy phases (proxy_dial,
@@ -41,28 +48,15 @@ type HTTPBodyProber struct {
 // Responses larger than this fail the probe to prevent unbounded memory use.
 const maxHTTPBodyBytes int64 = 1 << 20 // 1 MiB
 
-// NewHTTPBodyProber creates an HTTPBodyProber with a transport configured
-// for single-use connections and the given TLS/redirect settings. If proxyURL
-// is non-empty, all requests are routed through the specified HTTP proxy.
-// bodyMatchRegex is compiled once at construction time and reused for every
-// probe execution.
+// NewHTTPBodyProber creates an HTTPBodyProber with the given TLS/redirect
+// settings. If proxyURL is non-empty, all requests are routed through the
+// specified HTTP proxy. bodyMatchRegex is compiled once at construction
+// time and reused for every probe execution. The actual *http.Client is
+// constructed per Probe invocation so the per-target DNS resolver can be
+// injected without sharing a Transport across concurrent probes.
 func NewHTTPBodyProber(tlsSkipVerify bool, followRedirects bool, proxyURL string, bodyMatchRegex string) *HTTPBodyProber {
-	transport := &http.Transport{
-		DisableKeepAlives: true,
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: tlsSkipVerify,
-		},
-	}
-
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   0, // Enforced via context.
-	}
-
-	if !followRedirects {
-		client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
-			return http.ErrUseLastResponse
-		}
+	tlsCfg := &tls.Config{
+		InsecureSkipVerify: tlsSkipVerify,
 	}
 
 	var compiledRegex *regexp.Regexp
@@ -77,13 +71,38 @@ func NewHTTPBodyProber(tlsSkipVerify bool, followRedirects bool, proxyURL string
 	}
 
 	return &HTTPBodyProber{
-		client:                 client,
+		tlsConfig:              tlsCfg,
 		compiledBodyMatchRegex: compiledRegex,
 		regexCompileErr:        regexErr,
 		tlsSkipVerify:          tlsSkipVerify,
 		followRedirects:        followRedirects,
 		proxyURL:               parsedProxy,
 	}
+}
+
+// newClient builds the *http.Client used for a single probe invocation.
+// See HTTPProber.newClient for rationale; the contract is identical.
+func (p *HTTPBodyProber) newClient(resolver *net.Resolver) *http.Client {
+	transport := &http.Transport{
+		DisableKeepAlives: true,
+		TLSClientConfig:   p.tlsConfig.Clone(),
+		DialContext: (&net.Dialer{
+			Resolver: resolver,
+		}).DialContext,
+	}
+
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   0, // Enforced via context.
+	}
+
+	if !p.followRedirects {
+		client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+	}
+
+	return client
 }
 
 // Probe executes an HTTP request against target.Address, reads the response
@@ -127,6 +146,9 @@ func (p *HTTPBodyProber) probeDirect(ctx context.Context, target config.TargetCo
 		method = http.MethodGet
 	}
 
+	resolver := resolverFor(target.DNSResolver)
+	client := p.newClient(resolver)
+
 	// Phase timing anchors. Zero-valued times indicate the phase did not
 	// occur (e.g. tls_handshake on plain HTTP, or dns_resolve for literal
 	// IP hosts). httptrace callbacks may fire concurrently from net/http
@@ -145,7 +167,7 @@ func (p *HTTPBodyProber) probeDirect(ctx context.Context, target config.TargetCo
 		req.Header.Set(k, v)
 	}
 
-	resp, err := p.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		result.Error = fmt.Sprintf("http request: %s", err.Error())
 		result.Phases = buildPhasesFromSnapshot(timings.snapshot(), time.Time{})
@@ -218,9 +240,10 @@ func (p *HTTPBodyProber) probeViaProxy(ctx context.Context, target config.Target
 	var exchange proxyHTTPExchangeResult
 	currentMethod := method
 	currentHeaders := target.ProbeOpts.Headers
+	resolver := resolverFor(target.DNSResolver)
 	hop := 0
 	for {
-		exchange = executeProxyHTTPExchange(ctx, p.proxyURL, currentURL, currentMethod, currentHeaders, nil, p.tlsSkipVerify)
+		exchange = executeProxyHTTPExchange(ctx, p.proxyURL, currentURL, currentMethod, currentHeaders, nil, p.tlsSkipVerify, resolver)
 
 		if exchange.connectResp.Observed && !result.ProxyConnectResponseReceived {
 			// Preserve the first CONNECT status observed across redirect

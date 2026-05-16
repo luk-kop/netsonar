@@ -28,7 +28,7 @@ func (p *TCPProber) Probe(ctx context.Context, target config.TargetConfig) Probe
 	var result ProbeResult
 
 	start := time.Now()
-	dialResult, err := dialTCPWithSplitPhases(ctx, target.Address)
+	dialResult, err := dialTCPWithSplitPhases(ctx, resolverFor(target.DNSResolver), target.Address)
 	result.Duration = time.Since(start)
 	phases := make(map[string]time.Duration, 2)
 	addObservedPhase(phases, PhaseDNSResolve, dialResult.dnsEnd, dialResult.dnsStart)

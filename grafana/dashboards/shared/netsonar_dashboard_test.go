@@ -177,7 +177,7 @@ func TestNetsonarDashboardTLSCertificatePhasePanels(t *testing.T) {
 	if breakdown.Title != "TLS Cert Phase Breakdown" || breakdown.Type != "table" {
 		t.Fatalf("panel 207 = %q/%q, want TLS Cert Phase Breakdown/table", breakdown.Title, breakdown.Type)
 	}
-	assertTarget(t, breakdown.Targets[0], "A", `label_join(probe_phase_duration_seconds{job=~"$job", probe_type="tls_cert"}, "target_path", " / ", "target_name", "network_path") or label_replace(label_join(sum by (target_name, network_path) (probe_phase_duration_seconds{job=~"$job", probe_type="tls_cert"}), "target_path", " / ", "target_name", "network_path"), "phase", "total_phases", "__name__", ".*")`, "")
+	assertTarget(t, breakdown.Targets[0], "A", `label_join(label_replace(probe_success{job=~"$job", probe_type="tls_cert"}, "phase", "Status", "__name__", ".*"), "target_path", " / ", "target_name", "network_path") or label_join(probe_phase_duration_seconds{job=~"$job", probe_type="tls_cert"}, "target_path", " / ", "target_name", "network_path") or label_replace(label_join(sum by (target_name, network_path) (probe_phase_duration_seconds{job=~"$job", probe_type="tls_cert"}), "target_path", " / ", "target_name", "network_path"), "phase", "total_phases", "__name__", ".*")`, "")
 
 	timing := findPanel(t, dash, 208)
 	if timing.Title != "TLS Phase Timing" || timing.Type != "timeseries" {
@@ -198,7 +198,7 @@ func TestNetsonarDashboardProbeSectionsHavePhasePanels(t *testing.T) {
 		201: {
 			title: "HTTP Phase Breakdown (Direct)",
 			kind:  "table",
-			expr:  `probe_phase_duration_seconds{job=~"$job", probe_type="http", network_path="direct"} or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~"$job", probe_type="http", network_path="direct"}), "phase", "total_phases", "__name__", ".*")`,
+			expr:  `label_replace(probe_success{job=~"$job", probe_type="http", network_path="direct"}, "phase", "Status", "__name__", ".*") or probe_phase_duration_seconds{job=~"$job", probe_type="http", network_path="direct"} or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~"$job", probe_type="http", network_path="direct"}), "phase", "total_phases", "__name__", ".*")`,
 		},
 		206: {
 			title:  "HTTP Phase Timing (Direct)",
@@ -209,7 +209,7 @@ func TestNetsonarDashboardProbeSectionsHavePhasePanels(t *testing.T) {
 		204: {
 			title: "HTTP Phase Breakdown (Proxy)",
 			kind:  "table",
-			expr:  `probe_phase_duration_seconds{job=~"$job", probe_type="http", network_path="proxy"} or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~"$job", probe_type="http", network_path="proxy"}), "phase", "total_phases", "__name__", ".*")`,
+			expr:  `label_replace(probe_success{job=~"$job", probe_type="http", network_path="proxy"}, "phase", "Status", "__name__", ".*") or probe_phase_duration_seconds{job=~"$job", probe_type="http", network_path="proxy"} or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~"$job", probe_type="http", network_path="proxy"}), "phase", "total_phases", "__name__", ".*")`,
 		},
 		205: {
 			title:  "HTTP Phase Timing (Proxy)",
@@ -220,7 +220,7 @@ func TestNetsonarDashboardProbeSectionsHavePhasePanels(t *testing.T) {
 		209: {
 			title: "HTTP Response Body Phase Breakdown",
 			kind:  "table",
-			expr:  `label_join(probe_phase_duration_seconds{job=~"$job", probe_type="http_body"}, "target_path", " / ", "target_name", "network_path") or label_replace(label_join(sum by (target_name, network_path) (probe_phase_duration_seconds{job=~"$job", probe_type="http_body"}), "target_path", " / ", "target_name", "network_path"), "phase", "total_phases", "__name__", ".*")`,
+			expr:  `label_join(label_replace(probe_success{job=~"$job", probe_type="http_body"}, "phase", "Status", "__name__", ".*"), "target_path", " / ", "target_name", "network_path") or label_join(probe_phase_duration_seconds{job=~"$job", probe_type="http_body"}, "target_path", " / ", "target_name", "network_path") or label_replace(label_join(sum by (target_name, network_path) (probe_phase_duration_seconds{job=~"$job", probe_type="http_body"}), "target_path", " / ", "target_name", "network_path"), "phase", "total_phases", "__name__", ".*")`,
 		},
 		210: {
 			title:  "HTTP Response Body Phase Timing",
@@ -231,7 +231,7 @@ func TestNetsonarDashboardProbeSectionsHavePhasePanels(t *testing.T) {
 		211: {
 			title: "Proxy CONNECT Phase Breakdown",
 			kind:  "table",
-			expr:  `probe_phase_duration_seconds{job=~"$job", probe_type="proxy_connect"} or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~"$job", probe_type="proxy_connect"}), "phase", "total_phases", "__name__", ".*")`,
+			expr:  `label_replace(probe_success{job=~"$job", probe_type="proxy_connect"}, "phase", "Status", "__name__", ".*") or probe_phase_duration_seconds{job=~"$job", probe_type="proxy_connect"} or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~"$job", probe_type="proxy_connect"}), "phase", "total_phases", "__name__", ".*")`,
 		},
 		77: {
 			title:  "Proxy CONNECT Phase Timing",
@@ -242,7 +242,7 @@ func TestNetsonarDashboardProbeSectionsHavePhasePanels(t *testing.T) {
 		212: {
 			title: "TCP Phase Breakdown",
 			kind:  "table",
-			expr:  `probe_phase_duration_seconds{job=~"$job", probe_type="tcp"} or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~"$job", probe_type="tcp"}), "phase", "total_phases", "__name__", ".*")`,
+			expr:  `label_replace(probe_success{job=~"$job", probe_type="tcp"}, "phase", "Status", "__name__", ".*") or probe_phase_duration_seconds{job=~"$job", probe_type="tcp"} or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~"$job", probe_type="tcp"}), "phase", "total_phases", "__name__", ".*")`,
 		},
 		213: {
 			title:  "TCP Phase Timing",
@@ -253,7 +253,7 @@ func TestNetsonarDashboardProbeSectionsHavePhasePanels(t *testing.T) {
 		207: {
 			title: "TLS Cert Phase Breakdown",
 			kind:  "table",
-			expr:  `label_join(probe_phase_duration_seconds{job=~"$job", probe_type="tls_cert"}, "target_path", " / ", "target_name", "network_path") or label_replace(label_join(sum by (target_name, network_path) (probe_phase_duration_seconds{job=~"$job", probe_type="tls_cert"}), "target_path", " / ", "target_name", "network_path"), "phase", "total_phases", "__name__", ".*")`,
+			expr:  `label_join(label_replace(probe_success{job=~"$job", probe_type="tls_cert"}, "phase", "Status", "__name__", ".*"), "target_path", " / ", "target_name", "network_path") or label_join(probe_phase_duration_seconds{job=~"$job", probe_type="tls_cert"}, "target_path", " / ", "target_name", "network_path") or label_replace(label_join(sum by (target_name, network_path) (probe_phase_duration_seconds{job=~"$job", probe_type="tls_cert"}), "target_path", " / ", "target_name", "network_path"), "phase", "total_phases", "__name__", ".*")`,
 		},
 		208: {
 			title:  "TLS Phase Timing",
@@ -294,6 +294,22 @@ func TestNetsonarDashboardPhaseTimingPanelsUseTableLegend(t *testing.T) {
 		}
 		if panel.Options.Tooltip.Mode != "multi" {
 			t.Fatalf("panel %d %q tooltip mode = %q, want multi", id, panel.Title, panel.Options.Tooltip.Mode)
+		}
+	}
+}
+
+func TestNetsonarDashboardPhaseBreakdownTablesShowStatusAfterTarget(t *testing.T) {
+	dash := loadDashboard(t)
+
+	for _, id := range []int{201, 204, 209, 211, 212, 207} {
+		panel := findPanel(t, dash, id)
+		index := lastOrganizeIndex(t, panel)
+
+		if got := index["Status"]; got != 1 {
+			t.Fatalf("panel %d %q Status column index = %d, want 1", id, panel.Title, got)
+		}
+		if !hasOverride(panel, "Status") {
+			t.Fatalf("panel %d %q has no Status field override", id, panel.Title)
 		}
 	}
 }
@@ -381,6 +397,18 @@ func firstOrganize(t *testing.T, panel dashboardPanel) dashboardTransformation {
 	}
 	t.Fatalf("panel %d has no organize transformation", panel.ID)
 	return dashboardTransformation{}
+}
+
+func lastOrganizeIndex(t *testing.T, panel dashboardPanel) map[string]int {
+	t.Helper()
+
+	for i := len(panel.Transformations) - 1; i >= 0; i-- {
+		if panel.Transformations[i].ID == "organize" {
+			return panel.Transformations[i].Options.IndexByName
+		}
+	}
+	t.Fatalf("panel %d has no organize transformation", panel.ID)
+	return nil
 }
 
 func findPanel(t *testing.T, dash dashboardJSON, id int) dashboardPanel {

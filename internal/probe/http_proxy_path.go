@@ -33,6 +33,10 @@ type proxyPhaseTrace struct {
 // setupProxyHTTPConn establishes a connection ready for HTTP request
 // exchange through the configured proxy.
 //
+// resolver is used to resolve the proxy hostname before dialing. Callers
+// pass net.DefaultResolver (or BuildResolver("")) for the system path or
+// BuildResolver("ip:port") to pin lookups to a specific server.
+//
 // Phase emission depends on the target URL scheme:
 //
 //   - targetURL.Scheme == "https":
@@ -54,12 +58,13 @@ func setupProxyHTTPConn(
 	ctx context.Context,
 	proxyURL, targetURL *url.URL,
 	tlsSkipVerify bool,
+	resolver *net.Resolver,
 ) (net.Conn, proxyPhaseTrace, error) {
 	switch targetURL.Scheme {
 	case "https":
-		return setupProxyTLSConn(ctx, proxyURL, targetURL, tlsSkipVerify)
+		return setupProxyTLSConn(ctx, proxyURL, targetURL, tlsSkipVerify, resolver)
 	case "http":
-		return setupProxyPlainConn(ctx, proxyURL, tlsSkipVerify)
+		return setupProxyPlainConn(ctx, proxyURL, tlsSkipVerify, resolver)
 	default:
 		return nil, proxyPhaseTrace{}, fmt.Errorf("unsupported target URL scheme %q for proxy path", targetURL.Scheme)
 	}
@@ -69,9 +74,10 @@ func setupProxyTLSConn(
 	ctx context.Context,
 	proxyURL, targetURL *url.URL,
 	tlsSkipVerify bool,
+	resolver *net.Resolver,
 ) (net.Conn, proxyPhaseTrace, error) {
 	tunnelDest := hostPortForTargetURL(targetURL)
-	tunnel, err := dialProxyTunnel(ctx, proxyURL, tunnelDest, tlsSkipVerify)
+	tunnel, err := dialProxyTunnel(ctx, proxyURL, tunnelDest, tlsSkipVerify, resolver)
 	trace := proxyPhaseTrace{phases: tunnel.phases, connectResp: tunnel.connectResp}
 	if err != nil {
 		return nil, trace, err
@@ -110,12 +116,16 @@ func setupProxyPlainConn(
 	ctx context.Context,
 	proxyURL *url.URL,
 	tlsSkipVerify bool,
+	resolver *net.Resolver,
 ) (net.Conn, proxyPhaseTrace, error) {
+	if resolver == nil {
+		resolver = net.DefaultResolver
+	}
 	proxyAddr := hostPortForURL(proxyURL)
 	phases := make(map[string]time.Duration, 2)
 	trace := proxyPhaseTrace{phases: phases}
 
-	var d net.Dialer
+	d := net.Dialer{Resolver: resolver}
 	dialStart := time.Now()
 	conn, err := d.DialContext(ctx, "tcp", proxyAddr)
 	dialEnd := time.Now()
@@ -226,6 +236,10 @@ type proxyHTTPExchangeResult struct {
 // body; callers are responsible for that step so they can measure the
 // transfer phase and apply their own body-size policy.
 //
+// resolver is used for DNS lookups when dialing the proxy. Callers pass
+// net.DefaultResolver (or BuildResolver("")) for the system path or
+// BuildResolver("ip:port") to pin lookups to a specific server.
+//
 // On success the returned conn is owned by resp.Body and is closed when
 // resp.Body is closed. On failure the caller receives a nil resp and any
 // transient conn has been closed already.
@@ -236,10 +250,11 @@ func executeProxyHTTPExchange(
 	headers map[string]string,
 	requestBody io.Reader,
 	tlsSkipVerify bool,
+	resolver *net.Resolver,
 ) proxyHTTPExchangeResult {
 	var result proxyHTTPExchangeResult
 
-	conn, trace, err := setupProxyHTTPConn(ctx, proxyURL, targetURL, tlsSkipVerify)
+	conn, trace, err := setupProxyHTTPConn(ctx, proxyURL, targetURL, tlsSkipVerify, resolver)
 	result.phases = trace.phases
 	result.setupEnd = trace.setupEnd
 	result.connectResp = trace.connectResp

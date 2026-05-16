@@ -50,7 +50,7 @@ func (p *ProxyProber) Probe(ctx context.Context, target config.TargetConfig) (re
 	}
 
 	start := time.Now()
-	tunnel, err := dialProxyTunnel(ctx, proxyURL, tunnelDest, false)
+	tunnel, err := dialProxyTunnel(ctx, proxyURL, tunnelDest, false, resolverFor(target.DNSResolver))
 	result.Duration = time.Since(start)
 	if len(tunnel.phases) > 0 {
 		result.Phases = tunnel.phases

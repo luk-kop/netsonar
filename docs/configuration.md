@@ -41,6 +41,10 @@ agent:
     - target_region
     - target_partition
     - target_account
+  dns_resolver: ""              # Optional: override DNS resolver for hostname → IP lookups across all probes
+                                #          ""  = system resolver path (default)
+                                #          "<ip>:<port>" = pinned resolver (e.g. "127.0.0.1:5353")
+                                #          Hostnames rejected. See probe-types.md "Resolver selection".
 ```
 
 When `allowed_tag_keys` contains entries, targets may only use tag keys from this list. When absent or empty, the agent collects tag keys dynamically from all targets (limited to 30 unique keys).
@@ -111,6 +115,10 @@ targets:
       target_partition: global
       target_account: ep-devops-eu1
       target_type: private
+    dns_resolver: ""                                                    # Optional: override agent.dns_resolver
+                                                                        #   field omitted → inherit agent.dns_resolver
+                                                                        #   ""           → opt out, use system resolver
+                                                                        #   "ip:port"    → use this resolver for this target
     probe_opts:                                                         # Probe-type-specific options
       # (see Probe Types section)
 ```
@@ -170,6 +178,8 @@ flowchart TD
 - Non-zero ICMP options `ping_count` and `ping_interval` are supported only by `icmp`
 - Non-zero MTU options `icmp_payload_sizes`, `expected_min_mtu`, `mtu_retries`, and `mtu_per_attempt_timeout` are supported only by `mtu`
 - Non-empty DNS options `dns_query_name`, `dns_query_type`, `dns_server`, and `dns_expected` are supported only by `dns`
+- For `dns`, `dns_server` must be empty or an IP literal (e.g. `8.8.8.8:53`, `[2001:db8::1]:53`, or bare IP `8.8.8.8` which auto-appends `:53`). **Hostnames are rejected** at config load time — this is a breaking change vs earlier behavior; see [Resolver selection](probe-types.md#resolver-selection) for the rationale.
+- `agent.dns_resolver` and `target.dns_resolver` must be empty or an IP literal with port (`8.8.8.8:53`, `[2001:db8::1]:53`); hostnames and bare IPs without port are rejected. See [Resolver selection](probe-types.md#resolver-selection) for three-state semantics (omit / explicit `""` / value).
 - For `http` and `http_body`, `method` must be one of: `GET`, `HEAD`, `POST`; an empty value defaults to `GET`
 - For `http` and `http_body`, `headers` may define custom request headers as string key/value pairs
 - For `http` and `http_body`, every `expected_status_codes` value must be a valid HTTP status code in the range `100`-`599`; an empty list accepts any response that completes according to the probe's body-read semantics

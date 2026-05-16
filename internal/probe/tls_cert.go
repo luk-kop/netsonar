@@ -39,11 +39,12 @@ func (p *TLSCertProber) Probe(ctx context.Context, target config.TargetConfig) P
 		InsecureSkipVerify: target.ProbeOpts.TLSSkipVerify,
 	}
 
+	resolver := resolverFor(target.DNSResolver)
 	if target.ProbeOpts.ProxyURL != "" {
-		return p.probeViaProxy(ctx, target.ProbeOpts.ProxyURL, addr, tlsCfg)
+		return p.probeViaProxy(ctx, target.ProbeOpts.ProxyURL, addr, tlsCfg, resolver)
 	}
 
-	return p.probeDirect(ctx, addr, tlsCfg)
+	return p.probeDirect(ctx, addr, tlsCfg, resolver)
 }
 
 func tlsCertHostPort(address string) (host, addr string) {
@@ -60,12 +61,12 @@ func tlsCertHostPort(address string) (host, addr string) {
 	return host, address
 }
 
-func (p *TLSCertProber) probeDirect(ctx context.Context, addr string, tlsCfg *tls.Config) ProbeResult {
+func (p *TLSCertProber) probeDirect(ctx context.Context, addr string, tlsCfg *tls.Config, resolver *net.Resolver) ProbeResult {
 	var result ProbeResult
 	start := time.Now()
 	phases := make(map[string]time.Duration, 3)
 
-	dialResult, err := dialTCPWithSplitPhases(ctx, addr)
+	dialResult, err := dialTCPWithSplitPhases(ctx, resolver, addr)
 	addObservedPhase(phases, PhaseDNSResolve, dialResult.dnsEnd, dialResult.dnsStart)
 	addObservedPhase(phases, PhaseTCPConnect, dialResult.tcpEnd, dialResult.tcpStart)
 	if len(phases) > 0 {
@@ -107,7 +108,7 @@ func (p *TLSCertProber) probeDirect(ctx context.Context, addr string, tlsCfg *tl
 	return result
 }
 
-func (p *TLSCertProber) probeViaProxy(ctx context.Context, rawProxyURL, addr string, tlsCfg *tls.Config) ProbeResult {
+func (p *TLSCertProber) probeViaProxy(ctx context.Context, rawProxyURL, addr string, tlsCfg *tls.Config, resolver *net.Resolver) ProbeResult {
 	var result ProbeResult
 
 	proxyURL, err := proxyurl.Parse(rawProxyURL)
@@ -117,7 +118,7 @@ func (p *TLSCertProber) probeViaProxy(ctx context.Context, rawProxyURL, addr str
 	}
 
 	start := time.Now()
-	tunnel, err := dialProxyTunnel(ctx, proxyURL, addr, false)
+	tunnel, err := dialProxyTunnel(ctx, proxyURL, addr, false, resolver)
 	if len(tunnel.phases) > 0 {
 		result.Phases = tunnel.phases
 	}

@@ -1740,6 +1740,72 @@
           {
             "matcher": {
               "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "0": {
+                        "color": "red",
+                        "text": "FAIL"
+                      },
+                      "1": {
+                        "color": "green",
+                        "text": "OK"
+                      }
+                    },
+                    "type": "value"
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "green",
+                      "value": 1
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "custom.width",
+                "value": 120
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
               "options": "target_name"
             },
             "properties": [
@@ -1850,11 +1916,11 @@
         ]
       },
       "title": "HTTP Phase Breakdown (Direct)",
-      "description": "Instant snapshot of direct HTTP phase durations pivoted by target.\n\nColumn legend:\n- Target: HTTP target name; click to drill down to HTTP Details.\n- dns_resolve: DNS lookup time for hostname targets. N/A means DNS was not observed, for example a literal IP target.\n- tcp_connect: TCP connection establishment time.\n- tls_handshake: Target TLS handshake time. N/A means TLS was not observed, for example plain HTTP.\n- request_write: Time from connection/TLS readiness to request write completion. Usually near-zero for GET/small requests; grows when request_body_bytes sends an upload payload.\n- ttfb: Time from request write completion to first response byte.\n- transfer: Response body read time up to response_body_limit_bytes.\n- total_phases: sum of observed phase timings for this target.\n\nCell colours: green <50 ms, yellow 50-200 ms, red >200 ms. N/A cells mean the phase was not observed or does not apply.",
+      "description": "Instant snapshot of direct HTTP phase durations pivoted by target.\n\nColumn legend:\n- Target: HTTP target name; click to drill down to HTTP Details.\n- Status: latest probe outcome from probe_success. OK = succeeded, FAIL = failed.\n- dns_resolve: DNS lookup time for hostname targets. N/A means DNS was not observed, for example a literal IP target.\n- tcp_connect: TCP connection establishment time.\n- tls_handshake: Target TLS handshake time. N/A means TLS was not observed, for example plain HTTP.\n- request_write: Time from connection/TLS readiness to request write completion. Usually near-zero for GET/small requests; grows when request_body_bytes sends an upload payload.\n- ttfb: Time from request write completion to first response byte.\n- transfer: Response body read time up to response_body_limit_bytes.\n- total_phases: sum of observed phase timings for this target.\n\nCell colours: green <50 ms, yellow 50-200 ms, red >200 ms. N/A cells mean the phase was not observed or does not apply.",
       "type": "table",
       "targets": [
         {
-          "expr": "probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", network_path=\"direct\"} or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", network_path=\"direct\"}), \"phase\", \"total_phases\", \"__name__\", \".*\")",
+          "expr": "label_replace(probe_success{job=~\"$job\", probe_type=\"http\", network_path=\"direct\"}, \"phase\", \"Status\", \"__name__\", \".*\") or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", network_path=\"direct\"} or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", network_path=\"direct\"}), \"phase\", \"total_phases\", \"__name__\", \".*\")",
           "format": "table",
           "instant": true,
           "refId": "A"
@@ -1899,13 +1965,14 @@
           "options": {
             "indexByName": {
               "target_name\\phase": 0,
-              "dns_resolve": 1,
-              "tcp_connect": 2,
-              "tls_handshake": 3,
-              "request_write": 4,
-              "ttfb": 5,
-              "transfer": 6,
-              "total_phases": 7
+              "Status": 1,
+              "dns_resolve": 2,
+              "tcp_connect": 3,
+              "tls_handshake": 4,
+              "request_write": 5,
+              "ttfb": 6,
+              "transfer": 7,
+              "total_phases": 8
             },
             "renameByName": {
               "target_name\\phase": "Target"
@@ -2417,6 +2484,72 @@
           {
             "matcher": {
               "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "0": {
+                        "color": "red",
+                        "text": "FAIL"
+                      },
+                      "1": {
+                        "color": "green",
+                        "text": "OK"
+                      }
+                    },
+                    "type": "value"
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "green",
+                      "value": 1
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "custom.width",
+                "value": 120
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
               "options": "target_name"
             },
             "properties": [
@@ -2527,11 +2660,11 @@
         ]
       },
       "title": "HTTP Phase Breakdown (Proxy)",
-      "description": "Instant snapshot of proxied HTTP phase durations pivoted by target. This panel shows the full HTTP flow through the proxy, not only the proxy hop.\n\nProxy setup phases:\n- proxy_dial: TCP connection to the proxy, including proxy hostname DNS when applicable.\n- proxy_tls: TLS handshake with an HTTPS proxy. N/A for plain HTTP proxies.\n- proxy_connect: CONNECT request/response with the proxy for HTTPS targets. N/A for plain HTTP targets through a forward proxy.\n\nTarget HTTP exchange phases:\n- tls_handshake: TLS handshake with the target through the proxy tunnel for HTTPS targets.\n- request_write: HTTP request write after proxy setup and target TLS readiness.\n- ttfb: Time from request write completion to first response byte.\n- transfer: Response body read time up to response_body_limit_bytes.\n- total_phases: sum of observed phase timings for this target.\n\nrequest_write, ttfb, and transfer are expected for proxied HTTP because NetSonar still performs the target HTTP exchange after proxy setup completes.",
+      "description": "Instant snapshot of proxied HTTP phase durations pivoted by target. This panel shows the full HTTP flow through the proxy, not only the proxy hop.\n\nColumn legend:\n- Target: HTTP target name; click to drill down to HTTP Details.\n- Status: latest probe outcome from probe_success. OK = succeeded, FAIL = failed.\n\nProxy setup phases:\n- proxy_dial: TCP connection to the proxy, including proxy hostname DNS when applicable.\n- proxy_tls: TLS handshake with an HTTPS proxy. N/A for plain HTTP proxies.\n- proxy_connect: CONNECT request/response with the proxy for HTTPS targets. N/A for plain HTTP targets through a forward proxy.\n\nTarget HTTP exchange phases:\n- tls_handshake: TLS handshake with the target through the proxy tunnel for HTTPS targets.\n- request_write: HTTP request write after proxy setup and target TLS readiness.\n- ttfb: Time from request write completion to first response byte.\n- transfer: Response body read time up to response_body_limit_bytes.\n- total_phases: sum of observed phase timings for this target.\n\nrequest_write, ttfb, and transfer are expected for proxied HTTP because NetSonar still performs the target HTTP exchange after proxy setup completes.",
       "type": "table",
       "targets": [
         {
-          "expr": "probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", network_path=\"proxy\"} or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", network_path=\"proxy\"}), \"phase\", \"total_phases\", \"__name__\", \".*\")",
+          "expr": "label_replace(probe_success{job=~\"$job\", probe_type=\"http\", network_path=\"proxy\"}, \"phase\", \"Status\", \"__name__\", \".*\") or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", network_path=\"proxy\"} or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", network_path=\"proxy\"}), \"phase\", \"total_phases\", \"__name__\", \".*\")",
           "format": "table",
           "instant": true,
           "refId": "A"
@@ -2576,14 +2709,15 @@
           "options": {
             "indexByName": {
               "target_name\\phase": 0,
-              "proxy_dial": 1,
-              "proxy_tls": 2,
-              "proxy_connect": 3,
-              "tls_handshake": 4,
-              "request_write": 5,
-              "ttfb": 6,
-              "transfer": 7,
-              "total_phases": 8
+              "Status": 1,
+              "proxy_dial": 2,
+              "proxy_tls": 3,
+              "proxy_connect": 4,
+              "tls_handshake": 5,
+              "request_write": 6,
+              "ttfb": 7,
+              "transfer": 8,
+              "total_phases": 9
             },
             "renameByName": {
               "target_name\\phase": "Target"
@@ -3157,6 +3291,72 @@
           {
             "matcher": {
               "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "0": {
+                        "color": "red",
+                        "text": "FAIL"
+                      },
+                      "1": {
+                        "color": "green",
+                        "text": "OK"
+                      }
+                    },
+                    "type": "value"
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "green",
+                      "value": 1
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "custom.width",
+                "value": 120
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
               "options": "Target / Path"
             },
             "properties": [
@@ -3247,11 +3447,11 @@
         ]
       },
       "title": "HTTP Response Body Phase Breakdown",
-      "description": "Instant snapshot of HTTP response body probe phase durations pivoted by target and path. Direct probes can emit dns_resolve, tcp_connect, tls_handshake, request_write, ttfb, and transfer. Proxy-path probes can emit proxy_dial, optional proxy_tls, proxy_connect, tls_handshake, request_write, ttfb, and transfer. total_phases is the sum of observed phase timings for this target/path. N/A cells mean the phase was not observed or does not apply.",
+      "description": "Instant snapshot of HTTP response body probe phase durations pivoted by target and path. Status is the latest probe outcome from probe_success. Direct probes can emit dns_resolve, tcp_connect, tls_handshake, request_write, ttfb, and transfer. Proxy-path probes can emit proxy_dial, optional proxy_tls, proxy_connect, tls_handshake, request_write, ttfb, and transfer. total_phases is the sum of observed phase timings for this target/path. N/A cells mean the phase was not observed or does not apply.",
       "type": "table",
       "targets": [
         {
-          "expr": "label_join(probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http_body\"}, \"target_path\", \" / \", \"target_name\", \"network_path\") or label_replace(label_join(sum by (target_name, network_path) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http_body\"}), \"target_path\", \" / \", \"target_name\", \"network_path\"), \"phase\", \"total_phases\", \"__name__\", \".*\")",
+          "expr": "label_join(label_replace(probe_success{job=~\"$job\", probe_type=\"http_body\"}, \"phase\", \"Status\", \"__name__\", \".*\"), \"target_path\", \" / \", \"target_name\", \"network_path\") or label_join(probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http_body\"}, \"target_path\", \" / \", \"target_name\", \"network_path\") or label_replace(label_join(sum by (target_name, network_path) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http_body\"}), \"target_path\", \" / \", \"target_name\", \"network_path\"), \"phase\", \"total_phases\", \"__name__\", \".*\")",
           "format": "table",
           "instant": true,
           "refId": "A"
@@ -3297,16 +3497,17 @@
           "options": {
             "indexByName": {
               "target_path\\phase": 0,
-              "dns_resolve": 1,
-              "tcp_connect": 2,
-              "proxy_dial": 3,
-              "proxy_tls": 4,
-              "proxy_connect": 5,
-              "tls_handshake": 6,
-              "request_write": 7,
-              "ttfb": 8,
-              "transfer": 9,
-              "total_phases": 10
+              "Status": 1,
+              "dns_resolve": 2,
+              "tcp_connect": 3,
+              "proxy_dial": 4,
+              "proxy_tls": 5,
+              "proxy_connect": 6,
+              "tls_handshake": 7,
+              "request_write": 8,
+              "ttfb": 9,
+              "transfer": 10,
+              "total_phases": 11
             },
             "renameByName": {
               "target_path\\phase": "Target / Path"
@@ -3737,6 +3938,72 @@
           {
             "matcher": {
               "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "0": {
+                        "color": "red",
+                        "text": "FAIL"
+                      },
+                      "1": {
+                        "color": "green",
+                        "text": "OK"
+                      }
+                    },
+                    "type": "value"
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "green",
+                      "value": 1
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "custom.width",
+                "value": 120
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
               "options": "Target"
             },
             "properties": [
@@ -3827,11 +4094,11 @@
         ]
       },
       "title": "Proxy CONNECT Phase Breakdown",
-      "description": "Instant snapshot of raw proxy CONNECT probe phase durations pivoted by target. proxy_dial is the TCP connection to the proxy, proxy_tls is the TLS handshake with an HTTPS proxy, proxy_connect is the CONNECT request/response, and total_phases is the sum of observed CONNECT probe phases. N/A cells mean the phase was not observed or does not apply.",
+      "description": "Instant snapshot of raw proxy CONNECT probe phase durations pivoted by target. Status is the latest probe outcome from probe_success. proxy_dial is the TCP connection to the proxy, proxy_tls is the TLS handshake with an HTTPS proxy, proxy_connect is the CONNECT request/response, and total_phases is the sum of observed CONNECT probe phases. N/A cells mean the phase was not observed or does not apply.",
       "type": "table",
       "targets": [
         {
-          "expr": "probe_phase_duration_seconds{job=~\"$job\", probe_type=\"proxy_connect\"} or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"proxy_connect\"}), \"phase\", \"total_phases\", \"__name__\", \".*\")",
+          "expr": "label_replace(probe_success{job=~\"$job\", probe_type=\"proxy_connect\"}, \"phase\", \"Status\", \"__name__\", \".*\") or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"proxy_connect\"} or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"proxy_connect\"}), \"phase\", \"total_phases\", \"__name__\", \".*\")",
           "format": "table",
           "instant": true,
           "refId": "A"
@@ -3876,10 +4143,11 @@
           "options": {
             "indexByName": {
               "target_name\\phase": 0,
-              "proxy_dial": 1,
-              "proxy_tls": 2,
-              "proxy_connect": 3,
-              "total_phases": 4
+              "Status": 1,
+              "proxy_dial": 2,
+              "proxy_tls": 3,
+              "proxy_connect": 4,
+              "total_phases": 5
             },
             "renameByName": {
               "target_name\\phase": "Target"
@@ -4566,6 +4834,72 @@
           {
             "matcher": {
               "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "0": {
+                        "color": "red",
+                        "text": "FAIL"
+                      },
+                      "1": {
+                        "color": "green",
+                        "text": "OK"
+                      }
+                    },
+                    "type": "value"
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "green",
+                      "value": 1
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "custom.width",
+                "value": 120
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
               "options": "Target"
             },
             "properties": [
@@ -4656,11 +4990,11 @@
         ]
       },
       "title": "TCP Phase Breakdown",
-      "description": "Instant snapshot of TCP probe phase durations pivoted by target. tcp_connect is TCP connection establishment time; dns_resolve appears only for hostname targets. total_phases is the sum of observed TCP probe phases. N/A cells mean the phase was not observed or does not apply.",
+      "description": "Instant snapshot of TCP probe phase durations pivoted by target. Status is the latest probe outcome from probe_success. tcp_connect is TCP connection establishment time; dns_resolve appears only for hostname targets. total_phases is the sum of observed TCP probe phases. N/A cells mean the phase was not observed or does not apply.",
       "type": "table",
       "targets": [
         {
-          "expr": "probe_phase_duration_seconds{job=~\"$job\", probe_type=\"tcp\"} or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"tcp\"}), \"phase\", \"total_phases\", \"__name__\", \".*\")",
+          "expr": "label_replace(probe_success{job=~\"$job\", probe_type=\"tcp\"}, \"phase\", \"Status\", \"__name__\", \".*\") or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"tcp\"} or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"tcp\"}), \"phase\", \"total_phases\", \"__name__\", \".*\")",
           "format": "table",
           "instant": true,
           "refId": "A"
@@ -4705,9 +5039,10 @@
           "options": {
             "indexByName": {
               "target_name\\phase": 0,
-              "dns_resolve": 1,
-              "tcp_connect": 2,
-              "total_phases": 3
+              "Status": 1,
+              "dns_resolve": 2,
+              "tcp_connect": 3,
+              "total_phases": 4
             },
             "renameByName": {
               "target_name\\phase": "Target"
@@ -5415,6 +5750,72 @@
           {
             "matcher": {
               "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "0": {
+                        "color": "red",
+                        "text": "FAIL"
+                      },
+                      "1": {
+                        "color": "green",
+                        "text": "OK"
+                      }
+                    },
+                    "type": "value"
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "green",
+                      "value": 1
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "custom.width",
+                "value": 120
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
               "options": "target_path"
             },
             "properties": [
@@ -5505,11 +5906,11 @@
         ]
       },
       "title": "TLS Cert Phase Breakdown",
-      "description": "Instant snapshot of TLS certificate probe phase durations pivoted by target and path. Direct tls_cert probes can emit dns_resolve, tcp_connect, and tls_handshake. Proxy-path tls_cert probes emit proxy_dial, optional proxy_tls, proxy_connect, and tls_handshake; they do not send an HTTP request to the target.\n\nColumn legend:\n- Target / Path: TLS cert target name and network_path.\n- dns_resolve: DNS lookup time for direct hostname targets.\n- tcp_connect: TCP connection establishment time for direct probes.\n- proxy_dial: TCP connection to the proxy, including proxy hostname DNS when applicable.\n- proxy_tls: TLS handshake with an HTTPS proxy. N/A for plain HTTP proxies.\n- proxy_connect: CONNECT request/response with the proxy.\n- tls_handshake: TLS handshake with the target, directly or through the proxy tunnel.\n- total_phases: sum of observed phase timings for this target/path.\n\nCell colours: green <50 ms, yellow 50-200 ms, red >200 ms. N/A cells mean the phase was not observed or does not apply.",
+      "description": "Instant snapshot of TLS certificate probe phase durations pivoted by target and path. Direct tls_cert probes can emit dns_resolve, tcp_connect, and tls_handshake. Proxy-path tls_cert probes emit proxy_dial, optional proxy_tls, proxy_connect, and tls_handshake; they do not send an HTTP request to the target.\n\nColumn legend:\n- Target / Path: TLS cert target name and network_path.\n- Status: latest probe outcome from probe_success. OK = succeeded, FAIL = failed.\n- dns_resolve: DNS lookup time for direct hostname targets.\n- tcp_connect: TCP connection establishment time for direct probes.\n- proxy_dial: TCP connection to the proxy, including proxy hostname DNS when applicable.\n- proxy_tls: TLS handshake with an HTTPS proxy. N/A for plain HTTP proxies.\n- proxy_connect: CONNECT request/response with the proxy.\n- tls_handshake: TLS handshake with the target, directly or through the proxy tunnel.\n- total_phases: sum of observed phase timings for this target/path.\n\nCell colours: green <50 ms, yellow 50-200 ms, red >200 ms. N/A cells mean the phase was not observed or does not apply.",
       "type": "table",
       "targets": [
         {
-          "expr": "label_join(probe_phase_duration_seconds{job=~\"$job\", probe_type=\"tls_cert\"}, \"target_path\", \" / \", \"target_name\", \"network_path\") or label_replace(label_join(sum by (target_name, network_path) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"tls_cert\"}), \"target_path\", \" / \", \"target_name\", \"network_path\"), \"phase\", \"total_phases\", \"__name__\", \".*\")",
+          "expr": "label_join(label_replace(probe_success{job=~\"$job\", probe_type=\"tls_cert\"}, \"phase\", \"Status\", \"__name__\", \".*\"), \"target_path\", \" / \", \"target_name\", \"network_path\") or label_join(probe_phase_duration_seconds{job=~\"$job\", probe_type=\"tls_cert\"}, \"target_path\", \" / \", \"target_name\", \"network_path\") or label_replace(label_join(sum by (target_name, network_path) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"tls_cert\"}), \"target_path\", \" / \", \"target_name\", \"network_path\"), \"phase\", \"total_phases\", \"__name__\", \".*\")",
           "format": "table",
           "instant": true,
           "refId": "A"
@@ -5555,13 +5956,14 @@
           "options": {
             "indexByName": {
               "target_path\\phase": 0,
-              "dns_resolve": 1,
-              "tcp_connect": 2,
-              "proxy_dial": 3,
-              "proxy_tls": 4,
-              "proxy_connect": 5,
-              "tls_handshake": 6,
-              "total_phases": 7
+              "Status": 1,
+              "dns_resolve": 2,
+              "tcp_connect": 3,
+              "proxy_dial": 4,
+              "proxy_tls": 5,
+              "proxy_connect": 6,
+              "tls_handshake": 7,
+              "total_phases": 8
             },
             "renameByName": {
               "target_path\\phase": "Target / Path"
