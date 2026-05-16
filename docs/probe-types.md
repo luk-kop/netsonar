@@ -2,6 +2,258 @@
 
 Supported probe types: `tcp`, `http`, `icmp`, `mtu`, `dns`, `tls_cert`, `http_body`, `proxy_connect`.
 
+## Resolver selection
+
+NetSonar uses Go's standard `net.Resolver` for hostname → IP lookups in all
+probe types. By default this goes through the host's system resolver path
+(NSS, systemd-resolved, /etc/resolv.conf, local dnsmasq, etc.), which means
+its behavior — including caching — depends on host configuration.
+
+The `dns_resolver` option lets you override this and direct NetSonar to send
+DNS queries to a specific server, bypassing the system resolver entirely.
+
+### DNS caching behavior — what's in NetSonar's control and what isn't
+
+This is the single most common source of confusion, so read this section
+before configuring anything.
+
+**NetSonar itself does NOT maintain any DNS cache.** The agent process keeps
+no internal map of hostname → IP results between probes. Every probe
+performs a fresh DNS lookup via the configured resolver path.
+
+**However, DNS caching almost certainly still happens** — just not inside
+NetSonar. It happens in layers below the agent that NetSonar does not
+control:
+
+| Layer                                  | Caches?                                  | Active when                                                                          |
+|----------------------------------------|------------------------------------------|--------------------------------------------------------------------------------------|
+| NetSonar (application)                 | **No**                                   | Always — there is no app-level cache to disable                                      |
+| `nscd` (NSS cache daemon)              | Yes (if installed)                       | `dns_resolver` unset → uses system path                                              |
+| `systemd-resolved` stub (127.0.0.53)   | Yes (in-memory, honors record TTL)       | `dns_resolver` unset on most Linux distros                                           |
+| Local forwarder (`dnsmasq`, `unbound`) | Yes                                      | `dns_resolver` unset and host is configured to use one                               |
+| Upstream recursor (8.8.8.8, corp DNS)  | Yes (this is its job)                    | Always — even when `dns_resolver` is set, the resolver itself may cache              |
+| Authoritative nameservers              | No (by design)                           | Always                                                                               |
+
+Practical implications:
+
+1. **Default (`dns_resolver` not set) — system cache active.** NetSonar uses
+   the host's normal DNS path. Whatever caches the host has
+   (`systemd-resolved`, `nscd`, local dnsmasq) will serve repeated lookups
+   from cache. Probe timings reflect cache hits most of the time, with
+   occasional fresh lookups when TTL expires.
+2. **Custom `dns_resolver: "x:y"` — system cache bypassed, but resolver
+   cache still applies.** Setting `dns_resolver` makes NetSonar send DNS
+   queries directly via UDP/TCP to the specified address, skipping
+   NSS/resolved/`/etc/resolv.conf` entirely. But the resolver you point to
+   is itself probably a caching server. If you want truly fresh lookups
+   every probe, point `dns_resolver` at a recursor you control with caching
+   disabled (e.g. your own `unbound` with `cache-min-ttl: 0`,
+   `cache-max-ttl: 0`).
+3. **There is no protocol-level "no-cache" flag in DNS.** You cannot ask an
+   arbitrary upstream resolver to bypass its cache for a single query. The
+   only way to guarantee fresh lookups is to control the resolver yourself.
+4. **`probe_dns_resolve_seconds` reflects whatever caching is in effect.**
+   If you're seeing suspiciously fast/consistent DNS phase timings, you're
+   most likely measuring cache hits — not the actual end-to-end DNS path.
+   To measure real resolution latency, point `dns_resolver` at a
+   non-caching recursor or use `probe_type: dns` with `dns_server` set
+   directly.
+5. **`GODEBUG=netdns=*` does nothing in NetSonar.** Binaries are built with
+   `CGO_ENABLED=0`, which means the cgo-based resolver code is not compiled
+   into the binary at all. The env var has no resolver to switch to —
+   pure-Go is the only available path.
+
+Summary: if you need control over DNS caching for your probes, the
+mechanism is **`dns_resolver` pointing at a recursor you control**, not any
+NetSonar-side option. NetSonar's contract is "use the resolver you tell me
+to"; everything past that is operator-owned infrastructure.
+
+### Field reference
+
+| Field                  | Where                                                            | Role                                                            | When to use                                                                                  |
+|------------------------|------------------------------------------------------------------|-----------------------------------------------------------------|----------------------------------------------------------------------------------------------|
+| `agent.dns_resolver`   | top-level `agent:` block                                         | Global default — applies to all targets unless overridden       | "All my probes should use a specific DNS server (e.g. own unbound, corporate resolver)"     |
+| `target.dns_resolver`  | per `targets[]` entry                                            | Per-target override (3-state, see below)                        | "This target should use a different resolver than the global default"                        |
+| `probe_opts.dns_server`| per `targets[]` entry, **only for `probe_type: dns`**            | **Subject of measurement** — the DNS server being probed        | "I want to measure latency/correctness of a specific DNS server"                             |
+
+`dns_server` and `dns_resolver` are different concepts:
+
+- `dns_server` is what the DNS probe **measures** — the DNS query goes there.
+- `dns_resolver` is what NetSonar **uses internally** to turn hostnames into IPs
+  before establishing connections. For `probe_type: dns`, `dns_resolver` is
+  unused because `dns_server` is required to be an IP literal (see below).
+
+### Three-state semantics for `target.dns_resolver`
+
+`target.dns_resolver` has three distinct meanings depending on how it's
+written in YAML:
+
+```yaml
+# Case 1 — field omitted: inherit agent.dns_resolver (most common)
+targets:
+  - name: api
+    probe_type: tcp
+    address: api.example.com:443
+    # dns_resolver not set → uses agent.dns_resolver
+
+# Case 2 — explicit value: override to a specific resolver
+  - name: public-api
+    probe_type: tcp
+    address: api.example.com:443
+    dns_resolver: "8.8.8.8:53"
+    # → uses 8.8.8.8:53, ignores agent.dns_resolver
+
+# Case 3 — explicit empty string: opt out of agent.dns_resolver, use system path
+  - name: baseline-via-system
+    probe_type: tcp
+    address: api.example.com:443
+    dns_resolver: ""
+    # → uses host system resolver (NSS/resolved/etc.) even if agent.dns_resolver is set
+```
+
+Effective resolver matrix:
+
+| `agent.dns_resolver` | `target.dns_resolver` (YAML) | Effective resolver used   |
+|----------------------|------------------------------|---------------------------|
+| not set / `""`       | not set                      | system                    |
+| `"X"`                | not set                      | `X`                       |
+| `"X"`                | `"Y"`                        | `Y`                       |
+| `"X"`                | `""`                         | system (explicit opt-out) |
+| not set              | `"Y"`                        | `Y`                       |
+
+### Validation rules
+
+`dns_resolver` (both at `agent` and `target` level) must be either:
+
+- empty (`""`) — meaning "system resolver", or
+- an IP literal with port — `"8.8.8.8:53"`, `"[2001:db8::1]:53"`
+
+Hostnames (`"dns.google:53"`) and bare IPs without port (`"8.8.8.8"`) are
+**rejected at config load time**. The reason: a hostname-as-resolver would
+itself require resolution via the system path, defeating the purpose of the
+override.
+
+`dns_server` (under `probe_opts`, only for `probe_type: dns`) must be either:
+
+- empty (`""`) — meaning "use system resolver to perform the query", or
+- an IP literal (`"8.8.8.8:53"`, `"8.8.8.8"` — port `:53` is auto-appended)
+
+**Hostnames are rejected** to keep `probe_dns_resolve_seconds` measurements
+honest — see "DNS probe caveats" below.
+
+### Common usage patterns
+
+#### Pattern 1 — All probes via a local cache-less recursor
+
+```yaml
+agent:
+  dns_resolver: "127.0.0.1:5353"   # your own unbound with cache disabled
+
+targets:
+  - name: api
+    probe_type: tcp
+    address: api.example.com:443
+  - name: web
+    probe_type: http
+    address: https://web.example.com
+```
+
+All targets inherit `agent.dns_resolver`. Every probe's hostname lookup
+goes to `127.0.0.1:5353`. Useful when you want deterministic DNS behavior
+independent of host config drift.
+
+#### Pattern 2 — Global default with per-target override
+
+```yaml
+agent:
+  dns_resolver: "127.0.0.1:5353"
+
+targets:
+  - name: internal-api
+    probe_type: tcp
+    address: api.internal.corp:443
+    # uses agent.dns_resolver (127.0.0.1:5353) — has internal zone
+
+  - name: external-api
+    probe_type: tcp
+    address: api.example.com:443
+    dns_resolver: "8.8.8.8:53"   # external API: use public DNS instead
+```
+
+#### Pattern 3 — Per-target system-resolver opt-out
+
+```yaml
+agent:
+  dns_resolver: "127.0.0.1:5353"
+
+targets:
+  - name: most-targets
+    probe_type: tcp
+    address: api.example.com:443
+    # uses 127.0.0.1:5353
+
+  - name: system-baseline
+    probe_type: tcp
+    address: api.example.com:443
+    dns_resolver: ""             # opt out — measure system DNS path as baseline
+```
+
+Useful when you want one probe to measure the "real" system resolver
+behavior (with its NSS/cache/resolved layers) as a baseline, while
+everything else uses a controlled resolver.
+
+#### Pattern 4 — DNS probe targeting a specific server
+
+```yaml
+targets:
+  - name: measure-8888
+    probe_type: dns
+    address: example.com
+    probe_opts:
+      dns_server: "8.8.8.8:53"      # subject — the DNS server we measure
+      dns_query_name: example.com
+    # dns_resolver is unused for DNS probes (dns_server is required to be IP literal)
+```
+
+For DNS probes, `dns_resolver` is **not used** because `dns_server` must be
+an IP literal (validator enforces this). There is no pre-resolution step
+for DNS probes, so the agent-level resolver is irrelevant here.
+
+### What does NOT happen
+
+- **`dns_resolver` is not a DNS cache toggle.** See "DNS caching behavior"
+  above — NetSonar has no application-level cache, and `dns_resolver` only
+  redirects queries; cache behavior is determined by whatever server you
+  point it at.
+- **`dns_resolver` does not affect `probe_type: dns`.** Because `dns_server`
+  is required to be an IP literal, there is no pre-resolution where
+  `dns_resolver` could intervene.
+- **`GODEBUG=netdns=*` has no effect in NetSonar.** Binaries are built with
+  `CGO_ENABLED=0`, so the cgo resolver code is not compiled in. Setting
+  the env var has no alternative resolver to switch to — pure-Go is the
+  only available path.
+
+### DNS probe caveats (`probe_type: dns`)
+
+The DNS probe's `dns_server` field must be an **IP literal** (e.g.
+`"8.8.8.8:53"`, or just `"8.8.8.8"` — port `:53` is auto-appended). The
+validator rejects hostnames.
+
+Why this restriction: if `dns_server` were a hostname, NetSonar would have
+to resolve it first (via system path or `dns_resolver`) before sending the
+actual measured query. `probe_dns_resolve_seconds` would then contain
+**two** DNS lookups — pre-resolution of the server name, plus the test
+query — which contaminates the metric and makes it inconsistent across
+probes (cache hit vs miss for the pre-resolution).
+
+If you need to monitor a named DNS server (e.g. `dns.google`):
+
+1. Resolve its IP manually once: `dig +short dns.google`
+2. Configure the IP directly: `dns_server: "8.8.8.8:53"` (or whichever IP)
+3. If you want to alert when the name → IP mapping itself changes, set up
+   a separate `probe_type: dns` target that queries for `dns.google`
+   against a known recursor.
+
 ## TCP
 
 Measures TCP connection establishment time.
@@ -284,7 +536,18 @@ application-level DNS result cache for `probe_type: dns`. When `dns_server` is
 empty, the lookup uses the system resolver path, so operating-system, local
 forwarder, or upstream recursive resolver caching may still affect the observed
 latency and returned records. When `dns_server` is set, NetSonar sends the
-lookup through that configured resolver.
+lookup through that configured resolver, but caching by that resolver remains
+operator-controlled.
+
+`dns_server` must be an IP literal (e.g. `"8.8.8.8:53"`, or `"8.8.8.8"` —
+port `:53` is auto-appended). Hostnames are rejected at config load time
+to keep `probe_dns_resolve_seconds` measurements honest — see
+[Resolver selection](#resolver-selection) for the full rationale and
+migration guidance.
+
+`dns_resolver` (agent or target level) does not affect this probe type:
+`dns_server` is required to be an IP literal, so there is no pre-resolution
+step where a resolver override could intervene.
 
 ```yaml
 - name: "rds-dns"
@@ -304,7 +567,7 @@ lookup through that configured resolver.
 |------------------|------------|-------------|------------------------------------------------------------------------------------------------------------------------|
 | `dns_query_name` | string     | `address`   | DNS name to query. Falls back to the target's `address` when omitted.                                                  |
 | `dns_query_type` | string     | `A`         | DNS record type. One of `A`, `AAAA`, `CNAME`.                                                                          |
-| `dns_server`     | string     | `""`        | Resolver in `host:port` form. Empty uses the system resolver (`/etc/resolv.conf`).                                     |
+| `dns_server`     | string     | `""`        | Resolver to query in `host:port` form. **Must be an IP literal**; hostnames are rejected. Empty uses the system resolver (`/etc/resolv.conf`). |
 | `dns_expected`   | `[]string` | `[]`        | Expected result set. When non-empty, the response must match exactly (order-independent). See subsection below.        |
 
 If `dns_query_name` is omitted, the target's `address` is used as the query name.

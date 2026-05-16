@@ -33,7 +33,7 @@ remain useful when investigating a specific endpoint or network path.
 | `probe_icmp_stddev_rtt_seconds` | Per-reply `ping -D` or `fping -C N` RTTs | Compute population standard deviation; do not compare to Linux `ping` mdev |
 | `probe_icmp_packet_loss_ratio` | `ping -c N` loss percentage | Convert percent to ratio |
 | `probe_mtu_bytes` | `ping -M do -s N` with binary search | Use ICMP with DF, not `tracepath` UDP |
-| `probe_dns_resolve_seconds` | `dig @server +stats` query time | Compare after converting milliseconds to seconds, using the same DNS server and query type |
+| `probe_dns_resolve_seconds` | `dig @server +stats` query time | Compare after converting milliseconds to seconds, using the same DNS server and query type. When `dns_resolver` is set, the metric reflects latency against the configured resolver, not the host's normal DNS path; use `dig @<resolver>` (or set `dns_resolver: ""` on the probe) for an apples-to-apples baseline. |
 | `probe_dns_result_match` | `dig @server <name> <type> +short` | Binary match after applying NetSonar's normalization rules |
 | `probe_tls_cert_expiry_timestamp_seconds` | `openssl s_client -showcerts` plus `openssl x509 -noout -enddate` for every cert | NetSonar should report the earliest `NotAfter` across the peer chain |
 | `probe_tls_cert_chain_expiry_timestamp_seconds` | `openssl s_client -showcerts` plus per-cert `openssl x509 -enddate` | Per-certificate timestamp comparison |
@@ -172,7 +172,15 @@ describe the capped read, while curl normally reads the full body.
 including the dial to a configured DNS server. `dig +stats` reports query time
 from a different implementation. For UDP this should be small noise; TCP
 fallback should not be used for routine timing comparisons unless explicitly
-tested.
+tested. When `dns_resolver` is set (either at agent or target level), the
+metric reflects latency against that resolver — not the host's normal DNS
+path — so baselines with `dig` (no `@server`) or
+`curl -w '%{time_namelookup}'` are not apples-to-apples. Use
+`dig @<resolver>` to match the configured resolver, or set
+`dns_resolver: ""` on the probe to opt in to the system path. For
+`probe_type: dns`, the metric measures exactly one query against the
+configured `dns_server` (which is required to be an IP literal — no
+pre-resolution contamination).
 
 **DNS query type.** `dig` defaults to A records. Match the configured
 `dns_query_type` explicitly when comparing A, AAAA, or CNAME probes.

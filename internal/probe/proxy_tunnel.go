@@ -43,13 +43,20 @@ type proxyTunnelResult struct {
 // to match the `tls_skip_verify` probe option; proxy_connect and tls_cert
 // preserve the original behavior (false) because they never exposed a
 // proxy-TLS skip knob.
-func dialProxyTunnel(ctx context.Context, proxyURL *url.URL, tunnelDest string, proxyTLSSkipVerify bool) (proxyTunnelResult, error) {
+//
+// resolver overrides the DNS path used to resolve the proxy hostname.
+// Callers pass net.DefaultResolver (or BuildResolver("")) for the system
+// path, or BuildResolver("ip:port") to pin lookups to a specific server.
+func dialProxyTunnel(ctx context.Context, proxyURL *url.URL, tunnelDest string, proxyTLSSkipVerify bool, resolver *net.Resolver) (proxyTunnelResult, error) {
+	if resolver == nil {
+		resolver = net.DefaultResolver
+	}
 	proxyAddr := hostPortForURL(proxyURL)
 	start := time.Now()
 	phases := make(map[string]time.Duration, 3)
 	result := proxyTunnelResult{phases: phases}
 
-	var d net.Dialer
+	d := net.Dialer{Resolver: resolver}
 	proxyConn, err := d.DialContext(ctx, "tcp", proxyAddr)
 	proxyDialDone := time.Now()
 	addObservedPhase(phases, PhaseProxyDial, proxyDialDone, start)

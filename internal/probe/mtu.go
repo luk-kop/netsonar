@@ -88,7 +88,7 @@ func (p *MTUProber) Probe(ctx context.Context, target config.TargetConfig) (resu
 
 	// Resolve the target address to an IPv4 address. Emits PhaseDNSResolve
 	// only when the input was a hostname and a lookup was performed.
-	resolved, err := resolveIPv4(ctx, target.Address)
+	resolved, err := resolveIPv4(ctx, resolverFor(target.DNSResolver), target.Address)
 	if resolved.dnsStart != (time.Time{}) {
 		phases := make(map[string]time.Duration, 1)
 		addObservedPhase(phases, PhaseDNSResolve, resolved.dnsEnd, resolved.dnsStart)

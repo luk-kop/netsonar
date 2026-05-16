@@ -236,14 +236,18 @@ type ipv4ResolveResult struct {
 // forms like ::ffff:192.0.2.1, which To4() returns non-nil for) take a fast
 // path and no DNS phase is recorded. Pure literal IPv6 is rejected because
 // ICMP and MTU probers are IPv4-only. Hostnames go through
-// net.DefaultResolver.LookupIP(ctx, "ip4", host) so the lookup respects the
-// context deadline, and the first returned IPv4 address is used.
+// resolver.LookupIP(ctx, "ip4", host) so the lookup respects the context
+// deadline, and the first returned IPv4 address is used.
+//
+// resolver controls which DNS path is exercised: pass net.DefaultResolver
+// (or the result of BuildResolver("")) to use the system path, or
+// BuildResolver("ip:port") to send queries directly to a specific server.
 //
 // On failure the returned error is suitable for wrapping at the call site
 // with the operator-facing prefix "resolve IPv4 address: ...". When the
 // failure happens during hostname lookup, dnsStart and dnsEnd are populated
 // so callers can still emit PhaseDNSResolve.
-func resolveIPv4(ctx context.Context, address string) (ipv4ResolveResult, error) {
+func resolveIPv4(ctx context.Context, resolver *net.Resolver, address string) (ipv4ResolveResult, error) {
 	var result ipv4ResolveResult
 
 	if ip := net.ParseIP(address); ip != nil {
@@ -254,8 +258,12 @@ func resolveIPv4(ctx context.Context, address string) (ipv4ResolveResult, error)
 		return result, fmt.Errorf("IPv6 literal %q is not supported (IPv4-only prober)", address)
 	}
 
+	if resolver == nil {
+		resolver = net.DefaultResolver
+	}
+
 	result.dnsStart = time.Now()
-	ips, err := net.DefaultResolver.LookupIP(ctx, "ip4", address)
+	ips, err := resolver.LookupIP(ctx, "ip4", address)
 	result.dnsEnd = time.Now()
 	if err != nil {
 		return result, err
@@ -277,7 +285,7 @@ type splitDialResult struct {
 	tcpEnd   time.Time
 }
 
-func dialTCPWithSplitPhases(ctx context.Context, address string) (splitDialResult, error) {
+func dialTCPWithSplitPhases(ctx context.Context, resolver *net.Resolver, address string) (splitDialResult, error) {
 	var result splitDialResult
 
 	host, port, err := net.SplitHostPort(address)
@@ -285,12 +293,16 @@ func dialTCPWithSplitPhases(ctx context.Context, address string) (splitDialResul
 		return result, err
 	}
 
+	if resolver == nil {
+		resolver = net.DefaultResolver
+	}
+
 	var dialTargets []string
 	if isLiteralIPHost(host) {
 		dialTargets = []string{address}
 	} else {
 		result.dnsStart = time.Now()
-		ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+		ips, err := resolver.LookupIPAddr(ctx, host)
 		result.dnsEnd = time.Now()
 		if err != nil {
 			return result, fmt.Errorf("dns resolve: %w", err)
@@ -302,7 +314,7 @@ func dialTCPWithSplitPhases(ctx context.Context, address string) (splitDialResul
 	}
 
 	result.tcpStart = time.Now()
-	conn, err := dialTCPHappyEyeballs(ctx, dialTargets)
+	conn, err := dialTCPHappyEyeballs(ctx, resolver, dialTargets)
 	result.tcpEnd = time.Now()
 	if err != nil {
 		return result, err
@@ -326,14 +338,14 @@ func joinDialTargets(ips []net.IPAddr, port string) []string {
 	return targets
 }
 
-func dialTCPHappyEyeballs(ctx context.Context, dialTargets []string) (net.Conn, error) {
+func dialTCPHappyEyeballs(ctx context.Context, resolver *net.Resolver, dialTargets []string) (net.Conn, error) {
 	if len(dialTargets) == 0 {
 		return nil, fmt.Errorf("no dial targets")
 	}
 
 	primaryTargets, fallbackTargets := splitDialFamilies(dialTargets)
 	if len(fallbackTargets) == 0 {
-		return dialTCPAddresses(ctx, primaryTargets)
+		return dialTCPAddresses(ctx, resolver, primaryTargets)
 	}
 
 	dialCtx, cancel := context.WithCancel(ctx)
@@ -360,7 +372,7 @@ func dialTCPHappyEyeballs(ctx context.Context, dialTargets []string) (net.Conn, 
 				case <-timer.C:
 				}
 			}
-			conn, err := dialTCPAddresses(dialCtx, targets)
+			conn, err := dialTCPAddresses(dialCtx, resolver, targets)
 			results <- dialOutcome{conn: conn, err: err}
 		}()
 	}
@@ -391,9 +403,12 @@ func dialTCPHappyEyeballs(ctx context.Context, dialTargets []string) (net.Conn, 
 	return nil, lastErr
 }
 
-func dialTCPAddresses(ctx context.Context, targets []string) (net.Conn, error) {
+func dialTCPAddresses(ctx context.Context, resolver *net.Resolver, targets []string) (net.Conn, error) {
+	if resolver == nil {
+		resolver = net.DefaultResolver
+	}
 	var (
-		d       net.Dialer
+		d       = net.Dialer{Resolver: resolver}
 		lastErr error
 	)
 	for _, target := range targets {

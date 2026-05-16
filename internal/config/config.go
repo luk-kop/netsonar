@@ -129,6 +129,16 @@ type AgentConfig struct {
 	LogFormat               string        `yaml:"log_format"`
 	EnableRuntimeMetrics    bool          `yaml:"enable_runtime_metrics"`
 	AllowedTagKeys          []string      `yaml:"allowed_tag_keys"`
+
+	// DNSResolver overrides the system DNS resolver for all hostname → IP
+	// lookups performed by NetSonar across all probe types. The empty
+	// string means "use the host's system resolver path" (NSS,
+	// systemd-resolved, /etc/resolv.conf). A non-empty value must be a
+	// validated IP literal with port (e.g. "8.8.8.8:53",
+	// "[2001:db8::1]:53"); hostnames are rejected at load time.
+	//
+	// Per-target overrides via TargetConfig.DNSResolver take precedence.
+	DNSResolver string `yaml:"dns_resolver"`
 }
 
 // TargetConfig defines a single probe target.
@@ -140,6 +150,17 @@ type TargetConfig struct {
 	Timeout   time.Duration     `yaml:"timeout"`
 	Tags      map[string]string `yaml:"tags"`
 	ProbeOpts ProbeOptions      `yaml:"probe_opts"`
+
+	// DNSResolver overrides the agent-level DNS resolver for this target.
+	//
+	// YAML semantics (three-state pointer):
+	//   field omitted          → inherit agent.dns_resolver (most common)
+	//   dns_resolver: ""       → force system resolver (opt out of agent default)
+	//   dns_resolver: "x:y"    → use this specific resolver
+	//
+	// After applyDefaults() this field is guaranteed non-nil. Hashing
+	// (hash.go) and Equal() rely on this post-applyDefaults invariant.
+	DNSResolver *string `yaml:"dns_resolver"`
 }
 
 // ProbeOptions holds probe-type-specific settings.
@@ -225,6 +246,15 @@ func applyDefaults(cfg *Config) {
 			cfg.Targets[i].Timeout = cfg.Agent.DefaultTimeout
 		}
 
+		// Propagate agent.dns_resolver only when the target did not specify
+		// the field at all. An explicit empty string in the target YAML
+		// (`dns_resolver: ""`) is a deliberate opt-out from the agent
+		// default and must be preserved as a non-nil empty pointer.
+		if cfg.Targets[i].DNSResolver == nil {
+			v := cfg.Agent.DNSResolver
+			cfg.Targets[i].DNSResolver = &v
+		}
+
 		// Apply default ICMP payload sizes for MTU probes that don't specify their own.
 		if cfg.Targets[i].ProbeType == ProbeTypeMTU && len(cfg.Targets[i].ProbeOpts.ICMPPayloadSizes) == 0 {
 			if len(cfg.Agent.DefaultICMPPayloadSizes) > 0 {
@@ -265,6 +295,10 @@ func validate(cfg *Config) error {
 	}
 	if cfg.Agent.InitialProbeJitter < 0 {
 		return fmt.Errorf("agent: initial_probe_jitter must be >= 0")
+	}
+
+	if err := validateDNSResolver(cfg.Agent.DNSResolver); err != nil {
+		return fmt.Errorf("agent: %w", err)
 	}
 
 	// Validate agent-level default_icmp_payload_sizes if provided.
@@ -341,6 +375,15 @@ func validate(cfg *Config) error {
 		// Validate tag keys against allowlist or Prometheus naming rules.
 		if err := validateTagKeys(t, allowlistMode, allowlist); err != nil {
 			return err
+		}
+
+		// DNSResolver is guaranteed non-nil after applyDefaults; validate
+		// the dereferenced value. Empty string means "system resolver",
+		// non-empty must be IP literal with port.
+		if t.DNSResolver != nil {
+			if err := validateDNSResolver(*t.DNSResolver); err != nil {
+				return fmt.Errorf("target %q: %w", t.Name, err)
+			}
 		}
 
 		// Probe-type-specific validation.
@@ -542,6 +585,9 @@ func validateProbeOpts(t TargetConfig) error {
 		if err := validateDNSQueryType(t); err != nil {
 			return err
 		}
+		if err := validateDNSServer(t.ProbeOpts.DNSServer); err != nil {
+			return fmt.Errorf("target %q: %w", t.Name, err)
+		}
 	case ProbeTypeTLSCert:
 		if err := validateProxyURL(t.Name, t.ProbeOpts.ProxyURL); err != nil {
 			return err
@@ -737,6 +783,60 @@ func validateDNSQueryType(t TargetConfig) error {
 	qt := t.ProbeOpts.DNSQueryType
 	if qt != "" && !ValidDNSQueryTypes[qt] {
 		return fmt.Errorf("target %q: invalid dns_query_type %q (valid: A, AAAA, CNAME)", t.Name, qt)
+	}
+	return nil
+}
+
+// validateDNSResolver checks that a dns_resolver value is either empty
+// (meaning "use the host system resolver") or an IP literal with port.
+// Hostnames are rejected so the override does not silently fall back to
+// the system path: resolving the resolver itself would defeat the purpose
+// of the configuration.
+func validateDNSResolver(s string) error {
+	if s == "" {
+		return nil
+	}
+	host, port, err := net.SplitHostPort(s)
+	if err != nil {
+		return fmt.Errorf("dns_resolver %q must be an IP literal with port (e.g. \"8.8.8.8:53\"), not a hostname — otherwise pre-resolution falls back to the system resolver, defeating the purpose of the override", s)
+	}
+	if net.ParseIP(host) == nil {
+		return fmt.Errorf("dns_resolver %q must be an IP literal with port (e.g. \"8.8.8.8:53\"), not a hostname — otherwise pre-resolution falls back to the system resolver, defeating the purpose of the override", s)
+	}
+	portNum, err := strconv.Atoi(port)
+	if err != nil || portNum < 1 || portNum > 65535 {
+		return fmt.Errorf("dns_resolver %q port must be in range 1-65535", s)
+	}
+	return nil
+}
+
+// validateDNSServer checks the probe_opts.dns_server value used by
+// `probe_type: dns`. Empty is allowed (falls back to the system resolver
+// at probe time). A non-empty value must be an IP literal; a missing port
+// is auto-completed to :53 by the prober, which the validator emulates
+// before parsing.
+//
+// Hostnames are rejected — and this is a breaking change versus earlier
+// behavior — to keep probe_dns_resolve_seconds honest. A hostname here
+// would require pre-resolution before the probed query, contaminating the
+// metric with two lookups instead of one.
+func validateDNSServer(s string) error {
+	if s == "" {
+		return nil
+	}
+	candidate := s
+	host, _, err := net.SplitHostPort(candidate)
+	if err != nil {
+		// The DNS prober auto-appends :53 when SplitHostPort fails. Mirror
+		// that here so a bare IP literal validates the same way.
+		candidate = net.JoinHostPort(s, "53")
+		host, _, err = net.SplitHostPort(candidate)
+		if err != nil {
+			return fmt.Errorf("probe_opts.dns_server %q must be an IP literal (e.g. \"8.8.8.8:53\"), not a hostname. Hostnames require pre-resolution which contaminates probe_dns_resolve_seconds with two lookups instead of one. If you need to probe a named server, resolve its IP once (e.g. with `dig +short`) and configure that IP directly", s)
+		}
+	}
+	if net.ParseIP(host) == nil {
+		return fmt.Errorf("probe_opts.dns_server %q must be an IP literal (e.g. \"8.8.8.8:53\"), not a hostname. Hostnames require pre-resolution which contaminates probe_dns_resolve_seconds with two lookups instead of one. If you need to probe a named server, resolve its IP once (e.g. with `dig +short`) and configure that IP directly", s)
 	}
 	return nil
 }

@@ -42,7 +42,7 @@ func (p *DNSProber) Probe(ctx context.Context, target config.TargetConfig) Probe
 		queryType = "A"
 	}
 
-	resolver := p.buildResolver(target.ProbeOpts.DNSServer)
+	resolver := p.buildResolver(target.ProbeOpts.DNSServer, resolverFor(target.DNSResolver))
 
 	start := time.Now()
 	records, err := p.resolve(ctx, resolver, queryName, queryType)
@@ -86,7 +86,13 @@ func (p *DNSProber) Probe(ctx context.Context, target config.TargetConfig) Probe
 
 // buildResolver returns a net.Resolver configured to use the specified DNS
 // server, or the system default resolver if server is empty.
-func (p *DNSProber) buildResolver(server string) *net.Resolver {
+//
+// preResolver is used to resolve the configured `dns_server` host when it
+// happens to be a hostname. The DNS prober rejects hostname dns_server
+// values at config load time today (see config.validateDNSServer), so this
+// path is exercised primarily for IP literals; preResolver is wired in for
+// completeness and future-proofing.
+func (p *DNSProber) buildResolver(server string, preResolver *net.Resolver) *net.Resolver {
 	if server == "" {
 		return net.DefaultResolver
 	}
@@ -96,10 +102,14 @@ func (p *DNSProber) buildResolver(server string) *net.Resolver {
 		server = net.JoinHostPort(server, "53")
 	}
 
+	if preResolver == nil {
+		preResolver = net.DefaultResolver
+	}
+
 	return &net.Resolver{
 		PreferGo: true,
 		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			var d net.Dialer
+			d := net.Dialer{Resolver: preResolver}
 			return d.DialContext(ctx, network, server)
 		},
 	}

@@ -41,6 +41,14 @@ agent:
     - target_partition
     - target_account
 
+  # Optional: override the DNS resolver used for hostname → IP lookups across
+  # all probes. Format: IP:port literal (hostnames are rejected). When unset,
+  # NetSonar uses the host's system resolver path (NSS, systemd-resolved,
+  # /etc/resolv.conf, etc.) with whatever caching those layers provide.
+  # Per-target overrides via target.dns_resolver take precedence.
+  # See docs/probe-types.md "Resolver selection" for full semantics.
+  # dns_resolver: "127.0.0.1:5353"
+
 # ---------------------------------------------------------------------------
 # Targets
 # ---------------------------------------------------------------------------
@@ -230,6 +238,42 @@ targets:
       service: api-pub
       scope: same-region
       impact: critical
+      target_region: eu-central-1
+      target_partition: global
+      target_account: ep-devops-eu1
+
+  # TCP — per-target DNS resolver override
+  # This probe pins hostname resolution to 8.8.8.8:53 regardless of
+  # agent.dns_resolver. Useful when one target needs a different resolver
+  # than the rest of the fleet (e.g. a public endpoint that should not
+  # depend on internal DNS).
+  - name: api-pub-tcp-pinned-dns
+    address: "api-public.example.com:443"
+    probe_type: tcp
+    timeout: 3s
+    dns_resolver: "8.8.8.8:53"
+    tags:
+      service: api-pub
+      scope: cross-region
+      impact: medium
+      target_region: eu-central-1
+      target_partition: global
+      target_account: ep-devops-eu1
+
+  # TCP — explicit opt-out from agent.dns_resolver
+  # When agent.dns_resolver is set, this empty-string override forces this
+  # probe to use the host's system resolver path. Useful as a baseline
+  # measurement against the configured resolver: side-by-side comparison
+  # surfaces drift between operator-controlled DNS and the host default.
+  - name: api-pub-tcp-system-dns-baseline
+    address: "api-pub.example.internal:443"
+    probe_type: tcp
+    timeout: 3s
+    dns_resolver: ""
+    tags:
+      service: api-pub
+      scope: same-region
+      impact: low
       target_region: eu-central-1
       target_partition: global
       target_account: ep-devops-eu1

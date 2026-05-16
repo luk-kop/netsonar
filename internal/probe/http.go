@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptrace"
 	"net/url"
@@ -37,17 +38,23 @@ func requestBodyReader(n int64) io.Reader {
 
 // HTTPProber probes HTTP/HTTPS endpoints with per-phase timing breakdown
 // using net/http/httptrace.ClientTrace.
+//
+// HTTPProber holds only static, immutable configuration. The actual
+// *http.Client and *http.Transport are constructed per call to Probe so
+// that concurrent invocations on the same prober — which the scheduler
+// performs across targets that share a probe type — never share a
+// Transport whose RoundTrip path is parameterized by per-target settings
+// (currently the per-target DNS resolver).
 type HTTPProber struct {
-	// client is the HTTP client used for probing. It is configured with
-	// DisableKeepAlives to ensure each probe creates a fresh connection
-	// for accurate connection-establishment measurements.
-	client *http.Client
+	// tlsConfig is the static TLS template applied to every probe
+	// transport. Cloned per call to avoid sharing a mutable *tls.Config
+	// across goroutines.
+	tlsConfig *tls.Config
 	// tlsSkipVerify is retained so the proxy-path code can re-derive a
 	// tls.Config per probe without reading back into the transport.
 	tlsSkipVerify bool
-	// followRedirects is retained so the proxy-path code can match the
-	// direct-path CheckRedirect contract (follow 3xx like http.Client's
-	// default, or stop at first response when false).
+	// followRedirects controls the CheckRedirect closure on the per-call
+	// http.Client. The proxy-path code mirrors the same contract.
 	followRedirects bool
 	// proxyURL, when non-nil, routes every probe through an explicit
 	// proxy-aware code path that measures proxy phases (proxy_dial,
@@ -56,27 +63,14 @@ type HTTPProber struct {
 	proxyURL *url.URL
 }
 
-// NewHTTPProber creates an HTTPProber with a transport configured for
-// single-use connections and the given TLS/redirect settings. If proxyURL
-// is non-empty, all requests are routed through the specified HTTP proxy.
+// NewHTTPProber creates an HTTPProber with the given TLS/redirect
+// settings. If proxyURL is non-empty, all requests are routed through the
+// specified HTTP proxy. The actual *http.Client is constructed per Probe
+// invocation so the per-target DNS resolver can be injected without
+// sharing a Transport across concurrent probes.
 func NewHTTPProber(tlsSkipVerify bool, followRedirects bool, proxyURL string) *HTTPProber {
-	transport := &http.Transport{
-		DisableKeepAlives: true,
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: tlsSkipVerify,
-		},
-	}
-
-	client := &http.Client{
-		Transport: transport,
-		// Timeout is enforced via context, not the client.
-		Timeout: 0,
-	}
-
-	if !followRedirects {
-		client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
-			return http.ErrUseLastResponse
-		}
+	tlsCfg := &tls.Config{
+		InsecureSkipVerify: tlsSkipVerify,
 	}
 
 	var parsedProxy *url.URL
@@ -85,11 +79,44 @@ func NewHTTPProber(tlsSkipVerify bool, followRedirects bool, proxyURL string) *H
 	}
 
 	return &HTTPProber{
-		client:          client,
+		tlsConfig:       tlsCfg,
 		tlsSkipVerify:   tlsSkipVerify,
 		followRedirects: followRedirects,
 		proxyURL:        parsedProxy,
 	}
+}
+
+// newClient builds the *http.Client used for a single probe invocation.
+// The transport always disables keep-alives (each probe must establish a
+// fresh connection so connection-setup phases are observable) and uses
+// the per-target DNS resolver to resolve hostnames before dialing.
+//
+// Allocation cost is deliberately accepted: DisableKeepAlives means a
+// fresh dial per request anyway, so the additional Transport/Client
+// structs add only tens of bytes per probe and avoid every concurrency
+// hazard a shared Transport would create around per-target settings.
+func (p *HTTPProber) newClient(resolver *net.Resolver) *http.Client {
+	transport := &http.Transport{
+		DisableKeepAlives: true,
+		TLSClientConfig:   p.tlsConfig.Clone(),
+		DialContext: (&net.Dialer{
+			Resolver: resolver,
+		}).DialContext,
+	}
+
+	client := &http.Client{
+		Transport: transport,
+		// Timeout is enforced via context, not the client.
+		Timeout: 0,
+	}
+
+	if !p.followRedirects {
+		client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+	}
+
+	return client
 }
 
 // Probe executes a full HTTP request against target.Address with httptrace
@@ -125,6 +152,9 @@ func (p *HTTPProber) probeDirect(ctx context.Context, target config.TargetConfig
 		method = http.MethodGet
 	}
 
+	resolver := resolverFor(target.DNSResolver)
+	client := p.newClient(resolver)
+
 	// Phase timing anchors. Zero-valued times indicate the phase did not
 	// occur (e.g. tls_handshake on plain HTTP). httptrace callbacks may fire
 	// concurrently from net/http transport goroutines, so the timings are
@@ -157,7 +187,7 @@ func (p *HTTPProber) probeDirect(ctx context.Context, target config.TargetConfig
 	}
 
 	start := time.Now()
-	resp, err := p.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		result.Duration = time.Since(start)
 		result.Error = err.Error()
@@ -259,9 +289,10 @@ func (p *HTTPProber) probeViaProxy(ctx context.Context, target config.TargetConf
 	currentMethod := method
 	currentHeaders := headers
 	currentBody := requestBody
+	resolver := resolverFor(target.DNSResolver)
 	hop := 0
 	for {
-		exchange = executeProxyHTTPExchange(ctx, p.proxyURL, currentURL, currentMethod, currentHeaders, currentBody, p.tlsSkipVerify)
+		exchange = executeProxyHTTPExchange(ctx, p.proxyURL, currentURL, currentMethod, currentHeaders, currentBody, p.tlsSkipVerify, resolver)
 
 		if exchange.connectResp.Observed && !result.ProxyConnectResponseReceived {
 			// Preserve the first observed CONNECT status — subsequent
