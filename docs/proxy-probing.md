@@ -210,14 +210,15 @@ The Grafana dashboard separates direct and proxy-path probes to avoid misleading
 
 | Section | Content | Filter |
 |---|---|---|
-| All Probes — Status Table | All probes with a "Path" column | None (shows everything) |
+| Overview | All Probes — Status Table with Path and Target columns, plus Skipped Probe Cycles scheduler health | None (shows everything) |
 | HTTP Probes (Direct) | Direct HTTP duration, status codes, truncation, and phase panels | `probe_type="http", network_path="direct"` |
 | HTTP Probes (Proxy) | Proxy-path HTTP duration and phase panels | `probe_type="http", network_path="proxy"` |
-| HTTP Response Body Probes | Body match, HTTP status codes, duration, and phase panels | `probe_type="http_body"` |
+| HTTP Response Body Probes | Response-body status snapshot, body match, HTTP status codes, duration, and phase panels | `probe_type="http_body"` |
 | Proxy CONNECT Probes | Raw CONNECT success, duration, status, and proxy phase panels | `probe_type="proxy_connect"` |
 | TCP Connectivity | TCP duration and phase panels | `probe_type="tcp"` |
-| DNS Resolution | DNS duration and result-match panels | `probe_type="dns"` |
+| DNS Resolution | DNS status snapshot, duration, and result-match panels | `probe_type="dns"` |
 | TLS Certificate Expiry | Certificate expiry, chain details, and TLS cert phase panels | `probe_type="tls_cert"` |
+| ICMP Ping | ICMP status snapshot, packet loss, RTT, and RTT standard deviation panels | `probe_type="icmp"` |
 
 This separation prevents proxy-path probes (with inherently higher latency due to the proxy hop) from distorting the Y-axis scale of direct probe charts.
 
