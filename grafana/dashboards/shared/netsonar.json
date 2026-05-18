@@ -309,7 +309,7 @@
           "instant": true
         }
       ],
-      "description": "Critical failures counts targets with impact=\"critical\" and probe_success=0. Timed Out counts targets whose latest probe reached or exceeded its configured timeout."
+      "description": "Critical Failures counts targets with impact=\"critical\" and probe_success=0. Timed Out counts targets whose latest probe reached or exceeded its configured timeout."
     },
     {
       "datasource": {
@@ -940,7 +940,7 @@
         }
       },
       "title": "All Probes — Status Table",
-      "description": "Current status of every configured probe target. Sorted by Status so failures appear first.\n\nColumn legend:\n- Status: latest probe outcome from probe_success. OK = succeeded, FAIL = failed.\n- Timed Out: YES means the latest probe reached or exceeded its configured timeout. Blank means the latest result did not hit the timeout.\n- Total Probe Time: wall-clock duration of the latest probe (probe_duration_seconds).\n- Time Limit: effective configured per-target timeout in seconds (probe_timeout_seconds).\n- Limit Used: latest Total Probe Time divided by Time Limit. This is a tuning signal, not the source of truth for timeout classification.\n- Name / Probe / Path: target identity. Path = YES means the probe goes through an HTTP proxy (network_path=proxy); blank = direct.\n- Service / Target / Host / Port / Scope / Region / Partition / Account / Impact / Target Type: routing and ownership labels from the target config. Dynamic tag columns are shown once; duplicate columns from joined queries are hidden.",
+      "description": "Current status of every configured probe target. Sorted by Status so failures appear first.\n\nColumn legend:\n- Status: latest probe outcome from probe_success. OK = succeeded, FAIL = failed.\n- Timed Out: YES means the latest probe reached or exceeded its configured timeout. Blank means the latest result did not hit the timeout.\n- Total Probe Time: wall-clock duration of the latest probe (probe_duration_seconds).\n- Time Limit: effective configured per-target timeout in seconds (probe_timeout_seconds).\n- Limit Used: latest Total Probe Time divided by Time Limit. This is a tuning signal, not the source of truth for timeout classification.\n- Name / Probe / Path / Target: target identity and probe route. Path indicates the network_path label, for example direct or proxy.\n- Service / Host / Port / Scope / Region / Partition / Account / Impact / Target Type: routing and ownership labels from the target config. Dynamic tag columns are shown once; duplicate columns from joined queries are hidden.",
       "type": "table",
       "transformations": [
         {
@@ -1087,14 +1087,14 @@
               "probe_type 1": 2,
               "network_path": 3,
               "network_path 1": 3,
-              "Value #D": 4,
-              "Value #C": 5,
-              "Value #E": 6,
-              "Value #F": 7,
-              "service": 8,
-              "service 1": 8,
-              "target": 9,
-              "target 1": 9,
+              "Value #D": 5,
+              "Value #C": 6,
+              "Value #E": 7,
+              "Value #F": 8,
+              "service": 9,
+              "service 1": 9,
+              "target": 4,
+              "target 1": 4,
               "host": 10,
               "host 1": 10,
               "port": 11,
@@ -1184,12 +1184,73 @@
       ]
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisLabel": "skips/s",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            }
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
+      "id": 45,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "title": "Skipped Probe Cycles",
+      "description": "Tracks scheduled probe cycles that NetSonar skipped because the previous run for the same target was still in progress. The scheduler runs at most one probe per target at a time; when a target duration exceeds or overlaps its configured interval, the stale tick is dropped and probe_skipped_overlap_total increments. Non-zero values usually mean the interval is too short for the probe duration, the timeout is too close to or longer than the interval, or the target/path is intermittently slow. This is a global scheduler health signal across all probe types, not an MTU-specific metric.",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(probe_skipped_overlap_total{job=~\"$job\"}[$__rate_interval])) by (target_name)",
+          "legendFormat": "{{target_name}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
       "collapsed": true,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 23
+        "y": 31
       },
       "id": 102,
       "title": "HTTP Probes (Direct)",
@@ -1222,7 +1283,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 24
+        "y": 32
       },
       "id": 20,
       "options": {
@@ -1278,7 +1339,7 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 24
+        "y": 32
       },
       "id": 21,
       "options": {
@@ -1338,7 +1399,7 @@
         "h": 4,
         "w": 6,
         "x": 12,
-        "y": 24
+        "y": 32
       },
       "id": 22,
       "options": {
@@ -1396,7 +1457,7 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 24
+        "y": 32
       },
       "id": 23,
       "options": {
@@ -1473,7 +1534,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 28
+        "y": 36
       },
       "id": 24,
       "options": {
@@ -1530,7 +1591,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 28
+        "y": 36
       },
       "id": 25,
       "options": {
@@ -1598,7 +1659,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 28
+        "y": 36
       },
       "id": 203,
       "options": {
@@ -1655,7 +1716,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 36
+        "y": 44
       },
       "id": 200,
       "options": {
@@ -1691,38 +1752,17 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "fixed",
+            "fixedColor": "text"
           },
           "custom": {
             "cellOptions": {
-              "type": "color-background",
-              "mode": "gradient"
+              "type": "auto"
             },
             "filterable": true
           },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "transparent",
-                "value": null
-              },
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "yellow",
-                "value": 0.05
-              },
-              {
-                "color": "red",
-                "value": 0.2
-              }
-            ]
-          },
-          "noValue": "N/A",
           "unit": "s",
+          "noValue": "N/A",
           "mappings": [
             {
               "type": "special",
@@ -1903,7 +1943,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 44
+        "y": 52
       },
       "id": 201,
       "options": {
@@ -1916,7 +1956,7 @@
         ]
       },
       "title": "HTTP Phase Breakdown (Direct)",
-      "description": "Instant snapshot of direct HTTP phase durations pivoted by target.\n\nColumn legend:\n- Target: HTTP target name; click to drill down to HTTP Details.\n- Status: latest probe outcome from probe_success. OK = succeeded, FAIL = failed.\n- dns_resolve: DNS lookup time for hostname targets. N/A means DNS was not observed, for example a literal IP target.\n- tcp_connect: TCP connection establishment time.\n- tls_handshake: Target TLS handshake time. N/A means TLS was not observed, for example plain HTTP.\n- request_write: Time from connection/TLS readiness to request write completion. Usually near-zero for GET/small requests; grows when request_body_bytes sends an upload payload.\n- ttfb: Time from request write completion to first response byte.\n- transfer: Response body read time up to response_body_limit_bytes.\n- total_phases: sum of observed phase timings for this target.\n\nCell colours: green <50 ms, yellow 50-200 ms, red >200 ms. N/A cells mean the phase was not observed or does not apply.",
+      "description": "Instant snapshot of direct HTTP phase durations pivoted by target.\n\nColumn legend:\n- Target: HTTP target name; click to drill down to HTTP Details.\n- Status: latest probe outcome from probe_success. OK = succeeded, FAIL = failed.\n- dns_resolve: DNS lookup time for hostname targets. N/A means DNS was not observed, for example a literal IP target.\n- tcp_connect: TCP connection establishment time.\n- tls_handshake: Target TLS handshake time. N/A means TLS was not observed, for example plain HTTP.\n- request_write: Time from connection/TLS readiness to request write completion. Usually near-zero for GET/small requests; grows when request_body_bytes sends an upload payload.\n- ttfb: Time from request write completion to first response byte.\n- transfer: Response body read time up to response_body_limit_bytes.\n- total_phases: sum of observed phase timings for this target.\n\nOnly Status and total_phases use background color. Ordinary phase cells are uncolored; N/A means the phase was not observed or does not apply.",
       "type": "table",
       "targets": [
         {
@@ -2016,7 +2056,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 62
+        "y": 70
       },
       "id": 202,
       "options": {
@@ -2032,7 +2072,7 @@
         "showUnfilled": true
       },
       "title": "HTTP Total Duration (Direct, last)",
-      "description": "Horizontal bar gauge of total direct HTTP probe duration per target from probe_duration_seconds. This should be approximately equal to total_phases in HTTP Phase Breakdown (Direct), which sums probe_phase_duration_seconds for observed HTTP phases. Small differences are expected because probe_duration_seconds is the outer wall-clock probe duration, while total_phases includes only instrumented sub-phases and may exclude small prober/scheduler/metric overhead. Thresholds match the phase breakdown table: green <50 ms, yellow 50-200 ms, red >200 ms.",
+      "description": "Horizontal bar gauge of total direct HTTP probe duration per target from probe_duration_seconds. This should be approximately equal to total_phases in HTTP Phase Breakdown (Direct), which sums probe_phase_duration_seconds for observed HTTP phases. Small differences are expected because probe_duration_seconds is the outer wall-clock probe duration, while total_phases includes only instrumented sub-phases and may exclude small prober/scheduler/metric overhead.",
       "type": "bargauge",
       "targets": [
         {
@@ -2051,7 +2091,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 54
+        "y": 62
       },
       "fieldConfig": {
         "defaults": {
@@ -2115,7 +2155,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 70
+        "y": 78
       },
       "id": 108,
       "title": "HTTP Probes (Proxy)",
@@ -2148,7 +2188,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 71
+        "y": 79
       },
       "id": 79,
       "options": {
@@ -2204,7 +2244,7 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 71
+        "y": 79
       },
       "id": 80,
       "options": {
@@ -2264,7 +2304,7 @@
         "h": 4,
         "w": 6,
         "x": 12,
-        "y": 71
+        "y": 79
       },
       "id": 81,
       "options": {
@@ -2322,7 +2362,7 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 71
+        "y": 79
       },
       "id": 82,
       "options": {
@@ -2399,7 +2439,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 75
+        "y": 83
       },
       "id": 83,
       "options": {
@@ -2435,38 +2475,17 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "fixed",
+            "fixedColor": "text"
           },
           "custom": {
             "cellOptions": {
-              "type": "color-background",
-              "mode": "gradient"
+              "type": "auto"
             },
             "filterable": true
           },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "transparent",
-                "value": null
-              },
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "yellow",
-                "value": 0.05
-              },
-              {
-                "color": "red",
-                "value": 0.2
-              }
-            ]
-          },
-          "noValue": "N/A",
           "unit": "s",
+          "noValue": "N/A",
           "mappings": [
             {
               "type": "special",
@@ -2647,7 +2666,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 83
+        "y": 91
       },
       "id": 204,
       "options": {
@@ -2660,7 +2679,7 @@
         ]
       },
       "title": "HTTP Phase Breakdown (Proxy)",
-      "description": "Instant snapshot of proxied HTTP phase durations pivoted by target. This panel shows the full HTTP flow through the proxy, not only the proxy hop.\n\nColumn legend:\n- Target: HTTP target name; click to drill down to HTTP Details.\n- Status: latest probe outcome from probe_success. OK = succeeded, FAIL = failed.\n\nProxy setup phases:\n- proxy_dial: TCP connection to the proxy, including proxy hostname DNS when applicable.\n- proxy_tls: TLS handshake with an HTTPS proxy. N/A for plain HTTP proxies.\n- proxy_connect: CONNECT request/response with the proxy for HTTPS targets. N/A for plain HTTP targets through a forward proxy.\n\nTarget HTTP exchange phases:\n- tls_handshake: TLS handshake with the target through the proxy tunnel for HTTPS targets.\n- request_write: HTTP request write after proxy setup and target TLS readiness.\n- ttfb: Time from request write completion to first response byte.\n- transfer: Response body read time up to response_body_limit_bytes.\n- total_phases: sum of observed phase timings for this target.\n\nrequest_write, ttfb, and transfer are expected for proxied HTTP because NetSonar still performs the target HTTP exchange after proxy setup completes.",
+      "description": "Instant snapshot of proxied HTTP phase durations pivoted by target. This panel shows the full HTTP flow through the proxy, not only the proxy hop.\n\nColumn legend:\n- Target: HTTP target name; click to drill down to HTTP Details.\n- Status: latest probe outcome from probe_success. OK = succeeded, FAIL = failed.\n\nProxy setup phases:\n- proxy_dial: TCP connection to the proxy, including proxy hostname DNS when applicable.\n- proxy_tls: TLS handshake with an HTTPS proxy. N/A for plain HTTP proxies.\n- proxy_connect: CONNECT request/response with the proxy for HTTPS targets. N/A for plain HTTP targets through a forward proxy.\n\nTarget HTTP exchange phases:\n- tls_handshake: TLS handshake with the target through the proxy tunnel for HTTPS targets.\n- request_write: HTTP request write after proxy setup and target TLS readiness.\n- ttfb: Time from request write completion to first response byte.\n- transfer: Response body read time up to response_body_limit_bytes.\n- total_phases: sum of observed phase timings for this target.\n\nrequest_write, ttfb, and transfer are expected for proxied HTTP because NetSonar still performs the target HTTP exchange after proxy setup completes. Only Status and total_phases use background color; ordinary phase cells are uncolored.",
       "type": "table",
       "targets": [
         {
@@ -2735,7 +2754,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 93
+        "y": 101
       },
       "fieldConfig": {
         "defaults": {
@@ -2799,11 +2818,491 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 101
+        "y": 109
       },
       "id": 107,
       "title": "HTTP Response Body Probes",
       "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true,
+            "inspect": false
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "0": {
+                        "color": "red",
+                        "text": "FAIL"
+                      },
+                      "1": {
+                        "color": "green",
+                        "text": "OK"
+                      }
+                    },
+                    "type": "value"
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "green",
+                      "value": 1
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 110
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Duration (s)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 3
+              },
+              {
+                "id": "custom.width",
+                "value": 120
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              },
+              {
+                "id": "noValue",
+                "value": "N/A"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "HTTP Code"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.width",
+                "value": 110
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              },
+              {
+                "id": "noValue",
+                "value": "-"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Body Match"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "0": {
+                        "color": "red",
+                        "text": "MISMATCH"
+                      },
+                      "1": {
+                        "color": "green",
+                        "text": "MATCH"
+                      }
+                    },
+                    "type": "value"
+                  },
+                  {
+                    "options": {
+                      "match": "null+nan",
+                      "result": {
+                        "text": "N/A",
+                        "color": "transparent"
+                      }
+                    },
+                    "type": "special"
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "green",
+                      "value": 1
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 130
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              },
+              {
+                "id": "noValue",
+                "value": "N/A"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Target"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 320
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Path"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "target_account"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Account"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "target_region"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Region"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "target_type"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Target Type"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Target / Path"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 260
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 114
+      },
+      "id": 217,
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": false,
+            "displayName": "Status"
+          }
+        ],
+        "footer": {
+          "show": false
+        }
+      },
+      "title": "HTTP Response Body Status per Target",
+      "description": "Current HTTP response-body probe status per target and path. Status is the latest probe outcome from probe_success. HTTP Code is present when an HTTP response was received. Body Match shows whether the response body matched the configured string or regex; N/A means body evaluation did not complete.",
+      "type": "table",
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "target_path",
+            "mode": "outer"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Time 1": true,
+              "Time 2": true,
+              "Time 3": true,
+              "Time 4": true,
+              "__name__": true,
+              "__name__ 1": true,
+              "__name__ 2": true,
+              "__name__ 3": true,
+              "__name__ 4": true,
+              "job": true,
+              "job 1": true,
+              "job 2": true,
+              "job 3": true,
+              "job 4": true,
+              "instance": true,
+              "instance 1": true,
+              "instance 2": true,
+              "instance 3": true,
+              "instance 4": true,
+              "url": true,
+              "url 1": true,
+              "url 2": true,
+              "url 3": true,
+              "url 4": true,
+              "host": true,
+              "host 1": true,
+              "host 2": true,
+              "host 3": true,
+              "host 4": true,
+              "monitor": true,
+              "monitor 1": true,
+              "monitor 2": true,
+              "monitor 3": true,
+              "monitor 4": true,
+              "port": true,
+              "port 1": true,
+              "port 2": true,
+              "port 3": true,
+              "port 4": true,
+              "visibility": true,
+              "visibility 1": true,
+              "visibility 2": true,
+              "visibility 3": true,
+              "visibility 4": true,
+              "provider": true,
+              "provider 1": true,
+              "provider 2": true,
+              "provider 3": true,
+              "provider 4": true,
+              "probe_type": true,
+              "probe_type 1": true,
+              "probe_type 2": true,
+              "probe_type 3": true,
+              "probe_type 4": true,
+              "target_partition": true,
+              "target_partition 1": true,
+              "target_partition 2": true,
+              "target_partition 3": true,
+              "target_partition 4": true,
+              "impact 1": true,
+              "impact 2": true,
+              "impact 3": true,
+              "impact 4": true,
+              "scope 1": true,
+              "scope 2": true,
+              "scope 3": true,
+              "scope 4": true,
+              "service 1": true,
+              "service 2": true,
+              "service 3": true,
+              "service 4": true,
+              "target 1": true,
+              "target 2": true,
+              "target 3": true,
+              "target 4": true,
+              "target_account 1": true,
+              "target_account 2": true,
+              "target_account 3": true,
+              "target_account 4": true,
+              "target_region 1": true,
+              "target_region 2": true,
+              "target_region 3": true,
+              "target_region 4": true,
+              "target_type 1": true,
+              "target_type 2": true,
+              "target_type 3": true,
+              "target_type 4": true,
+              "network_path 2": true,
+              "network_path 3": true,
+              "network_path 4": true,
+              "target_name 2": true,
+              "target_name 3": true,
+              "target_name 4": true,
+              "target_path 1": true,
+              "target_path 2": true,
+              "target_path 3": true,
+              "service": true,
+              "target": true,
+              "scope": true,
+              "target_region": true,
+              "impact": true,
+              "target_account": true,
+              "target_type": true,
+              "target_path": true,
+              "target_name": true,
+              "network_path": true
+            },
+            "indexByName": {
+              "Value #A": 0,
+              "target_name 1": 1,
+              "network_path 1": 2,
+              "Value #B": 3,
+              "Value #C": 4,
+              "Value #D": 5
+            },
+            "renameByName": {
+              "Value #A": "Status",
+              "target_name 1": "Name",
+              "network_path 1": "Path",
+              "Value #B": "Duration (s)",
+              "Value #C": "HTTP Code",
+              "Value #D": "Body Match"
+            }
+          }
+        }
+      ],
+      "targets": [
+        {
+          "expr": "label_join(probe_success{job=~\"$job\", probe_type=\"http_body\"}, \"target_path\", \" / \", \"target_name\", \"network_path\")",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "label_join(probe_duration_seconds{job=~\"$job\", probe_type=\"http_body\"}, \"target_path\", \" / \", \"target_name\", \"network_path\")",
+          "legendFormat": "",
+          "refId": "B",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "label_join((probe_http_status_code{job=~\"$job\", probe_type=\"http_body\"} or on(target_name, network_path) (probe_success{job=~\"$job\", probe_type=\"http_body\"} * 0 / 0)), \"target_path\", \" / \", \"target_name\", \"network_path\")",
+          "legendFormat": "",
+          "refId": "C",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "label_join((probe_http_body_match{job=~\"$job\", probe_type=\"http_body\"} or on(target_name, network_path) (probe_success{job=~\"$job\", probe_type=\"http_body\"} * 0 / 0)), \"target_path\", \" / \", \"target_name\", \"network_path\")",
+          "legendFormat": "",
+          "refId": "D",
+          "instant": true,
+          "format": "table"
+        }
+      ]
     },
     {
       "datasource": {
@@ -2832,7 +3331,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 102
+        "y": 110
       },
       "id": 73,
       "options": {
@@ -2888,7 +3387,7 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 102
+        "y": 110
       },
       "id": 74,
       "options": {
@@ -2948,7 +3447,7 @@
         "h": 4,
         "w": 6,
         "x": 12,
-        "y": 102
+        "y": 110
       },
       "id": 75,
       "options": {
@@ -3006,7 +3505,7 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 102
+        "y": 110
       },
       "id": 76,
       "options": {
@@ -3077,7 +3576,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 106
+        "y": 119
       },
       "id": 70,
       "options": {
@@ -3132,7 +3631,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 106
+        "y": 119
       },
       "id": 71,
       "options": {
@@ -3206,7 +3705,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 106
+        "y": 119
       },
       "id": 78,
       "options": {
@@ -3242,38 +3741,17 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "fixed",
+            "fixedColor": "text"
           },
           "custom": {
             "cellOptions": {
-              "type": "color-background",
-              "mode": "gradient"
+              "type": "auto"
             },
             "filterable": true
           },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "transparent",
-                "value": null
-              },
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "yellow",
-                "value": 0.05
-              },
-              {
-                "color": "red",
-                "value": 0.2
-              }
-            ]
-          },
-          "noValue": "N/A",
           "unit": "s",
+          "noValue": "N/A",
           "mappings": [
             {
               "type": "special",
@@ -3434,7 +3912,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 114
+        "y": 127
       },
       "id": 209,
       "options": {
@@ -3447,7 +3925,7 @@
         ]
       },
       "title": "HTTP Response Body Phase Breakdown",
-      "description": "Instant snapshot of HTTP response body probe phase durations pivoted by target and path. Status is the latest probe outcome from probe_success. Direct probes can emit dns_resolve, tcp_connect, tls_handshake, request_write, ttfb, and transfer. Proxy-path probes can emit proxy_dial, optional proxy_tls, proxy_connect, tls_handshake, request_write, ttfb, and transfer. total_phases is the sum of observed phase timings for this target/path. N/A cells mean the phase was not observed or does not apply.",
+      "description": "Instant snapshot of HTTP response body probe phase durations pivoted by target and path. Status is the latest probe outcome from probe_success. Direct probes can emit dns_resolve, tcp_connect, tls_handshake, request_write, ttfb, and transfer. Proxy-path probes can emit proxy_dial, optional proxy_tls, proxy_connect, tls_handshake, request_write, ttfb, and transfer. total_phases is the sum of observed phase timings for this target/path. Only Status and total_phases use background color; ordinary phase cells are uncolored. N/A cells mean the phase was not observed or does not apply.",
       "type": "table",
       "targets": [
         {
@@ -3525,7 +4003,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 124
+        "y": 137
       },
       "fieldConfig": {
         "defaults": {
@@ -3589,7 +4067,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 132
+        "y": 145
       },
       "id": 109,
       "title": "Proxy CONNECT Probes",
@@ -3622,7 +4100,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 133
+        "y": 146
       },
       "id": 84,
       "options": {
@@ -3678,7 +4156,7 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 133
+        "y": 146
       },
       "id": 85,
       "options": {
@@ -3738,7 +4216,7 @@
         "h": 4,
         "w": 6,
         "x": 12,
-        "y": 133
+        "y": 146
       },
       "id": 86,
       "options": {
@@ -3796,7 +4274,7 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 133
+        "y": 146
       },
       "id": 87,
       "options": {
@@ -3824,393 +4302,6 @@
         }
       ],
       "description": "Average latest wall-clock duration for raw proxy CONNECT probes."
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisLabel": "",
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 2,
-            "pointSize": 5,
-            "showPoints": "auto",
-            "spanNulls": false
-          },
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 137
-      },
-      "id": 88,
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "mean",
-            "max",
-            "lastNotNull"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "title": "Proxy CONNECT Duration",
-      "description": "Total wall-clock time for the CONNECT tunnel establishment per proxy target, including TCP dial to proxy and CONNECT handshake.",
-      "type": "timeseries",
-      "targets": [
-        {
-          "expr": "probe_duration_seconds{job=~\"$job\", probe_type=\"proxy_connect\"}",
-          "legendFormat": "{{target_name}}",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {
-            "cellOptions": {
-              "type": "color-background",
-              "mode": "gradient"
-            },
-            "filterable": true
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "transparent",
-                "value": null
-              },
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "yellow",
-                "value": 0.05
-              },
-              {
-                "color": "red",
-                "value": 0.2
-              }
-            ]
-          },
-          "noValue": "N/A",
-          "unit": "s",
-          "mappings": [
-            {
-              "type": "special",
-              "options": {
-                "match": "null+nan",
-                "result": {
-                  "text": "N/A",
-                  "color": "transparent"
-                }
-              }
-            }
-          ]
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Status"
-            },
-            "properties": [
-              {
-                "id": "mappings",
-                "value": [
-                  {
-                    "options": {
-                      "0": {
-                        "color": "red",
-                        "text": "FAIL"
-                      },
-                      "1": {
-                        "color": "green",
-                        "text": "OK"
-                      }
-                    },
-                    "type": "value"
-                  }
-                ]
-              },
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background"
-                }
-              },
-              {
-                "id": "color",
-                "value": {
-                  "mode": "thresholds"
-                }
-              },
-              {
-                "id": "thresholds",
-                "value": {
-                  "mode": "absolute",
-                  "steps": [
-                    {
-                      "color": "red",
-                      "value": null
-                    },
-                    {
-                      "color": "green",
-                      "value": 1
-                    }
-                  ]
-                }
-              },
-              {
-                "id": "unit",
-                "value": "none"
-              },
-              {
-                "id": "custom.width",
-                "value": 120
-              },
-              {
-                "id": "custom.align",
-                "value": "center"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Target"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "auto"
-                }
-              },
-              {
-                "id": "unit",
-                "value": "string"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Target"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "auto"
-                }
-              },
-              {
-                "id": "unit",
-                "value": "string"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "total_phases"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background",
-                  "mode": "basic"
-                }
-              },
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "blue"
-                }
-              },
-              {
-                "id": "thresholds",
-                "value": {
-                  "mode": "absolute",
-                  "steps": [
-                    {
-                      "color": "blue",
-                      "value": null
-                    }
-                  ]
-                }
-              },
-              {
-                "id": "unit",
-                "value": "s"
-              }
-            ]
-          }
-        ]
-      },
-      "gridPos": {
-        "h": 10,
-        "w": 24,
-        "x": 0,
-        "y": 145
-      },
-      "id": 211,
-      "options": {
-        "showHeader": true,
-        "sortBy": [
-          {
-            "displayName": "proxy_connect",
-            "desc": true
-          }
-        ]
-      },
-      "title": "Proxy CONNECT Phase Breakdown",
-      "description": "Instant snapshot of raw proxy CONNECT probe phase durations pivoted by target. Status is the latest probe outcome from probe_success. proxy_dial is the TCP connection to the proxy, proxy_tls is the TLS handshake with an HTTPS proxy, proxy_connect is the CONNECT request/response, and total_phases is the sum of observed CONNECT probe phases. N/A cells mean the phase was not observed or does not apply.",
-      "type": "table",
-      "targets": [
-        {
-          "expr": "label_replace(probe_success{job=~\"$job\", probe_type=\"proxy_connect\"}, \"phase\", \"Status\", \"__name__\", \".*\") or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"proxy_connect\"} or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"proxy_connect\"}), \"phase\", \"total_phases\", \"__name__\", \".*\")",
-          "format": "table",
-          "instant": true,
-          "refId": "A"
-        }
-      ],
-      "transformations": [
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {
-              "Time": true,
-              "__name__": true,
-              "instance": true,
-              "job": true,
-              "probe_type": true,
-              "network_path": true,
-              "scope": true,
-              "service": true,
-              "target": true,
-              "impact": true,
-              "target_account": true,
-              "target_partition": true,
-              "target_region": true
-            },
-            "indexByName": {
-              "target_name": 0,
-              "phase": 1,
-              "Value": 2
-            }
-          }
-        },
-        {
-          "id": "groupingToMatrix",
-          "options": {
-            "columnField": "phase",
-            "rowField": "target_name",
-            "valueField": "Value"
-          }
-        },
-        {
-          "id": "organize",
-          "options": {
-            "indexByName": {
-              "target_name\\phase": 0,
-              "Status": 1,
-              "proxy_dial": 2,
-              "proxy_tls": 3,
-              "proxy_connect": 4,
-              "total_phases": 5
-            },
-            "renameByName": {
-              "target_name\\phase": "Target"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisLabel": "",
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 2,
-            "pointSize": 5,
-            "showPoints": "auto",
-            "spanNulls": false
-          },
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 155
-      },
-      "id": 77,
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "mean",
-            "max",
-            "lastNotNull"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "title": "Proxy CONNECT Phase Timing",
-      "description": "Phases observed in the latest CONNECT probe result. Shown for both successful and failed probes; missing phases mean the probe did not reach that phase.\n\nPhase legend:\n- proxy_dial: TCP connection to the proxy.\n- proxy_tls: TLS handshake with the proxy, only for HTTPS proxy URLs.\n- proxy_connect: CONNECT request/response with the proxy. High values usually point to proxy latency or upstream tunnel establishment delay.",
-      "type": "timeseries",
-      "targets": [
-        {
-          "expr": "probe_phase_duration_seconds{job=~\"$job\", probe_type=\"proxy_connect\"}",
-          "legendFormat": "{{target_name}} — {{phase}}",
-          "refId": "A"
-        }
-      ]
     },
     {
       "datasource": {
@@ -4401,7 +4492,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 163
+        "y": 150
       },
       "id": 89,
       "options": {
@@ -4417,7 +4508,7 @@
         }
       },
       "title": "Proxy CONNECT Status per Target",
-      "description": "Current status of each proxy CONNECT target. Sorted by Status so failures appear first.\n\nColumn legend:\n- Status: binary probe outcome from probe_success. OK = proxy accepted the CONNECT tunnel or returned the expected CONNECT denial, FAIL = unexpected CONNECT status or connection failure.\n- CONNECT Code: HTTP status returned by the proxy to the CONNECT request when available. Colour codes the kind of response: green (2xx) = tunnel established; orange (3xx-4xx) = client/policy response, typically an explicit denial such as 403 — paired with Status=OK only when the target's expected_proxy_connect_status_codes matches; red (5xx) = upstream/infrastructure failure; blank = no CONNECT response observed (proxy unreachable or dial failed before any response).\n- Name / Service / Target / Scope / Region: target identity and routing context from config labels.\n- Duration (s): wall-clock time for the CONNECT probe, including TCP dial to proxy and CONNECT request/response. Use the Proxy CONNECT Phase Timing panel to see which stage is slow.",
+      "description": "Current status of each proxy CONNECT target. Sorted by Status so failures appear first.\n\nColumn legend:\n- Status: binary probe outcome from probe_success. OK = proxy accepted the CONNECT tunnel or returned the expected CONNECT denial, FAIL = unexpected CONNECT status or connection failure.\n- CONNECT Code: HTTP status returned by the proxy to the CONNECT request when available. Colors the kind of response: green (2xx) = tunnel established; orange (3xx-4xx) = client/policy response, typically an explicit denial such as 403 — paired with Status=OK only when the target's expected_proxy_connect_status_codes matches; red (5xx) = upstream/infrastructure failure; - = no CONNECT response observed (proxy unreachable or dial failed before any response).\n- Name / Service / Target / Scope / Region: target identity and routing context from config labels.\n- Duration (s): wall-clock time for the CONNECT probe, including TCP dial to proxy and CONNECT request/response. Use the Proxy CONNECT Phase Timing panel to see which stage is slow.",
       "type": "table",
       "transformations": [
         {
@@ -4492,6 +4583,10 @@
               "scope 2": true,
               "service 2": true,
               "target 2": true,
+              "target_type": true,
+              "target_type 1": true,
+              "target_type 2": true,
+              "target_type 3": true,
               "target_name 1": true,
               "target_name 2": true,
               "target_name 3": true
@@ -4499,12 +4594,15 @@
             "indexByName": {
               "Value #A": 0,
               "target_name": 1,
-              "service 1": 2,
-              "target 1": 3,
-              "scope 1": 4,
-              "target_region 1": 5,
-              "Value #C": 6,
-              "Value #B": 7
+              "service 1": 4,
+              "target 1": 5,
+              "scope 1": 6,
+              "target_region 1": 7,
+              "Value #C": 2,
+              "Value #B": 3,
+              "impact 1": 8,
+              "target_account 1": 9,
+              "target_partition 1": 10
             },
             "renameByName": {
               "target_name": "Name",
@@ -4547,18 +4645,6 @@
       ]
     },
     {
-      "collapsed": true,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 171
-      },
-      "id": 101,
-      "title": "TCP Connectivity",
-      "type": "row"
-    },
-    {
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -4578,170 +4664,7 @@
             "showPoints": "auto",
             "spanNulls": false
           },
-          "unit": "s",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 0.3
-              },
-              {
-                "color": "red",
-                "value": 1
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 172
-      },
-      "id": 10,
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "mean",
-            "max",
-            "lastNotNull"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "title": "TCP Duration — Local",
-      "type": "timeseries",
-      "targets": [
-        {
-          "expr": "probe_duration_seconds{job=~\"$job\", probe_type=\"tcp\", scope=\"local\"}",
-          "legendFormat": "{{target_name}}",
-          "refId": "A"
-        }
-      ],
-      "description": "TCP probe duration for targets tagged scope=\"local\". TCP probes are connect-only: duration covers DNS resolution when needed plus TCP connection establishment."
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisLabel": "",
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 2,
-            "pointSize": 5,
-            "showPoints": "auto",
-            "spanNulls": false
-          },
-          "unit": "s",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 0.5
-              },
-              {
-                "color": "red",
-                "value": 2
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 172
-      },
-      "id": 11,
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "mean",
-            "max",
-            "lastNotNull"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "title": "TCP Duration — External",
-      "type": "timeseries",
-      "targets": [
-        {
-          "expr": "probe_duration_seconds{job=~\"$job\", probe_type=\"tcp\", scope=\"external\"}",
-          "legendFormat": "{{target_name}}",
-          "refId": "A"
-        }
-      ],
-      "description": "TCP probe duration for targets tagged scope=\"external\". TCP probes are connect-only: duration covers DNS resolution when needed plus TCP connection establishment."
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisLabel": "",
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 2,
-            "pointSize": 5,
-            "showPoints": "auto",
-            "spanNulls": false
-          },
-          "unit": "s",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 0.3
-              },
-              {
-                "color": "red",
-                "value": 1
-              }
-            ]
-          }
+          "unit": "s"
         },
         "overrides": []
       },
@@ -4749,9 +4672,9 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 180
+        "y": 158
       },
-      "id": 12,
+      "id": 88,
       "options": {
         "legend": {
           "displayMode": "table",
@@ -4766,16 +4689,16 @@
           "mode": "multi"
         }
       },
-      "title": "TCP Duration — All Targets",
+      "title": "Proxy CONNECT Duration",
+      "description": "Total wall-clock time for the CONNECT tunnel establishment per proxy target, including TCP dial to proxy and CONNECT handshake.",
       "type": "timeseries",
       "targets": [
         {
-          "expr": "probe_duration_seconds{job=~\"$job\", probe_type=\"tcp\"}",
+          "expr": "probe_duration_seconds{job=~\"$job\", probe_type=\"proxy_connect\"}",
           "legendFormat": "{{target_name}}",
           "refId": "A"
         }
-      ],
-      "description": "TCP probe duration for all TCP targets regardless of scope. Use the local/external panels above when comparing scoped paths."
+      ]
     },
     {
       "datasource": {
@@ -4785,38 +4708,17 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "fixed",
+            "fixedColor": "text"
           },
           "custom": {
             "cellOptions": {
-              "type": "color-background",
-              "mode": "gradient"
+              "type": "auto"
             },
             "filterable": true
           },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "transparent",
-                "value": null
-              },
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "yellow",
-                "value": 0.05
-              },
-              {
-                "color": "red",
-                "value": 0.2
-              }
-            ]
-          },
-          "noValue": "N/A",
           "unit": "s",
+          "noValue": "N/A",
           "mappings": [
             {
               "type": "special",
@@ -4977,7 +4879,548 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 188
+        "y": 166
+      },
+      "id": 211,
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "proxy_connect",
+            "desc": true
+          }
+        ]
+      },
+      "title": "Proxy CONNECT Phase Breakdown",
+      "description": "Instant snapshot of raw proxy CONNECT probe phase durations pivoted by target. Status is the latest probe outcome from probe_success. proxy_dial is the TCP connection to the proxy, proxy_tls is the TLS handshake with an HTTPS proxy, proxy_connect is the CONNECT request/response, and total_phases is the sum of observed CONNECT probe phases. Only Status and total_phases use background color; ordinary phase cells are uncolored. N/A cells mean the phase was not observed or does not apply.",
+      "type": "table",
+      "targets": [
+        {
+          "expr": "label_replace(probe_success{job=~\"$job\", probe_type=\"proxy_connect\"}, \"phase\", \"Status\", \"__name__\", \".*\") or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"proxy_connect\"} or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"proxy_connect\"}), \"phase\", \"total_phases\", \"__name__\", \".*\")",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true,
+              "probe_type": true,
+              "network_path": true,
+              "scope": true,
+              "service": true,
+              "target": true,
+              "impact": true,
+              "target_account": true,
+              "target_partition": true,
+              "target_region": true
+            },
+            "indexByName": {
+              "target_name": 0,
+              "phase": 1,
+              "Value": 2
+            }
+          }
+        },
+        {
+          "id": "groupingToMatrix",
+          "options": {
+            "columnField": "phase",
+            "rowField": "target_name",
+            "valueField": "Value"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "indexByName": {
+              "target_name\\phase": 0,
+              "Status": 1,
+              "proxy_dial": 2,
+              "proxy_tls": 3,
+              "proxy_connect": 4,
+              "total_phases": 5
+            },
+            "renameByName": {
+              "target_name\\phase": "Target"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisLabel": "",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "pointSize": 5,
+            "showPoints": "auto",
+            "spanNulls": false
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 176
+      },
+      "id": 77,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "Proxy CONNECT Phase Timing",
+      "description": "Phases observed in the latest CONNECT probe result. Shown for both successful and failed probes; missing phases mean the probe did not reach that phase.\n\nPhase legend:\n- proxy_dial: TCP connection to the proxy.\n- proxy_tls: TLS handshake with the proxy, only for HTTPS proxy URLs.\n- proxy_connect: CONNECT request/response with the proxy. High values usually point to proxy latency or upstream tunnel establishment delay.",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "probe_phase_duration_seconds{job=~\"$job\", probe_type=\"proxy_connect\"}",
+          "legendFormat": "{{target_name}} — {{phase}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 184
+      },
+      "id": 101,
+      "title": "TCP Connectivity",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisLabel": "",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "pointSize": 5,
+            "showPoints": "auto",
+            "spanNulls": false
+          },
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.3
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 185
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "TCP Duration — Local",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "probe_duration_seconds{job=~\"$job\", probe_type=\"tcp\", scope=\"local\"}",
+          "legendFormat": "{{target_name}}",
+          "refId": "A"
+        }
+      ],
+      "description": "TCP probe duration for targets tagged scope=\"local\". TCP probes are connect-only: duration covers DNS resolution when needed plus TCP connection establishment."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisLabel": "",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "pointSize": 5,
+            "showPoints": "auto",
+            "spanNulls": false
+          },
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.5
+              },
+              {
+                "color": "red",
+                "value": 2
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 185
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "TCP Duration — External",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "probe_duration_seconds{job=~\"$job\", probe_type=\"tcp\", scope=\"external\"}",
+          "legendFormat": "{{target_name}}",
+          "refId": "A"
+        }
+      ],
+      "description": "TCP probe duration for targets tagged scope=\"external\". TCP probes are connect-only: duration covers DNS resolution when needed plus TCP connection establishment."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisLabel": "",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "pointSize": 5,
+            "showPoints": "auto",
+            "spanNulls": false
+          },
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.3
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 193
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "title": "TCP Duration — All Targets",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "probe_duration_seconds{job=~\"$job\", probe_type=\"tcp\"}",
+          "legendFormat": "{{target_name}}",
+          "refId": "A"
+        }
+      ],
+      "description": "TCP probe duration for all TCP targets regardless of scope. Use the local/external panels above when comparing scoped paths."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "custom": {
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true
+          },
+          "unit": "s",
+          "noValue": "N/A",
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "text": "N/A",
+                  "color": "transparent"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "0": {
+                        "color": "red",
+                        "text": "FAIL"
+                      },
+                      "1": {
+                        "color": "green",
+                        "text": "OK"
+                      }
+                    },
+                    "type": "value"
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "green",
+                      "value": 1
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "custom.width",
+                "value": 120
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Target"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto"
+                }
+              },
+              {
+                "id": "unit",
+                "value": "string"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Target"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto"
+                }
+              },
+              {
+                "id": "unit",
+                "value": "string"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "total_phases"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "blue",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "unit",
+                "value": "s"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 201
       },
       "id": 212,
       "options": {
@@ -4990,7 +5433,7 @@
         ]
       },
       "title": "TCP Phase Breakdown",
-      "description": "Instant snapshot of TCP probe phase durations pivoted by target. Status is the latest probe outcome from probe_success. tcp_connect is TCP connection establishment time; dns_resolve appears only for hostname targets. total_phases is the sum of observed TCP probe phases. N/A cells mean the phase was not observed or does not apply.",
+      "description": "Instant snapshot of TCP probe phase durations pivoted by target. Status is the latest probe outcome from probe_success. tcp_connect is TCP connection establishment time; dns_resolve appears only for hostname targets. total_phases is the sum of observed TCP probe phases. Only Status and total_phases use background color; ordinary phase cells are uncolored. N/A cells mean the phase was not observed or does not apply.",
       "type": "table",
       "targets": [
         {
@@ -5060,7 +5503,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 198
+        "y": 211
       },
       "fieldConfig": {
         "defaults": {
@@ -5124,11 +5567,491 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 206
+        "y": 219
       },
       "id": 105,
       "title": "DNS Resolution",
       "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true,
+            "inspect": false
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "0": {
+                        "color": "red",
+                        "text": "FAIL"
+                      },
+                      "1": {
+                        "color": "green",
+                        "text": "OK"
+                      }
+                    },
+                    "type": "value"
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "green",
+                      "value": 1
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 110
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Resolve Time (s)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 3
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "gradient"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 0.05
+                    },
+                    {
+                      "color": "red",
+                      "value": 0.2
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 140
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Result Match"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "0": {
+                        "color": "red",
+                        "text": "MISMATCH"
+                      },
+                      "1": {
+                        "color": "green",
+                        "text": "MATCH"
+                      }
+                    },
+                    "type": "value"
+                  },
+                  {
+                    "options": {
+                      "match": "null+nan",
+                      "result": {
+                        "text": "N/A",
+                        "color": "transparent"
+                      }
+                    },
+                    "type": "special"
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "green",
+                      "value": 1
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 130
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              },
+              {
+                "id": "noValue",
+                "value": "N/A"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Target"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 320
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Service"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 150
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Impact"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "impact"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Impact"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "scope"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Scope"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "service"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Service"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "target"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Target"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "target_account"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Account"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "target_region"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Region"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "target_type"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Target Type"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 220
+      },
+      "id": 214,
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": false,
+            "displayName": "Status"
+          }
+        ],
+        "footer": {
+          "show": false
+        }
+      },
+      "title": "DNS Status per Target",
+      "description": "Current DNS probe status per target. Status comes from probe_success, Resolve Time (s) from probe_dns_resolve_seconds, and Result Match from probe_dns_result_match when dns_expected is configured. N/A means result matching was not evaluated for that target.",
+      "type": "table",
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "target_name",
+            "mode": "outer"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Time 1": true,
+              "Time 2": true,
+              "__name__": true,
+              "__name__ 1": true,
+              "__name__ 2": true,
+              "job": true,
+              "job 1": true,
+              "job 2": true,
+              "instance": true,
+              "instance 1": true,
+              "instance 2": true,
+              "url": true,
+              "url 1": true,
+              "url 2": true,
+              "host": true,
+              "host 1": true,
+              "host 2": true,
+              "monitor": true,
+              "monitor 1": true,
+              "monitor 2": true,
+              "port": true,
+              "port 1": true,
+              "port 2": true,
+              "visibility": true,
+              "visibility 1": true,
+              "visibility 2": true,
+              "provider": true,
+              "provider 1": true,
+              "provider 2": true,
+              "probe_type": true,
+              "probe_type 1": true,
+              "probe_type 2": true,
+              "network_path": true,
+              "network_path 1": true,
+              "network_path 2": true,
+              "impact 2": true,
+              "target_partition 2": true,
+              "target_region 2": true,
+              "target_account 2": true,
+              "scope 2": true,
+              "service 2": true,
+              "target 2": true,
+              "target_type 2": true,
+              "target_name 1": true,
+              "target_name 2": true,
+              "target_partition": true,
+              "target_partition 1": true,
+              "impact 1": true,
+              "target_region 1": true,
+              "target_account 1": true,
+              "scope 1": true,
+              "service 1": true,
+              "target 1": true,
+              "target_type 1": true
+            },
+            "indexByName": {
+              "Value #A": 0,
+              "target_name": 1,
+              "service": 2,
+              "target": 3,
+              "scope": 4,
+              "target_region": 5,
+              "impact": 6,
+              "target_account": 7,
+              "target_type": 8,
+              "Value #B": 9,
+              "Value #C": 10
+            },
+            "renameByName": {
+              "Value #A": "Status",
+              "target_name": "Name",
+              "service": "Service",
+              "target": "Target",
+              "scope": "Scope",
+              "target_region": "Region",
+              "impact": "Impact",
+              "target_account": "Account",
+              "target_type": "Target Type",
+              "Value #B": "Resolve Time (s)",
+              "Value #C": "Result Match"
+            }
+          }
+        }
+      ],
+      "targets": [
+        {
+          "expr": "probe_success{job=~\"$job\", probe_type=\"dns\"}",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "probe_dns_resolve_seconds{job=~\"$job\"}",
+          "legendFormat": "",
+          "refId": "B",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "probe_dns_result_match{job=~\"$job\"} or on(target_name) (probe_success{job=~\"$job\", probe_type=\"dns\"} * 0 / 0)",
+          "legendFormat": "",
+          "refId": "C",
+          "instant": true,
+          "format": "table"
+        }
+      ]
     },
     {
       "datasource": {
@@ -5158,7 +6081,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 207
+        "y": 228
       },
       "id": 50,
       "options": {
@@ -5228,7 +6151,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 207
+        "y": 228
       },
       "id": 51,
       "options": {
@@ -5260,7 +6183,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 215
+        "y": 236
       },
       "id": 106,
       "title": "TLS Certificate Expiry",
@@ -5332,6 +6255,10 @@
               {
                 "id": "decimals",
                 "value": 0
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
               }
             ]
           },
@@ -5412,7 +6339,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 216
+        "y": 237
       },
       "id": 60,
       "options": {
@@ -5457,6 +6384,7 @@
               "scope": "Scope",
               "target_region": "Region",
               "target_account": "Account",
+              "target_type": "Target Type",
               "Value": "Expires In (d)"
             },
             "indexByName": {
@@ -5468,6 +6396,7 @@
               "scope": 6,
               "target_region": 7,
               "target_account": 8,
+              "target_type": 9,
               "Value": 0
             }
           }
@@ -5549,6 +6478,10 @@
               {
                 "id": "decimals",
                 "value": 0
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
               }
             ]
           },
@@ -5618,7 +6551,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 224
+        "y": 245
       },
       "id": 61,
       "options": {
@@ -5665,6 +6598,7 @@
               "scope": "Scope",
               "target_region": "Region",
               "target_account": "Account",
+              "target_type": "Target Type",
               "Value": "Expires In (d)"
             },
             "indexByName": {
@@ -5678,6 +6612,7 @@
               "scope": 8,
               "target_region": 9,
               "target_account": 10,
+              "target_type": 11,
               "Value": 0
             }
           }
@@ -5701,38 +6636,17 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "fixed",
+            "fixedColor": "text"
           },
           "custom": {
             "cellOptions": {
-              "type": "color-background",
-              "mode": "gradient"
+              "type": "auto"
             },
             "filterable": true
           },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "transparent",
-                "value": null
-              },
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "yellow",
-                "value": 0.05
-              },
-              {
-                "color": "red",
-                "value": 0.2
-              }
-            ]
-          },
-          "noValue": "N/A",
           "unit": "s",
+          "noValue": "N/A",
           "mappings": [
             {
               "type": "special",
@@ -5893,7 +6807,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 232
+        "y": 253
       },
       "id": 207,
       "options": {
@@ -5906,7 +6820,7 @@
         ]
       },
       "title": "TLS Cert Phase Breakdown",
-      "description": "Instant snapshot of TLS certificate probe phase durations pivoted by target and path. Direct tls_cert probes can emit dns_resolve, tcp_connect, and tls_handshake. Proxy-path tls_cert probes emit proxy_dial, optional proxy_tls, proxy_connect, and tls_handshake; they do not send an HTTP request to the target.\n\nColumn legend:\n- Target / Path: TLS cert target name and network_path.\n- Status: latest probe outcome from probe_success. OK = succeeded, FAIL = failed.\n- dns_resolve: DNS lookup time for direct hostname targets.\n- tcp_connect: TCP connection establishment time for direct probes.\n- proxy_dial: TCP connection to the proxy, including proxy hostname DNS when applicable.\n- proxy_tls: TLS handshake with an HTTPS proxy. N/A for plain HTTP proxies.\n- proxy_connect: CONNECT request/response with the proxy.\n- tls_handshake: TLS handshake with the target, directly or through the proxy tunnel.\n- total_phases: sum of observed phase timings for this target/path.\n\nCell colours: green <50 ms, yellow 50-200 ms, red >200 ms. N/A cells mean the phase was not observed or does not apply.",
+      "description": "Instant snapshot of TLS certificate probe phase durations pivoted by target and path. Direct tls_cert probes can emit dns_resolve, tcp_connect, and tls_handshake. Proxy-path tls_cert probes emit proxy_dial, optional proxy_tls, proxy_connect, and tls_handshake; they do not send an HTTP request to the target.\n\nColumn legend:\n- Target / Path: TLS cert target name and network_path.\n- Status: latest probe outcome from probe_success. OK = succeeded, FAIL = failed.\n- dns_resolve: DNS lookup time for direct hostname targets.\n- tcp_connect: TCP connection establishment time for direct probes.\n- proxy_dial: TCP connection to the proxy, including proxy hostname DNS when applicable.\n- proxy_tls: TLS handshake with an HTTPS proxy. N/A for plain HTTP proxies.\n- proxy_connect: CONNECT request/response with the proxy.\n- tls_handshake: TLS handshake with the target, directly or through the proxy tunnel.\n- total_phases: sum of observed phase timings for this target/path.\n\nOnly Status and total_phases use background color. Ordinary phase cells are uncolored; N/A means the phase was not observed or does not apply.",
       "type": "table",
       "targets": [
         {
@@ -5981,7 +6895,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 242
+        "y": 263
       },
       "fieldConfig": {
         "defaults": {
@@ -6045,11 +6959,453 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 250
+        "y": 271
       },
       "id": 103,
       "title": "ICMP Ping",
       "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true,
+            "inspect": false
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "0": {
+                        "color": "red",
+                        "text": "FAIL"
+                      },
+                      "1": {
+                        "color": "green",
+                        "text": "OK"
+                      }
+                    },
+                    "type": "value"
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "green",
+                      "value": 1
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 110
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Avg RTT (s)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 3
+              },
+              {
+                "id": "custom.width",
+                "value": 120
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              },
+              {
+                "id": "noValue",
+                "value": "N/A"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Packet Loss"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 0.01
+                    },
+                    {
+                      "color": "red",
+                      "value": 0.1
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 120
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "RTT Stddev (s)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 3
+              },
+              {
+                "id": "custom.width",
+                "value": 130
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              },
+              {
+                "id": "noValue",
+                "value": "N/A"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Target"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 300
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Service"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 150
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Impact"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "target_account"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Account"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "target_region"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Region"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "target_type"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Target Type"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 272
+      },
+      "id": 215,
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": false,
+            "displayName": "Status"
+          }
+        ],
+        "footer": {
+          "show": false
+        }
+      },
+      "title": "ICMP Status per Target",
+      "description": "Current ICMP probe status per target. Status is the latest probe outcome from probe_success. Avg RTT (s) is the average round-trip time across successful ICMP echo replies. Packet Loss is the latest loss ratio, where 0 means no loss and 1 means 100% loss. RTT Stddev (s) shows jitter across successful replies and is N/A when no replies were observed.",
+      "type": "table",
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "target_name",
+            "mode": "outer"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Time 1": true,
+              "Time 2": true,
+              "Time 3": true,
+              "__name__": true,
+              "__name__ 1": true,
+              "__name__ 2": true,
+              "__name__ 3": true,
+              "job": true,
+              "job 1": true,
+              "job 2": true,
+              "job 3": true,
+              "instance": true,
+              "instance 1": true,
+              "instance 2": true,
+              "instance 3": true,
+              "url": true,
+              "url 1": true,
+              "url 2": true,
+              "url 3": true,
+              "host": true,
+              "host 1": true,
+              "host 2": true,
+              "host 3": true,
+              "monitor": true,
+              "monitor 1": true,
+              "monitor 2": true,
+              "monitor 3": true,
+              "port": true,
+              "port 1": true,
+              "port 2": true,
+              "port 3": true,
+              "visibility": true,
+              "visibility 1": true,
+              "visibility 2": true,
+              "visibility 3": true,
+              "provider": true,
+              "provider 1": true,
+              "provider 2": true,
+              "provider 3": true,
+              "probe_type": true,
+              "probe_type 1": true,
+              "probe_type 2": true,
+              "probe_type 3": true,
+              "network_path": true,
+              "network_path 1": true,
+              "network_path 2": true,
+              "network_path 3": true,
+              "target_partition": true,
+              "target_partition 1": true,
+              "target_partition 2": true,
+              "target_partition 3": true,
+              "target_name 1": true,
+              "target_name 2": true,
+              "target_name 3": true,
+              "impact 1": true,
+              "impact 2": true,
+              "impact 3": true,
+              "scope 1": true,
+              "scope 2": true,
+              "scope 3": true,
+              "service 1": true,
+              "service 2": true,
+              "service 3": true,
+              "target 1": true,
+              "target 2": true,
+              "target 3": true,
+              "target_account 1": true,
+              "target_account 2": true,
+              "target_account 3": true,
+              "target_region 1": true,
+              "target_region 2": true,
+              "target_region 3": true,
+              "target_type 1": true,
+              "target_type 2": true,
+              "target_type 3": true
+            },
+            "indexByName": {
+              "Value #A": 0,
+              "target_name": 1,
+              "service": 2,
+              "target": 3,
+              "scope": 4,
+              "target_region": 5,
+              "impact": 6,
+              "target_account": 7,
+              "target_type": 8,
+              "Value #B": 9,
+              "Value #C": 10,
+              "Value #D": 11
+            },
+            "renameByName": {
+              "Value #A": "Status",
+              "target_name": "Name",
+              "service": "Service",
+              "target": "Target",
+              "scope": "Scope",
+              "target_region": "Region",
+              "impact": "Impact",
+              "target_account": "Account",
+              "target_type": "Target Type",
+              "Value #B": "Avg RTT (s)",
+              "Value #C": "Packet Loss",
+              "Value #D": "RTT Stddev (s)"
+            }
+          }
+        }
+      ],
+      "targets": [
+        {
+          "expr": "probe_success{job=~\"$job\", probe_type=\"icmp\"}",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "probe_icmp_avg_rtt_seconds{job=~\"$job\", probe_type=\"icmp\"}",
+          "legendFormat": "",
+          "refId": "B",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "probe_icmp_packet_loss_ratio{job=~\"$job\", probe_type=\"icmp\"}",
+          "legendFormat": "",
+          "refId": "C",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "probe_icmp_stddev_rtt_seconds{job=~\"$job\", probe_type=\"icmp\"}",
+          "legendFormat": "",
+          "refId": "D",
+          "instant": true,
+          "format": "table"
+        }
+      ]
     },
     {
       "datasource": {
@@ -6078,7 +7434,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 251
+        "y": 280
       },
       "id": 30,
       "options": {
@@ -6138,7 +7494,7 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 251
+        "y": 280
       },
       "id": 31,
       "options": {
@@ -6196,7 +7552,7 @@
         "h": 4,
         "w": 6,
         "x": 12,
-        "y": 251
+        "y": 280
       },
       "id": 32,
       "options": {
@@ -6256,7 +7612,7 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 251
+        "y": 280
       },
       "id": 33,
       "options": {
@@ -6313,7 +7669,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 255
+        "y": 284
       },
       "id": 34,
       "options": {
@@ -6388,7 +7744,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 255
+        "y": 284
       },
       "id": 35,
       "options": {
@@ -6445,7 +7801,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 263
+        "y": 292
       },
       "id": 36,
       "options": {
@@ -6479,7 +7835,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 271
+        "y": 300
       },
       "id": 104,
       "title": "MTU Detection",
@@ -6512,7 +7868,7 @@
         "h": 4,
         "w": 8,
         "x": 0,
-        "y": 272
+        "y": 301
       },
       "id": 40,
       "options": {
@@ -6572,7 +7928,7 @@
         "h": 4,
         "w": 8,
         "x": 8,
-        "y": 272
+        "y": 301
       },
       "id": 41,
       "options": {
@@ -6638,7 +7994,7 @@
         "h": 4,
         "w": 8,
         "x": 16,
-        "y": 272
+        "y": 301
       },
       "id": 42,
       "options": {
@@ -6839,7 +8195,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 276
+        "y": 305
       },
       "id": 43,
       "options": {
@@ -7027,7 +8383,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 284
+        "y": 313
       },
       "id": 46,
       "options": {
@@ -7089,7 +8445,7 @@
         "h": 8,
         "w": 16,
         "x": 0,
-        "y": 292
+        "y": 321
       },
       "id": 44,
       "options": {
@@ -7113,67 +8469,6 @@
         {
           "expr": "sum by (state, detail) (probe_mtu_state{job=~\"$job\"})",
           "legendFormat": "{{state}} / {{detail}}",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisLabel": "skips/s",
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 1,
-            "pointSize": 5,
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            }
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 292
-      },
-      "id": 45,
-      "options": {
-        "legend": {
-          "calcs": [
-            "mean",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "title": "Probes Exceeding Interval (skipped cycles)",
-      "description": "Counts how often a probe was still running when the next scheduled cycle fired. Non-zero values mean the probe duration exceeds the configured interval — consider increasing the interval or timeout for affected targets.",
-      "type": "timeseries",
-      "targets": [
-        {
-          "expr": "sum(rate(probe_skipped_overlap_total{job=~\"$job\"}[$__rate_interval])) by (target_name)",
-          "legendFormat": "{{target_name}}",
           "refId": "A"
         }
       ]

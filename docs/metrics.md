@@ -339,16 +339,16 @@ Native RTT metrics in NetSonar are:
 
 ### Probe-Specific Latency Signals
 
-Several probe types expose timings that are useful to operators, but they are not a single cross-probe status-table column. The main Grafana status table shows status, timeout, total probe time, timeout limit, limit-used ratio, and target identity labels. Detailed latency attribution lives in the probe-specific phase, duration, and state panels.
+Several probe types expose timings that are useful to operators, but they are not a single cross-probe status-table column. The main Grafana status table shows status, timeout, total probe time, timeout limit, limit-used ratio, and target identity labels. Dedicated status snapshot tables exist for DNS, ICMP, and HTTP response-body probes where probe-specific diagnostics are useful at a glance. Detailed latency attribution lives in the probe-specific phase, duration, and state panels.
 
 | Probe Type | Metric / Phase | Operator interpretation | Strict RTT? | Where to inspect |
 |---|---|---|---|---|
-| `icmp` | `probe_icmp_avg_rtt_seconds` | Network round-trip latency | Yes | ICMP RTT panels |
+| `icmp` | `probe_icmp_avg_rtt_seconds` | Network round-trip latency | Yes | ICMP Status per Target / ICMP RTT panels |
 | `mtu` | `probe_icmp_avg_rtt_seconds` | Network round-trip latency observed during MTU probing | Yes | MTU state and RTT-derived panels |
 | `tcp` | `probe_phase_duration_seconds{phase="tcp_connect"}` | TCP connect latency | No | TCP Phase Breakdown / TCP Phase Timing |
-| `dns` | `probe_dns_resolve_seconds` | DNS lookup latency | No | DNS Resolve Time |
+| `dns` | `probe_dns_resolve_seconds` | DNS lookup latency | No | DNS Status per Target / DNS Resolve Time |
 | `http` | `probe_phase_duration_seconds{phase="ttfb"}` | Request-to-first-byte latency | No | HTTP Phase Breakdown / HTTP Phase Timing |
-| `http_body` | `probe_phase_duration_seconds` and `probe_duration_seconds` | HTTP exchange, capped body read, and body validation duration | No | HTTP Response Body phase and duration panels |
+| `http_body` | `probe_phase_duration_seconds` and `probe_duration_seconds` | HTTP exchange, capped body read, and body validation duration | No | HTTP Response Body Status per Target / phase and duration panels |
 | `tls_cert` | `probe_phase_duration_seconds{phase="tls_handshake"}` | TLS handshake latency | No | TLS Cert Phase Breakdown / TLS Phase Timing |
 | `proxy_connect` | `probe_phase_duration_seconds{phase="proxy_connect"}` | Proxy CONNECT request/response latency | No | Proxy CONNECT Phase Breakdown / Phase Timing |
 
@@ -428,11 +428,11 @@ Because TPT for `icmp` and `mtu` is dominated by configured intervals and retry 
 - When alerting on slow probes, alert on `probe_duration_seconds` **per `probe_type`** with thresholds that match each probe's expected shape. Do not apply a single global threshold across probe types.
 - If `Status = FAIL`, look at `Timed Out`, `Limit Used`, and TPT to tell a full timeout (TPT near the timeout boundary, `Limit Used` near 100%) from a fast fail (TPT ≈ 0) without opening the details dashboard.
 
-### Probes Exceeding Interval (skipped cycles)
+### Skipped Probe Cycles
 
-This panel tracks how often a probe was still running when the next scheduled tick fired. The scheduler enforces at-most-one-in-flight per target, so it drops the stale tick and increments `probe_skipped_overlap_total`.
+The **Skipped Probe Cycles** panel in the Overview section tracks how often a scheduled probe cycle was skipped because the previous run for the same target was still in progress. The scheduler enforces at-most-one-in-flight per target, so it drops the stale tick and increments `probe_skipped_overlap_total`.
 
-An empty panel means all probes complete within their configured interval — this is the expected state. If values appear, consider:
+An empty panel means all probes complete within their configured interval — this is the expected state. This is a global scheduler health signal across all probe types, not an MTU-specific metric. If values appear, consider:
 
 - Increasing the target's `interval` so the probe has more time between cycles.
 - Reducing the target's `timeout` to cap how long a slow probe can block.
