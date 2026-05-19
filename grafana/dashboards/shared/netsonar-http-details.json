@@ -23,20 +23,130 @@
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "fieldConfig": {
         "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": { "type": "auto" },
+            "filterable": true,
+            "inspect": false
+          },
           "color": { "mode": "thresholds" },
           "thresholds": {
             "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Status" },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "0": { "color": "red", "text": "FAIL" },
+                      "1": { "color": "green", "text": "OK" }
+                    },
+                    "type": "value"
+                  }
+                ]
+              },
+              { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+              { "id": "custom.align", "value": "center" },
+              { "id": "custom.width", "value": 100 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Path" },
+            "properties": [
+              { "id": "custom.align", "value": "center" },
+              { "id": "custom.width", "value": 120 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Target" },
+            "properties": [{ "id": "custom.width", "value": 360 }]
+          }
+        ]
+      },
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
+      "id": 8,
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "desc": false, "displayName": "Path" }],
+        "footer": { "show": false }
+      },
+      "title": "Probe Info - $target_name",
+      "description": "Current probe metadata for the selected HTTP target. Path shows the raw network_path label value, for example direct or proxy.",
+      "type": "table",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "instance": true,
+              "url": true,
+              "probe_type": true,
+              "target_name": true,
+              "monitor": true,
+              "provider": true,
+              "target_partition": true,
+              "visibility": true
+            },
+            "indexByName": {
+              "Value": 0,
+              "target": 1,
+              "network_path": 2,
+              "impact": 3,
+              "service": 4,
+              "scope": 5,
+              "target_type": 6,
+              "target_region": 7,
+              "target_account": 8
+            },
+            "renameByName": {
+              "Value": "Status",
+              "network_path": "Path",
+              "target": "Target",
+              "service": "Service",
+              "scope": "Scope",
+              "target_region": "Region",
+              "target_account": "Account",
+              "impact": "Impact",
+              "target_type": "Target Type"
+            }
+          }
+        }
+      ],
+      "targets": [
+        {
+          "expr": "probe_success{job=~\"$job\", probe_type=\"http\", target_name=\"$target_name\"}",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "blue" },
+          "thresholds": {
+            "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 0.05 },
-              { "color": "red", "value": 0.2 }
+              { "color": "blue", "value": null }
             ]
           },
           "unit": "s"
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 4 },
       "id": 1,
       "options": {
         "colorMode": "background",
@@ -59,20 +169,18 @@
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": { "mode": "fixed", "fixedColor": "blue" },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 0.05 },
-              { "color": "red", "value": 0.2 }
+              { "color": "blue", "value": null }
             ]
           },
           "unit": "s"
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 4 },
       "id": 2,
       "options": {
         "colorMode": "background",
@@ -95,20 +203,18 @@
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": { "mode": "fixed", "fixedColor": "blue" },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 0.05 },
-              { "color": "red", "value": 0.2 }
+              { "color": "blue", "value": null }
             ]
           },
           "unit": "s"
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 4 },
       "id": 3,
       "options": {
         "colorMode": "background",
@@ -131,20 +237,18 @@
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": { "mode": "fixed", "fixedColor": "blue" },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 0.05 },
-              { "color": "red", "value": 0.2 }
+              { "color": "blue", "value": null }
             ]
           },
           "unit": "s"
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 4 },
       "id": 4,
       "options": {
         "colorMode": "background",
@@ -208,7 +312,7 @@
           }
         ]
       },
-      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 4 },
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 8 },
       "id": 5,
       "options": {
         "legend": {
@@ -248,7 +352,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
       "id": 6,
       "options": {
         "legend": { "displayMode": "list", "placement": "bottom" },
@@ -293,7 +397,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
       "id": 7,
       "options": {
         "legend": { "displayMode": "list", "placement": "bottom" },
@@ -307,6 +411,143 @@
           "expr": "avg_over_time(probe_success{job=~\"$job\", probe_type=\"http\", target_name=\"$target_name\"}[5m])",
           "legendFormat": "success rate (5m avg)",
           "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": { "type": "auto" },
+            "filterable": true,
+            "inspect": false
+          },
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Phase" },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "zz_TOTAL": { "text": "TOTAL" }
+                    },
+                    "type": "value"
+                  }
+                ]
+              },
+              { "id": "custom.width", "value": 180 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Last" },
+            "properties": [
+              { "id": "unit", "value": "s" },
+              { "id": "decimals", "value": 3 },
+              { "id": "custom.align", "value": "center" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Mean" },
+            "properties": [
+              { "id": "unit", "value": "s" },
+              { "id": "decimals", "value": 3 },
+              { "id": "custom.align", "value": "center" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Max" },
+            "properties": [
+              { "id": "unit", "value": "s" },
+              { "id": "decimals", "value": 3 },
+              { "id": "custom.align", "value": "center" }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 28 },
+      "id": 9,
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "desc": false, "displayName": "Phase" }],
+        "footer": { "show": false }
+      },
+      "title": "Phase Summary - $target_name",
+      "description": "Summary of HTTP phase durations for the selected target over the visible time range. TOTAL is the sum of phase values for each statistic.",
+      "type": "table",
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "phase",
+            "mode": "outer"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Time 1": true,
+              "Time 2": true,
+              "__name__": true,
+              "__name__ 1": true,
+              "__name__ 2": true,
+              "job": true,
+              "job 1": true,
+              "job 2": true,
+              "instance": true,
+              "instance 1": true,
+              "instance 2": true,
+              "target_name": true,
+              "target_name 1": true,
+              "target_name 2": true
+            },
+            "indexByName": {
+              "phase": 0,
+              "Value #A": 1,
+              "Value #B": 2,
+              "Value #C": 3
+            },
+            "renameByName": {
+              "phase": "Phase",
+              "Value #A": "Last",
+              "Value #B": "Mean",
+              "Value #C": "Max"
+            }
+          }
+        }
+      ],
+      "targets": [
+        {
+          "expr": "sum by (phase) (probe_phase_duration_seconds{job=~\"$job\", probe_type=~\"http|http_body\", target_name=\"$target_name\"}) or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~\"$job\", probe_type=~\"http|http_body\", target_name=\"$target_name\"}), \"phase\", \"zz_TOTAL\", \"target_name\", \".*\")",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "sum by (phase) (avg_over_time(probe_phase_duration_seconds{job=~\"$job\", probe_type=~\"http|http_body\", target_name=\"$target_name\"}[$__range])) or label_replace(sum by (target_name) (avg_over_time(probe_phase_duration_seconds{job=~\"$job\", probe_type=~\"http|http_body\", target_name=\"$target_name\"}[$__range])), \"phase\", \"zz_TOTAL\", \"target_name\", \".*\")",
+          "legendFormat": "",
+          "refId": "B",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "sum by (phase) (max_over_time(probe_phase_duration_seconds{job=~\"$job\", probe_type=~\"http|http_body\", target_name=\"$target_name\"}[$__range])) or label_replace(sum by (target_name) (max_over_time(probe_phase_duration_seconds{job=~\"$job\", probe_type=~\"http|http_body\", target_name=\"$target_name\"}[$__range])), \"phase\", \"zz_TOTAL\", \"target_name\", \".*\")",
+          "legendFormat": "",
+          "refId": "C",
+          "instant": true,
+          "format": "table"
         }
       ]
     }
