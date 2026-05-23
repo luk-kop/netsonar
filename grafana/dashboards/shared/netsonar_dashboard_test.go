@@ -173,6 +173,9 @@ func TestNetsonarDashboardCriticalAndTimedOutStatsAreSeparatePanels(t *testing.T
 		8:   {H: 4, W: 5, X: 10, Y: 5},
 		9:   {H: 4, W: 4, X: 15, Y: 5},
 		6:   {H: 4, W: 5, X: 19, Y: 5},
+		7:   {H: 14, W: 24, X: 0, Y: 9},
+		219: {H: 8, W: 8, X: 0, Y: 23},
+		45:  {H: 8, W: 16, X: 8, Y: 23},
 	}
 	for id, want := range expectedGrid {
 		panel := findPanel(t, dash, id)
@@ -185,6 +188,47 @@ func TestNetsonarDashboardCriticalAndTimedOutStatsAreSeparatePanels(t *testing.T
 		panel := findPanel(t, dash, id)
 		if panel.Title != title || panel.Options.TextMode != "value" {
 			t.Fatalf("panel %d title/textMode = %q/%q, want %q/value", id, panel.Title, panel.Options.TextMode, title)
+		}
+	}
+}
+
+func TestNetsonarDashboardProxyRegistryPanel(t *testing.T) {
+	dash := loadDashboard(t)
+	panel := findPanel(t, dash, 219)
+
+	if panel.Title != "Proxy Registry" || panel.Type != "table" {
+		t.Fatalf("panel 219 = %q/%q, want Proxy Registry/table", panel.Title, panel.Type)
+	}
+	if len(panel.Targets) != 1 {
+		t.Fatalf("panel 219 targets = %d, want 1", len(panel.Targets))
+	}
+	assertTarget(t, panel.Targets[0], "A", `count by (proxy_name, proxy_endpoint) (netsonar_target_proxy_info{job=~"$job"})`, "")
+	if !panel.Targets[0].Instant || panel.Targets[0].Format != "table" {
+		t.Fatalf("panel 219 target instant/format = %v/%q, want true/table", panel.Targets[0].Instant, panel.Targets[0].Format)
+	}
+
+	organize := firstOrganize(t, panel)
+	for field, want := range map[string]int{
+		"proxy_name":     0,
+		"proxy_endpoint": 1,
+		"Value":          2,
+	} {
+		if got := organize.Options.IndexByName[field]; got != want {
+			t.Fatalf("panel 219 index %q = %d, want %d", field, got, want)
+		}
+	}
+	for field, want := range map[string]string{
+		"proxy_name":     "Proxy",
+		"proxy_endpoint": "Proxy Endpoint",
+		"Value":          "Targets",
+	} {
+		if got := organize.Options.RenameByName[field]; got != want {
+			t.Fatalf("panel 219 rename %q = %q, want %q", field, got, want)
+		}
+	}
+	for _, hidden := range []string{"Time", "__name__", "job", "instance"} {
+		if !organize.Options.ExcludeByName[hidden] {
+			t.Fatalf("panel 219 does not hide %q", hidden)
 		}
 	}
 }
@@ -346,12 +390,12 @@ func TestNetsonarDashboardHTTPBodySectionLayout(t *testing.T) {
 	dash := loadDashboard(t)
 
 	expected := map[int]gridPos{
-		217: {H: 8, W: 12, X: 0, Y: 118},
-		70:  {H: 8, W: 12, X: 12, Y: 118},
-		71:  {H: 8, W: 12, X: 0, Y: 126},
-		78:  {H: 8, W: 12, X: 12, Y: 126},
-		209: {H: 10, W: 24, X: 0, Y: 134},
-		210: {H: 8, W: 24, X: 0, Y: 144},
+		217: {H: 8, W: 12, X: 0, Y: 114},
+		70:  {H: 8, W: 12, X: 12, Y: 114},
+		71:  {H: 8, W: 12, X: 0, Y: 122},
+		78:  {H: 8, W: 12, X: 12, Y: 122},
+		209: {H: 10, W: 24, X: 0, Y: 130},
+		210: {H: 8, W: 24, X: 0, Y: 140},
 	}
 	for id, want := range expected {
 		panel := findPanel(t, dash, id)
