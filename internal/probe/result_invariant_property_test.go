@@ -30,7 +30,7 @@ type probeScenario struct {
 	ICMPPayloadSizes []int
 	DNSQueryName     string
 	DNSQueryType     string
-	ProxyURL         string
+	ProxyEndpoint    string
 	BodyMatchString  string
 }
 
@@ -97,7 +97,7 @@ func genProbeScenario() gopter.Gen {
 			ICMPPayloadSizes: []int{1472, 1372, 1272},
 			DNSQueryName:     addr,
 			DNSQueryType:     "A",
-			ProxyURL:         "http://127.0.0.1:19999", // non-existent proxy
+			ProxyEndpoint:    "http://127.0.0.1:19999", // non-existent proxy
 			BodyMatchString:  "ok",
 			Description: fmt.Sprintf("type=%s addr=%s timeout=%dms",
 				pt, addr, tms),
@@ -165,11 +165,12 @@ func buildTarget(sc probeScenario, httpURL, httpsURL string) config.TargetConfig
 		target.ProbeOpts.TLSSkipVerify = true
 
 	case config.ProbeTypeProxyConnect:
-		target.ProbeOpts.ProxyURL = sc.ProxyURL
+		target.ProxyName = "test-egress"
+		target.ResolvedProxy = &config.ResolvedProxyConfig{Endpoint: sc.ProxyEndpoint}
 		if sc.Address == "127.0.0.1" || sc.Address == "localhost" {
-			target.Address = "https://example.com"
+			target.Address = "example.com:443"
 		} else {
-			target.Address = fmt.Sprintf("https://%s", sc.Address)
+			target.Address = net.JoinHostPort(sc.Address, "443")
 		}
 	}
 
@@ -184,7 +185,7 @@ func proberForType(pt config.ProbeType) Prober {
 	case config.ProbeTypeTCP:
 		return &TCPProber{}
 	case config.ProbeTypeHTTP:
-		return NewHTTPProber(true, false, "")
+		return NewHTTPProber(true, false, nil)
 	case config.ProbeTypeICMP:
 		return &ICMPProber{}
 	case config.ProbeTypeMTU:
@@ -194,7 +195,7 @@ func proberForType(pt config.ProbeType) Prober {
 	case config.ProbeTypeTLSCert:
 		return &TLSCertProber{}
 	case config.ProbeTypeHTTPBody:
-		return NewHTTPBodyProber(true, false, "", "")
+		return NewHTTPBodyProber(true, false, nil, "")
 	case config.ProbeTypeProxyConnect:
 		return &ProxyProber{}
 	default:

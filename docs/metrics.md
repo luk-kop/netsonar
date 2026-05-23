@@ -30,7 +30,7 @@ These labels are hardcoded in the agent binary and applied to every metric autom
 | `target`       | `address` field       | Target address (e.g. `https://ssm.eu-central-1.amazonaws.com`) |
 | `target_name`  | `name` field          | Unique target name from config (e.g. `egress-proxy-ok`) |
 | `probe_type`   | `probe_type` field    | Probe type (e.g. `tcp`, `http`, `proxy_connect`) |
-| `network_path` | auto from `proxy_url` | `"proxy"` if target uses `proxy_url`, `"direct"` otherwise |
+| `proxy_name`  | `target.proxy_name` | Configured proxy name for proxied targets; empty string for direct targets |
 
 ## Dynamic Labels
 
@@ -38,7 +38,7 @@ When `allowed_tag_keys` is configured, the agent uses that list directly as the 
 
 When `allowed_tag_keys` is absent or empty, the agent falls back to dynamic mode: it collects all unique tag keys from every target in the configuration and registers them as Prometheus label names. This means adding a new label (e.g. `target_account`, `team`, `environment`) requires only a configuration change, subject to the global safety limit below.
 
-**Limits:** Each target may have at most **20 tags** (`MaxTagsPerTarget`). The total number of unique tag keys is capped at **30** (`MaxGlobalTagKeys`) — this limit applies in both modes: in dynamic mode (no allowlist) it counts the keys collected from all targets, and in allowlist mode it limits the length of `allowed_tag_keys`. The reason for this cap is that every unique tag key becomes a Prometheus label on every metric series; too many labels degrade TSDB (Prometheus/Mimir) write and query performance. These limits apply only to user-defined tags — the **4 fixed labels** (`target`, `target_name`, `probe_type`, `network_path`) are always present and do not count towards these limits.
+**Limits:** Each target may have at most **20 tags** (`MaxTagsPerTarget`). The total number of unique tag keys is capped at **30** (`MaxGlobalTagKeys`) — this limit applies in both modes: in dynamic mode (no allowlist) it counts the keys collected from all targets, and in allowlist mode it limits the length of `allowed_tag_keys`. The reason for this cap is that every unique tag key becomes a Prometheus label on every metric series; too many labels degrade TSDB (Prometheus/Mimir) write and query performance. These limits apply only to user-defined tags — the **4 fixed labels** (`target`, `target_name`, `probe_type`, `proxy_name`) are always present on probe metrics and do not count towards these limits. `proxy_endpoint` is reserved for the proxy info metric and is not allowed as a user tag. `network_path` is not reserved; if you use it as a user tag, it has no built-in routing semantics.
 
 In dynamic mode, the effective maximum number of labels per probe metric series is **4 fixed labels + up to 20 discovered tag labels = 24**, because no single target may define more than 20 tags. In allowlist mode, the schema comes from `allowed_tag_keys`, so every probe metric series has **4 fixed labels + up to 30 allowlisted tag labels = 34**; targets that do not define a particular allowlisted key get an empty string value for that label.
 
@@ -83,7 +83,7 @@ The following table shows which probe types emit each metric:
 | `probe_http_status_code` | `http_` | http, http_body |
 | `probe_http_response_truncated` | `http_` | http |
 | `probe_http_body_match` | `http_` | http_body |
-| `probe_proxy_connect_status_code` | `proxy_` | proxy_connect, tls_cert (with `proxy_url`), http (with `proxy_url`, `https://` target), http_body (with `proxy_url`, `https://` target) |
+| `probe_proxy_connect_status_code` | `proxy_` | proxy_connect, tls_cert (with `proxy_name`), http (with `proxy_name`, `https://` target), http_body (with `proxy_name`, `https://` target) |
 | `probe_tls_cert_expiry_timestamp_seconds` | `tls_` | http (when `tls_emit_cert_metrics=true`), tls_cert |
 | `probe_tls_cert_chain_expiry_timestamp_seconds` | `tls_` | http (when `tls_emit_cert_metrics=true`), tls_cert |
 | `probe_icmp_packet_loss_ratio` | `icmp_` | icmp |
@@ -128,6 +128,33 @@ The following table shows which probe types emit each metric:
 | `netsonar_config_info`                      | Gauge | `hash`                                | Short SHA256 hash of the effective configuration (always 1) |
 | `netsonar_targets_total`                    | Gauge | -                                     | Total number of configured targets                       |
 | `netsonar_config_reload_timestamp_seconds`  | Gauge | -                                     | Unix timestamp of last config reload                     |
+| `netsonar_target_proxy_info`                | Gauge | `target_name`, `proxy_name`, `proxy_endpoint` | Target-to-proxy endpoint mapping for proxied active targets |
+
+### `netsonar_target_proxy_info`
+
+`netsonar_target_proxy_info` is emitted only for active targets that reference a
+proxy. It exposes exactly one series per target-to-proxy mapping:
+
+For `v0.8.0` migration details from `network_path` to `proxy_name`, see
+[Proxy Registry Migration](migrations/proxy-registry.md).
+
+```prometheus
+netsonar_target_proxy_info{target_name="http-via-proxy",proxy_name="fake-egress",proxy_endpoint="http://fake-targets:8888"} 1
+```
+
+Direct targets have no info series. The metric intentionally omits `target` and
+dynamic tag labels, and `proxy_endpoint` is never added to `probe_*` metrics.
+Use this info metric when dashboards or ad-hoc queries need to show the concrete
+endpoint without multiplying probe metric cardinality.
+
+Common queries:
+
+```prometheus
+probe_success{proxy_name=""}                         # direct targets
+probe_success{proxy_name!=""}                        # proxied targets
+count by (proxy_name, proxy_endpoint) (netsonar_target_proxy_info)
+netsonar_target_proxy_info                           # target -> proxy endpoint table input
+```
 
 ### `netsonar_config_reload_timestamp_seconds`
 
@@ -144,13 +171,6 @@ have been applied and validation has passed, not over the raw YAML bytes.
 YAML file does not change the hash. Whitespace, comments, and key order in
 the YAML file are irrelevant.
 
-## Optional Runtime Metrics
-
-By default, NetSonar does not expose Go runtime or process metrics from the
-Prometheus client library. Set `agent.enable_runtime_metrics: true` to add
-standard metric families such as `go_goroutines`, `go_memstats_*`, and
-`process_cpu_seconds_total` to the existing `/metrics` endpoint.
-
 The hash is emitted as the first 12 hex characters of SHA256 and is also
 written to the agent log at startup and after every successful reload. Use
 it to verify that:
@@ -161,6 +181,13 @@ it to verify that:
 
 On reload, the previous series is `Reset()` so `/metrics` only ever exposes
 the hash of the currently active configuration.
+
+## Optional Runtime Metrics
+
+By default, NetSonar does not expose Go runtime or process metrics from the
+Prometheus client library. Set `agent.enable_runtime_metrics: true` to add
+standard metric families such as `go_goroutines`, `go_memstats_*`, and
+`process_cpu_seconds_total` to the existing `/metrics` endpoint.
 
 ## Phase Labels
 
@@ -473,72 +500,77 @@ netsonar_build_info{build_date="unknown",revision="unknown",version="dev"} 1
 # HELP netsonar_targets_total Total number of configured targets.
 # TYPE netsonar_targets_total gauge
 netsonar_targets_total 22
+# HELP netsonar_target_proxy_info Target-to-proxy endpoint mapping for proxied targets.
+# TYPE netsonar_target_proxy_info gauge
+netsonar_target_proxy_info{proxy_endpoint="http://fake-targets:8888",proxy_name="fake-egress",target_name="http-via-proxy"} 1
+netsonar_target_proxy_info{proxy_endpoint="http://fake-targets:8888",proxy_name="fake-egress",target_name="tls-cert-via-proxy"} 1
+netsonar_target_proxy_info{proxy_endpoint="http://fake-targets:8888",proxy_name="fake-egress",target_name="proxy-connect-denied"} 1
 
 # HELP probe_success 1 if the probe succeeded, 0 if it failed.
 # TYPE probe_success gauge
-probe_success{impact="critical",network_path="direct",probe_type="http",scope="local",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 1
-probe_success{impact="high",network_path="direct",probe_type="http",scope="local",service="fake-http",target="http://fake-targets:8080/error",target_account="dev-stack",target_name="http-500-expected-200",target_partition="dev",target_region="local"} 0
-probe_success{impact="high",network_path="proxy",probe_type="http",scope="local",service="fake-proxy",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-via-proxy",target_partition="dev",target_region="local"} 1
-probe_success{impact="high",network_path="proxy",probe_type="tls_cert",scope="local",service="fake-proxy",target="fake-targets:9443",target_account="dev-stack",target_name="tls-cert-via-proxy",target_partition="dev",target_region="local"} 1
-probe_success{impact="low",network_path="proxy",probe_type="proxy_connect",scope="local",service="fake-proxy",target="fake-targets:9001",target_account="dev-stack",target_name="proxy-connect-denied",target_partition="dev",target_region="local"} 1
-probe_success{impact="low",network_path="direct",probe_type="dns",scope="local",service="fake-dns",target="localhost",target_account="dev-stack",target_name="dns-localhost-mismatch",target_partition="dev",target_region="local"} 0
+probe_success{impact="critical",proxy_name="",probe_type="http",scope="local",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 1
+probe_success{impact="high",proxy_name="",probe_type="http",scope="local",service="fake-http",target="http://fake-targets:8080/error",target_account="dev-stack",target_name="http-500-expected-200",target_partition="dev",target_region="local"} 0
+probe_success{impact="high",proxy_name="fake-egress",probe_type="http",scope="local",service="fake-proxy",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-via-proxy",target_partition="dev",target_region="local"} 1
+probe_success{impact="high",proxy_name="fake-egress",probe_type="tls_cert",scope="local",service="fake-proxy",target="fake-targets:9443",target_account="dev-stack",target_name="tls-cert-via-proxy",target_partition="dev",target_region="local"} 1
+probe_success{impact="low",proxy_name="fake-egress",probe_type="proxy_connect",scope="local",service="fake-proxy",target="fake-targets:9001",target_account="dev-stack",target_name="proxy-connect-denied",target_partition="dev",target_region="local"} 1
+probe_success{impact="low",proxy_name="",probe_type="dns",scope="local",service="fake-dns",target="localhost",target_account="dev-stack",target_name="dns-localhost-mismatch",target_partition="dev",target_region="local"} 0
 
 # HELP probe_duration_seconds Total probe duration in seconds.
 # TYPE probe_duration_seconds gauge
-probe_duration_seconds{impact="critical",network_path="direct",probe_type="http",scope="local",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.008137887
+probe_duration_seconds{impact="critical",proxy_name="",probe_type="http",scope="local",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.008137887
 
 # HELP probe_phase_duration_seconds Per-phase timing for probes that expose sub-phase breakdowns (TCP: dns_resolve for hostname targets, tcp_connect; HTTP and http_body direct: dns_resolve for hostname targets, tcp_connect, tls_handshake for https, request_write, ttfb, transfer; HTTP and http_body via proxy: proxy_dial, optional proxy_tls for https proxies, proxy_connect for https targets, tls_handshake for https targets, request_write, ttfb, transfer — tcp_connect and dns_resolve are not emitted on the proxy path; TLS cert direct: dns_resolve for hostname targets, tcp_connect, tls_handshake; ICMP and MTU: dns_resolve for hostname targets; proxy_connect and TLS cert via proxy: proxy_dial, proxy_tls, proxy_connect; TLS cert via proxy also adds tls_handshake).
 # TYPE probe_phase_duration_seconds gauge
-probe_phase_duration_seconds{impact="critical",network_path="direct",phase="dns_resolve",probe_type="http",scope="local",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.000777178
-probe_phase_duration_seconds{impact="critical",network_path="direct",phase="tcp_connect",probe_type="http",scope="local",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.000253737
-probe_phase_duration_seconds{impact="critical",network_path="direct",phase="ttfb",probe_type="http",scope="local",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.006660328
-probe_phase_duration_seconds{impact="critical",network_path="direct",phase="transfer",probe_type="http",scope="local",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.000389704
-probe_phase_duration_seconds{impact="low",network_path="proxy",phase="proxy_dial",probe_type="proxy_connect",scope="local",service="fake-proxy",target="fake-targets:9001",target_account="dev-stack",target_name="proxy-connect-denied",target_partition="dev",target_region="local"} 0.000412303
-probe_phase_duration_seconds{impact="low",network_path="proxy",phase="proxy_connect",probe_type="proxy_connect",scope="local",service="fake-proxy",target="fake-targets:9001",target_account="dev-stack",target_name="proxy-connect-denied",target_partition="dev",target_region="local"} 0.001874519
+probe_phase_duration_seconds{impact="critical",proxy_name="",phase="dns_resolve",probe_type="http",scope="local",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.000777178
+probe_phase_duration_seconds{impact="critical",proxy_name="",phase="tcp_connect",probe_type="http",scope="local",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.000253737
+probe_phase_duration_seconds{impact="critical",proxy_name="",phase="ttfb",probe_type="http",scope="local",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.006660328
+probe_phase_duration_seconds{impact="critical",proxy_name="",phase="transfer",probe_type="http",scope="local",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0.000389704
+probe_phase_duration_seconds{impact="low",proxy_name="fake-egress",phase="proxy_dial",probe_type="proxy_connect",scope="local",service="fake-proxy",target="fake-targets:9001",target_account="dev-stack",target_name="proxy-connect-denied",target_partition="dev",target_region="local"} 0.000412303
+probe_phase_duration_seconds{impact="low",proxy_name="fake-egress",phase="proxy_connect",probe_type="proxy_connect",scope="local",service="fake-proxy",target="fake-targets:9001",target_account="dev-stack",target_name="proxy-connect-denied",target_partition="dev",target_region="local"} 0.001874519
 
 # HELP probe_http_status_code HTTP response status code.
 # TYPE probe_http_status_code gauge
-probe_http_status_code{impact="critical",network_path="direct",probe_type="http",scope="local",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 200
-probe_http_status_code{impact="high",network_path="direct",probe_type="http",scope="local",service="fake-http",target="http://fake-targets:8080/error",target_account="dev-stack",target_name="http-500-expected-200",target_partition="dev",target_region="local"} 500
+probe_http_status_code{impact="critical",proxy_name="",probe_type="http",scope="local",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 200
+probe_http_status_code{impact="high",proxy_name="",probe_type="http",scope="local",service="fake-http",target="http://fake-targets:8080/error",target_account="dev-stack",target_name="http-500-expected-200",target_partition="dev",target_region="local"} 500
 
-# HELP probe_proxy_connect_status_code HTTP status code returned by the proxy to a CONNECT request. Emitted by probe_type=proxy_connect, and by probe_type=http, http_body, or tls_cert when proxy_url targets an HTTPS destination that requires CONNECT.
+# HELP probe_proxy_connect_status_code HTTP status code returned by the proxy to a CONNECT request. Emitted by probe_type=proxy_connect, and by probe_type=http, http_body, or tls_cert when proxy_name targets an HTTPS destination that requires CONNECT.
 # TYPE probe_proxy_connect_status_code gauge
-probe_proxy_connect_status_code{impact="low",network_path="proxy",probe_type="proxy_connect",scope="local",service="fake-proxy",target="fake-targets:9001",target_account="dev-stack",target_name="proxy-connect-denied",target_partition="dev",target_region="local"} 403
+probe_proxy_connect_status_code{impact="low",proxy_name="fake-egress",probe_type="proxy_connect",scope="local",service="fake-proxy",target="fake-targets:9001",target_account="dev-stack",target_name="proxy-connect-denied",target_partition="dev",target_region="local"} 403
 
 # HELP probe_http_response_truncated 1 if the HTTP response body exceeded the effective response body limit, 0 otherwise.
 # TYPE probe_http_response_truncated gauge
-probe_http_response_truncated{impact="critical",network_path="direct",probe_type="http",scope="local",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0
+probe_http_response_truncated{impact="critical",proxy_name="",probe_type="http",scope="local",service="fake-http",target="http://fake-targets:8080/ok",target_account="dev-stack",target_name="http-ok",target_partition="dev",target_region="local"} 0
 
 # HELP probe_tls_cert_chain_expiry_timestamp_seconds Unix timestamp in seconds of each TLS peer certificate expiry.
 # TYPE probe_tls_cert_chain_expiry_timestamp_seconds gauge
-probe_tls_cert_chain_expiry_timestamp_seconds{cert_index="0",cert_role="leaf",impact="high",network_path="proxy",probe_type="tls_cert",scope="local",service="fake-proxy",target="fake-targets:9443",target_account="dev-stack",target_name="tls-cert-via-proxy",target_partition="dev",target_region="local"} 2.091883319e+09
+probe_tls_cert_chain_expiry_timestamp_seconds{cert_index="0",cert_role="leaf",impact="high",proxy_name="fake-egress",probe_type="tls_cert",scope="local",service="fake-proxy",target="fake-targets:9443",target_account="dev-stack",target_name="tls-cert-via-proxy",target_partition="dev",target_region="local"} 2.091883319e+09
 # HELP probe_tls_cert_expiry_timestamp_seconds Unix timestamp in seconds of the earliest TLS peer certificate expiry.
 # TYPE probe_tls_cert_expiry_timestamp_seconds gauge
-probe_tls_cert_expiry_timestamp_seconds{impact="high",network_path="proxy",probe_type="tls_cert",scope="local",service="fake-proxy",target="fake-targets:9443",target_account="dev-stack",target_name="tls-cert-via-proxy",target_partition="dev",target_region="local"} 2.091883319e+09
+probe_tls_cert_expiry_timestamp_seconds{impact="high",proxy_name="fake-egress",probe_type="tls_cert",scope="local",service="fake-proxy",target="fake-targets:9443",target_account="dev-stack",target_name="tls-cert-via-proxy",target_partition="dev",target_region="local"} 2.091883319e+09
 
 # HELP probe_icmp_packet_loss_ratio ICMP packet loss ratio (0.0–1.0).
 # TYPE probe_icmp_packet_loss_ratio gauge
-probe_icmp_packet_loss_ratio{impact="high",network_path="direct",probe_type="icmp",scope="local",service="fake-icmp",target="fake-targets",target_account="dev-stack",target_name="icmp-fake-targets",target_partition="dev",target_region="local"} 0
+probe_icmp_packet_loss_ratio{impact="high",proxy_name="",probe_type="icmp",scope="local",service="fake-icmp",target="fake-targets",target_account="dev-stack",target_name="icmp-fake-targets",target_partition="dev",target_region="local"} 0
 # HELP probe_icmp_avg_rtt_seconds Average ICMP echo round-trip time in seconds.
 # TYPE probe_icmp_avg_rtt_seconds gauge
-probe_icmp_avg_rtt_seconds{impact="high",network_path="direct",probe_type="icmp",scope="local",service="fake-icmp",target="fake-targets",target_account="dev-stack",target_name="icmp-fake-targets",target_partition="dev",target_region="local"} 0.00010804
+probe_icmp_avg_rtt_seconds{impact="high",proxy_name="",probe_type="icmp",scope="local",service="fake-icmp",target="fake-targets",target_account="dev-stack",target_name="icmp-fake-targets",target_partition="dev",target_region="local"} 0.00010804
 # HELP probe_icmp_stddev_rtt_seconds Population standard deviation of ICMP echo round-trip time in seconds.
 # TYPE probe_icmp_stddev_rtt_seconds gauge
-probe_icmp_stddev_rtt_seconds{impact="high",network_path="direct",probe_type="icmp",scope="local",service="fake-icmp",target="fake-targets",target_account="dev-stack",target_name="icmp-fake-targets",target_partition="dev",target_region="local"} 2.3828e-05
+probe_icmp_stddev_rtt_seconds{impact="high",proxy_name="",probe_type="icmp",scope="local",service="fake-icmp",target="fake-targets",target_account="dev-stack",target_name="icmp-fake-targets",target_partition="dev",target_region="local"} 2.3828e-05
 
 # HELP probe_mtu_bytes Largest confirmed MTU size from the MTU probe in bytes.
 # TYPE probe_mtu_bytes gauge
-probe_mtu_bytes{impact="critical",network_path="direct",probe_type="mtu",scope="external",service="fake-mtu",target="fake-targets",target_account="dev-stack-remote",target_name="mtu-fake-targets",target_partition="dev",target_region="eu-west-1"} 1500
+probe_mtu_bytes{impact="critical",proxy_name="",probe_type="mtu",scope="external",service="fake-mtu",target="fake-targets",target_account="dev-stack-remote",target_name="mtu-fake-targets",target_partition="dev",target_region="eu-west-1"} 1500
 # HELP probe_mtu_state MTU probe state as an info metric with state and detail labels (value is always 1).
 # TYPE probe_mtu_state gauge
-probe_mtu_state{detail="largest_size_confirmed",impact="critical",network_path="direct",probe_type="mtu",scope="external",service="fake-mtu",state="ok",target="fake-targets",target_account="dev-stack-remote",target_name="mtu-fake-targets",target_partition="dev",target_region="eu-west-1"} 1
-probe_mtu_state{detail="local_message_too_large",impact="high",network_path="direct",probe_type="mtu",scope="local",service="fake-mtu",state="degraded",target="fake-targets",target_account="dev-stack",target_name="mtu-fake-targets-too-large",target_partition="dev",target_region="local"} 1
+probe_mtu_state{detail="largest_size_confirmed",impact="critical",proxy_name="",probe_type="mtu",scope="external",service="fake-mtu",state="ok",target="fake-targets",target_account="dev-stack-remote",target_name="mtu-fake-targets",target_partition="dev",target_region="eu-west-1"} 1
+probe_mtu_state{detail="local_message_too_large",impact="high",proxy_name="",probe_type="mtu",scope="local",service="fake-mtu",state="degraded",target="fake-targets",target_account="dev-stack",target_name="mtu-fake-targets-too-large",target_partition="dev",target_region="local"} 1
 
 # HELP probe_dns_resolve_seconds DNS resolution time in seconds.
 # TYPE probe_dns_resolve_seconds gauge
-probe_dns_resolve_seconds{impact="high",network_path="direct",probe_type="dns",scope="local",service="fake-dns",target="localhost",target_account="dev-stack",target_name="dns-localhost-match",target_partition="dev",target_region="local"} 0.000264605
+probe_dns_resolve_seconds{impact="high",proxy_name="",probe_type="dns",scope="local",service="fake-dns",target="localhost",target_account="dev-stack",target_name="dns-localhost-match",target_partition="dev",target_region="local"} 0.000264605
 # HELP probe_dns_result_match 1 if DNS result matches expected values, 0 otherwise.
 # TYPE probe_dns_result_match gauge
-probe_dns_result_match{impact="high",network_path="direct",probe_type="dns",scope="local",service="fake-dns",target="localhost",target_account="dev-stack",target_name="dns-localhost-match",target_partition="dev",target_region="local"} 1
-probe_dns_result_match{impact="low",network_path="direct",probe_type="dns",scope="local",service="fake-dns",target="localhost",target_account="dev-stack",target_name="dns-localhost-mismatch",target_partition="dev",target_region="local"} 0
+probe_dns_result_match{impact="high",proxy_name="",probe_type="dns",scope="local",service="fake-dns",target="localhost",target_account="dev-stack",target_name="dns-localhost-match",target_partition="dev",target_region="local"} 1
+probe_dns_result_match{impact="low",proxy_name="",probe_type="dns",scope="local",service="fake-dns",target="localhost",target_account="dev-stack",target_name="dns-localhost-mismatch",target_partition="dev",target_region="local"} 0
 ```

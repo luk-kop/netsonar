@@ -50,7 +50,7 @@ func TestHTTPProber_ProxyPath_RedirectsDisabled(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPProber(false, false, "http://"+proxyAddr)
+	prober := NewHTTPProber(false, false, testResolvedProxy("http://"+proxyAddr))
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {
@@ -99,7 +99,7 @@ func TestHTTPProber_ProxyPath_RedirectsEnabled(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPProber(false, true, "http://"+proxyAddr)
+	prober := NewHTTPProber(false, true, testResolvedProxy("http://"+proxyAddr))
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {
@@ -147,7 +147,7 @@ func TestHTTPProber_ProxyPath_RelativeLocationRedirect(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPProber(false, true, "http://"+proxyAddr)
+	prober := NewHTTPProber(false, true, testResolvedProxy("http://"+proxyAddr))
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {
@@ -185,7 +185,7 @@ func TestHTTPProber_ProxyPath_TooManyRedirects(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPProber(false, true, "http://"+proxyAddr)
+	prober := NewHTTPProber(false, true, testResolvedProxy("http://"+proxyAddr))
 	result := prober.Probe(ctx, target)
 
 	wantHops := int64(proxyRedirectLimit)
@@ -239,7 +239,7 @@ func TestHTTPProber_ProxyPath_RedirectPhasesAreFinalHopOnly(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPProber(false, true, "http://"+proxyAddr)
+	prober := NewHTTPProber(false, true, testResolvedProxy("http://"+proxyAddr))
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {
@@ -300,7 +300,7 @@ func TestHTTPBodyProber_ProxyPath_RedirectsEnabled(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPBodyProber(false, true, "http://"+proxyAddr, "")
+	prober := NewHTTPBodyProber(false, true, testResolvedProxy("http://"+proxyAddr), "")
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {
@@ -354,7 +354,7 @@ func TestHTTPBodyProber_ProxyPath_RedirectsDisabled(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPBodyProber(false, false, "http://"+proxyAddr, "")
+	prober := NewHTTPBodyProber(false, false, testResolvedProxy("http://"+proxyAddr), "")
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {
@@ -390,7 +390,7 @@ func TestHTTPProber_ProxyPath_RedirectMissingLocationIsFinal(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPProber(false, true, "http://"+proxyAddr)
+	prober := NewHTTPProber(false, true, testResolvedProxy("http://"+proxyAddr))
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {
@@ -442,7 +442,7 @@ func TestHTTPProber_ProxyPath_TemporaryRedirectReplaysPostBody(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPProber(false, true, "http://"+proxyAddr)
+	prober := NewHTTPProber(false, true, testResolvedProxy("http://"+proxyAddr))
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {
@@ -499,7 +499,7 @@ func TestHTTPProber_ProxyPath_PostToGetThenTemporaryRedirectDoesNotReplayBody(t 
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPProber(false, true, "http://"+proxyAddr)
+	prober := NewHTTPProber(false, true, testResolvedProxy("http://"+proxyAddr))
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {

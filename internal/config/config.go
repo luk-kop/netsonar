@@ -2,9 +2,11 @@
 package config
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
@@ -85,6 +87,10 @@ const MaxTagsPerTarget = 20
 // is not configured.
 const MaxGlobalTagKeys = 30
 
+// MaxProxies is a safety-net limit against broken config generation creating
+// excessive fixed proxy label values.
+const MaxProxies = 64
+
 // MaxHTTPRequestBodyBytes caps generated HTTP request bodies. This prevents a
 // misconfigured probe from creating excessive background upload traffic.
 const MaxHTTPRequestBodyBytes int64 = 16 << 20 // 16 MiB
@@ -92,11 +98,14 @@ const MaxHTTPRequestBodyBytes int64 = 16 << 20 // 16 MiB
 // FixedLabels are the label names hardcoded in the agent binary.
 // Tag keys must not collide with these.
 var FixedLabels = map[string]bool{
-	"target":       true,
-	"target_name":  true,
-	"probe_type":   true,
-	"network_path": true,
+	"target":         true,
+	"target_name":    true,
+	"probe_type":     true,
+	"proxy_name":     true,
+	"proxy_endpoint": true,
 }
+
+var proxyNameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
 // prometheusLabelRe matches valid Prometheus label names: [a-zA-Z_][a-zA-Z0-9_]*.
 var prometheusLabelRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
@@ -113,8 +122,60 @@ const (
 
 // Config is the top-level configuration structure.
 type Config struct {
-	Agent   AgentConfig    `yaml:"agent"`
-	Targets []TargetConfig `yaml:"targets"`
+	Agent   AgentConfig            `yaml:"agent"`
+	Proxies map[string]ProxyConfig `yaml:"proxies"`
+	Targets []TargetConfig         `yaml:"targets"`
+}
+
+// ProxyConfig defines a named proxy registry entry. URL is raw YAML input and
+// is intentionally excluded from JSON; Endpoint is the canonical clean identity.
+type ProxyConfig struct {
+	URL           string `yaml:"url" json:"-"`
+	Endpoint      string `yaml:"-" json:"endpoint"`
+	TLSSkipVerify bool   `yaml:"tls_skip_verify" json:"tls_skip_verify"`
+	Username      string `yaml:"username" json:"username,omitempty"`
+	UsernameEnv   string `yaml:"username_env" json:"username_env,omitempty"`
+	UsernameFile  string `yaml:"username_file" json:"username_file,omitempty"`
+	PasswordEnv   string `yaml:"password_env" json:"password_env,omitempty"`
+	PasswordFile  string `yaml:"password_file" json:"password_file,omitempty"`
+
+	Credentials ResolvedProxyCredentials `yaml:"-" json:"-"`
+}
+
+// ResolvedProxyConfig is attached to targets that reference a proxy. It carries
+// hashable effective proxy fields plus runtime-only credentials.
+type ResolvedProxyConfig struct {
+	Endpoint      string `json:"endpoint"`
+	TLSSkipVerify bool   `json:"tls_skip_verify"`
+	Username      string `json:"username,omitempty"`
+	UsernameEnv   string `json:"username_env,omitempty"`
+	UsernameFile  string `json:"username_file,omitempty"`
+	PasswordEnv   string `json:"password_env,omitempty"`
+	PasswordFile  string `json:"password_file,omitempty"`
+
+	Credentials ResolvedProxyCredentials `json:"-"`
+}
+
+// ResolvedProxyCredentials stores secret runtime values outside JSON hashing.
+type ResolvedProxyCredentials struct {
+	username string
+	password string
+}
+
+// NewResolvedProxyCredentials constructs runtime proxy credentials while
+// keeping the underlying fields out of JSON/logging-capable paths.
+func NewResolvedProxyCredentials(username, password string) ResolvedProxyCredentials {
+	return ResolvedProxyCredentials{username: username, password: password}
+}
+
+// BasicAuthHeader returns a Proxy-Authorization header value without exposing
+// the underlying credential strings to callers.
+func (c ResolvedProxyCredentials) BasicAuthHeader() (string, bool) {
+	if c.username == "" && c.password == "" {
+		return "", false
+	}
+	auth := c.username + ":" + c.password
+	return "Basic " + base64.StdEncoding.EncodeToString([]byte(auth)), true
 }
 
 // AgentConfig holds agent-level settings.
@@ -143,13 +204,15 @@ type AgentConfig struct {
 
 // TargetConfig defines a single probe target.
 type TargetConfig struct {
-	Name      string            `yaml:"name"`
-	Address   string            `yaml:"address"`
-	ProbeType ProbeType         `yaml:"probe_type"`
-	Interval  time.Duration     `yaml:"interval"`
-	Timeout   time.Duration     `yaml:"timeout"`
-	Tags      map[string]string `yaml:"tags"`
-	ProbeOpts ProbeOptions      `yaml:"probe_opts"`
+	Name          string               `yaml:"name"`
+	Address       string               `yaml:"address"`
+	ProbeType     ProbeType            `yaml:"probe_type"`
+	Interval      time.Duration        `yaml:"interval"`
+	Timeout       time.Duration        `yaml:"timeout"`
+	Tags          map[string]string    `yaml:"tags"`
+	ProbeOpts     ProbeOptions         `yaml:"probe_opts"`
+	ProxyName     string               `yaml:"proxy_name"`
+	ResolvedProxy *ResolvedProxyConfig `yaml:"-" json:"resolved_proxy,omitempty"`
 
 	// DNSResolver overrides the agent-level DNS resolver for this target.
 	//
@@ -196,9 +259,6 @@ type ProbeOptions struct {
 	DNSQueryType       string   `yaml:"dns_query_type"`
 	DNSServer          string   `yaml:"dns_server"`
 	DNSExpectedResults []string `yaml:"dns_expected"`
-
-	// Proxy options
-	ProxyURL string `yaml:"proxy_url"`
 }
 
 // LoadConfig reads a YAML configuration file, applies defaults, and validates
@@ -216,7 +276,7 @@ func LoadConfig(path string) (*Config, error) {
 
 	applyDefaults(&cfg)
 
-	if err := validate(&cfg); err != nil {
+	if err := validate(&cfg, envLookupFunc(os.LookupEnv), fileReadFunc(os.ReadFile)); err != nil {
 		return nil, err
 	}
 
@@ -278,8 +338,19 @@ func applyDefaults(cfg *Config) {
 	}
 }
 
+type envLookupFunc func(string) (string, bool)
+type fileReadFunc func(string) ([]byte, error)
+
 // validate checks all configuration invariants and returns the first violation found.
-func validate(cfg *Config) error {
+func validate(cfg *Config, resolvers ...any) error {
+	lookupEnv := envLookupFunc(os.LookupEnv)
+	readFile := fileReadFunc(os.ReadFile)
+	if len(resolvers) >= 1 {
+		lookupEnv = resolvers[0].(envLookupFunc)
+	}
+	if len(resolvers) >= 2 {
+		readFile = resolvers[1].(fileReadFunc)
+	}
 	// Validate agent.log_level against a case-sensitive allowlist so that
 	// typos (e.g. "DEBUG", "warning", "debgu") fail loudly at load time
 	// instead of silently falling back to "info" in the logger setup.
@@ -299,6 +370,9 @@ func validate(cfg *Config) error {
 
 	if err := validateDNSResolver(cfg.Agent.DNSResolver); err != nil {
 		return fmt.Errorf("agent: %w", err)
+	}
+	if err := validateProxies(cfg, lookupEnv, readFile); err != nil {
+		return err
 	}
 
 	// Validate agent-level default_icmp_payload_sizes if provided.
@@ -387,7 +461,7 @@ func validate(cfg *Config) error {
 		}
 
 		// Probe-type-specific validation.
-		if err := validateProbeOpts(t); err != nil {
+		if err := validateProbeOpts(&cfg.Targets[i], cfg.Proxies); err != nil {
 			return err
 		}
 	}
@@ -406,6 +480,158 @@ func validate(cfg *Config) error {
 	}
 
 	return nil
+}
+
+func validateProxies(cfg *Config, lookupEnv envLookupFunc, readFile fileReadFunc) error {
+	if len(cfg.Proxies) > MaxProxies {
+		return fmt.Errorf("proxies has %d entries, maximum is %d; this guardrail catches configuration-generation mistakes", len(cfg.Proxies), MaxProxies)
+	}
+
+	names := make([]string, 0, len(cfg.Proxies))
+	for name := range cfg.Proxies {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	endpoints := make(map[string]string, len(cfg.Proxies))
+	for _, name := range names {
+		if !proxyNameRe.MatchString(name) {
+			return fmt.Errorf("proxy %q: proxy_name must match %s", name, proxyNameRe.String())
+		}
+		p := cfg.Proxies[name]
+		if p.URL == "" {
+			return fmt.Errorf("proxy %q: url is required", name)
+		}
+		u, err := proxyurl.Parse(p.URL)
+		if err != nil {
+			return fmt.Errorf("proxy %q: %w", name, err)
+		}
+		p.Endpoint = proxyurl.Endpoint(u)
+		if p.TLSSkipVerify && u.Scheme != "https" {
+			return fmt.Errorf("proxies.%s.tls_skip_verify=true is invalid for http:// proxy endpoint; proxy TLS verification only applies to https:// proxies", name)
+		}
+		if first, ok := endpoints[p.Endpoint]; ok {
+			return fmt.Errorf("proxy endpoint %q is registered by both proxy %q and proxy %q", p.Endpoint, first, name)
+		}
+		endpoints[p.Endpoint] = name
+
+		creds, err := resolveProxyCredentials(name, p, lookupEnv, readFile)
+		if err != nil {
+			return err
+		}
+		p.Credentials = creds
+		cfg.Proxies[name] = p
+	}
+	return nil
+}
+
+func resolveProxyCredentials(name string, p ProxyConfig, lookupEnv envLookupFunc, readFile fileReadFunc) (ResolvedProxyCredentials, error) {
+	usernameSources := nonEmptySourceCount(p.Username, p.UsernameEnv, p.UsernameFile)
+	passwordSources := nonEmptySourceCount(p.PasswordEnv, p.PasswordFile)
+
+	if p.Username != "" && p.UsernameEnv != "" {
+		return ResolvedProxyCredentials{}, fmt.Errorf("proxy %q: cannot set both username and username_env", name)
+	}
+	if p.Username != "" && p.UsernameFile != "" {
+		return ResolvedProxyCredentials{}, fmt.Errorf("proxy %q: cannot set both username and username_file", name)
+	}
+	if p.UsernameEnv != "" && p.UsernameFile != "" {
+		return ResolvedProxyCredentials{}, fmt.Errorf("proxy %q: cannot set both username_env and username_file", name)
+	}
+	if p.PasswordEnv != "" && p.PasswordFile != "" {
+		return ResolvedProxyCredentials{}, fmt.Errorf("proxy %q: cannot set both password_env and password_file", name)
+	}
+	if usernameSources == 0 && passwordSources == 0 {
+		return ResolvedProxyCredentials{}, nil
+	}
+	if usernameSources == 0 {
+		source := "password source"
+		if p.PasswordEnv != "" {
+			source = "password_env"
+		} else if p.PasswordFile != "" {
+			source = "password_file"
+		}
+		return ResolvedProxyCredentials{}, fmt.Errorf("proxy %q: %s is set but no username source; set username, username_env, or username_file", name, source)
+	}
+	if passwordSources == 0 {
+		return ResolvedProxyCredentials{}, fmt.Errorf("proxy %q: username is set but no password source; set password_env or password_file", name)
+	}
+
+	username, err := resolveUsername(name, p, lookupEnv, readFile)
+	if err != nil {
+		return ResolvedProxyCredentials{}, err
+	}
+	password, err := resolvePassword(name, p, lookupEnv, readFile)
+	if err != nil {
+		return ResolvedProxyCredentials{}, err
+	}
+	return ResolvedProxyCredentials{username: username, password: password}, nil
+}
+
+func nonEmptySourceCount(values ...string) int {
+	n := 0
+	for _, v := range values {
+		if v != "" {
+			n++
+		}
+	}
+	return n
+}
+
+func resolveUsername(name string, p ProxyConfig, lookupEnv envLookupFunc, readFile fileReadFunc) (string, error) {
+	switch {
+	case p.Username != "":
+		return p.Username, nil
+	case p.UsernameEnv != "":
+		v, ok := lookupEnv(p.UsernameEnv)
+		v = trimTrailingNewlines(v)
+		if !ok || v == "" {
+			return "", fmt.Errorf("proxy %q: username_env %q is not set or empty in environment", name, p.UsernameEnv)
+		}
+		return v, nil
+	case p.UsernameFile != "":
+		return readCredentialFile(name, "username_file", p.UsernameFile, readFile)
+	default:
+		return "", nil
+	}
+}
+
+func resolvePassword(name string, p ProxyConfig, lookupEnv envLookupFunc, readFile fileReadFunc) (string, error) {
+	switch {
+	case p.PasswordEnv != "":
+		v, ok := lookupEnv(p.PasswordEnv)
+		v = trimTrailingNewlines(v)
+		if !ok || v == "" {
+			return "", fmt.Errorf("proxy %q: password_env %q is not set or empty in environment", name, p.PasswordEnv)
+		}
+		return v, nil
+	case p.PasswordFile != "":
+		return readCredentialFile(name, "password_file", p.PasswordFile, readFile)
+	default:
+		return "", nil
+	}
+}
+
+func readCredentialFile(name, field, path string, readFile fileReadFunc) (string, error) {
+	if !filepath.IsAbs(path) {
+		return "", fmt.Errorf("proxy %q: %s %q must be an absolute path", name, field, path)
+	}
+	data, err := readFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("proxy %q: %s %q does not exist", name, field, path)
+		}
+		return "", fmt.Errorf("proxy %q: reading %s %q: %w", name, field, path, err)
+	}
+	value := trimTrailingNewlines(string(data))
+	if value == "" {
+		return "", fmt.Errorf("proxy %q: %s %q is empty after trimming trailing newlines", name, field, path)
+	}
+	return value, nil
+}
+
+func trimTrailingNewlines(s string) string {
+	return strings.TrimRight(s, "\r\n")
 }
 
 func validateMetricsPath(metricsPath string) error {
@@ -476,7 +702,7 @@ func validateLabelName(k string) error {
 }
 
 // validateProbeOpts checks probe-type-specific option constraints.
-func validateProbeOpts(t TargetConfig) error {
+func validateProbeOpts(t *TargetConfig, proxies map[string]ProxyConfig) error {
 	if t.ProbeOpts.ResponseBodyLimitBytes < 0 {
 		return fmt.Errorf("target %q: response_body_limit_bytes must be >= 0 (0 or omitted uses the 1 MiB default; positive values set an explicit cap)", t.Name)
 	}
@@ -534,78 +760,75 @@ func validateProbeOpts(t TargetConfig) error {
 
 	switch t.ProbeType {
 	case ProbeTypeTCP:
-		if err := validateProxyURLUnsupported(t); err != nil {
+		if err := validateProxyNameUnsupported(*t); err != nil {
 			return err
 		}
-		if err := validateTCPAddress(t); err != nil {
+		if err := validateTCPAddress(*t); err != nil {
 			return err
 		}
 	case ProbeTypeHTTP, ProbeTypeHTTPBody:
-		if err := validateHTTPMethod(t); err != nil {
+		if err := resolveTargetProxy(t, proxies, false); err != nil {
 			return err
 		}
-		if err := validateHTTPRequestBody(t); err != nil {
+		if err := validateHTTPMethod(*t); err != nil {
+			return err
+		}
+		if err := validateHTTPRequestBody(*t); err != nil {
 			return err
 		}
 		if t.ProbeType == ProbeTypeHTTPBody {
 			if t.ProbeOpts.BodyMatchRegex == "" && t.ProbeOpts.BodyMatchString == "" {
 				return fmt.Errorf("target %q: probe_type 'http_body' requires 'body_match_regex' or 'body_match_string' in probe_opts", t.Name)
 			}
-			if err := validateBodyMatchRegex(t); err != nil {
+			if err := validateBodyMatchRegex(*t); err != nil {
 				return err
 			}
 		}
-		if err := validateExpectedStatusCodes(t); err != nil {
-			return err
-		}
-		if err := validateProxyURL(t.Name, t.ProbeOpts.ProxyURL); err != nil {
+		if err := validateExpectedStatusCodes(*t); err != nil {
 			return err
 		}
 	case ProbeTypeICMP:
-		if err := validateProxyURLUnsupported(t); err != nil {
+		if err := validateProxyNameUnsupported(*t); err != nil {
 			return err
 		}
-		if err := validateIPv4OnlyAddress(t); err != nil {
+		if err := validateIPv4OnlyAddress(*t); err != nil {
 			return err
 		}
 	case ProbeTypeMTU:
-		if err := validateProxyURLUnsupported(t); err != nil {
+		if err := validateProxyNameUnsupported(*t); err != nil {
 			return err
 		}
-		if err := validateIPv4OnlyAddress(t); err != nil {
+		if err := validateIPv4OnlyAddress(*t); err != nil {
 			return err
 		}
-		if err := validateICMPPayloadSizes(t); err != nil {
+		if err := validateICMPPayloadSizes(*t); err != nil {
 			return err
 		}
 	case ProbeTypeDNS:
-		if err := validateProxyURLUnsupported(t); err != nil {
+		if err := validateProxyNameUnsupported(*t); err != nil {
 			return err
 		}
-		if err := validateDNSQueryType(t); err != nil {
+		if err := validateDNSQueryType(*t); err != nil {
 			return err
 		}
 		if err := validateDNSServer(t.ProbeOpts.DNSServer); err != nil {
 			return fmt.Errorf("target %q: %w", t.Name, err)
 		}
 	case ProbeTypeTLSCert:
-		if err := validateProxyURL(t.Name, t.ProbeOpts.ProxyURL); err != nil {
+		if err := resolveTargetProxy(t, proxies, false); err != nil {
 			return err
 		}
 	case ProbeTypeProxyConnect:
-		if t.ProbeOpts.ProxyURL == "" {
-			return fmt.Errorf("target %q: probe_type 'proxy_connect' requires 'proxy_url' in probe_opts", t.Name)
+		if err := resolveTargetProxy(t, proxies, true); err != nil {
+			return err
 		}
-		if err := validateProxyConnectAddress(t); err != nil {
+		if err := validateProxyConnectAddress(*t); err != nil {
 			return err
 		}
 		if len(t.ProbeOpts.ExpectedStatusCodes) > 0 {
 			return fmt.Errorf("target %q: expected_status_codes is not supported for probe_type 'proxy_connect'; use expected_proxy_connect_status_codes instead", t.Name)
 		}
-		if err := validateProxyURL(t.Name, t.ProbeOpts.ProxyURL); err != nil {
-			return err
-		}
-		if err := validateExpectedProxyConnectStatusCodes(t); err != nil {
+		if err := validateExpectedProxyConnectStatusCodes(*t); err != nil {
 			return err
 		}
 	}
@@ -642,11 +865,11 @@ func validateProxyConnectAddress(t TargetConfig) error {
 	return nil
 }
 
-func validateProxyURLUnsupported(t TargetConfig) error {
-	if t.ProbeOpts.ProxyURL == "" {
+func validateProxyNameUnsupported(t TargetConfig) error {
+	if t.ProxyName == "" {
 		return nil
 	}
-	return fmt.Errorf("target %q: probe_type %q does not support 'proxy_url'", t.Name, t.ProbeType)
+	return fmt.Errorf("target %q: probe_type %q does not support 'proxy_name'", t.Name, t.ProbeType)
 }
 
 func validateBodyMatchRegex(t TargetConfig) error {
@@ -729,17 +952,38 @@ func validateExpectedProxyConnectStatusCodes(t TargetConfig) error {
 	return nil
 }
 
-// validateProxyURL validates optional HTTP proxy URLs without leaking
-// credentials from userinfo in returned errors.
-func validateProxyURL(targetName, raw string) error {
-	if raw == "" {
+func resolveTargetProxy(t *TargetConfig, proxies map[string]ProxyConfig, required bool) error {
+	if t.ProxyName == "" {
+		if required {
+			return fmt.Errorf("target %q: probe_type 'proxy_connect' requires 'proxy_name'", t.Name)
+		}
 		return nil
 	}
-
-	if _, err := proxyurl.Parse(raw); err != nil {
-		return fmt.Errorf("target %q: %w", targetName, err)
+	if !proxyNameRe.MatchString(t.ProxyName) {
+		return fmt.Errorf("target %q: proxy_name %q must match %s", t.Name, t.ProxyName, proxyNameRe.String())
 	}
-
+	if len(proxies) == 0 {
+		return fmt.Errorf("target %q: proxy_name %q requires a top-level proxies registry", t.Name, t.ProxyName)
+	}
+	p, ok := proxies[t.ProxyName]
+	if !ok {
+		names := make([]string, 0, len(proxies))
+		for name := range proxies {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		return fmt.Errorf("target %q: unknown proxy_name %q (known proxies: %s)", t.Name, t.ProxyName, strings.Join(names, ", "))
+	}
+	t.ResolvedProxy = &ResolvedProxyConfig{
+		Endpoint:      p.Endpoint,
+		TLSSkipVerify: p.TLSSkipVerify,
+		Username:      p.Username,
+		UsernameEnv:   p.UsernameEnv,
+		UsernameFile:  p.UsernameFile,
+		PasswordEnv:   p.PasswordEnv,
+		PasswordFile:  p.PasswordFile,
+		Credentials:   p.Credentials,
+	}
 	return nil
 }
 

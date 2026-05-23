@@ -50,6 +50,18 @@ agent:
   # dns_resolver: "127.0.0.1:5353"
 
 # ---------------------------------------------------------------------------
+# Proxy registry
+# ---------------------------------------------------------------------------
+proxies:
+  infra-egress:
+    url: "http://infra-proxy.example.internal:8888"
+  fwd-egress:
+    url: "http://fwd-proxy.example.internal:8888"
+    # Auth example:
+    # username_env: "NETSONAR_PROXY_USER"
+    # password_file: "/run/secrets/netsonar_proxy_pass"
+
+# ---------------------------------------------------------------------------
 # Targets
 # ---------------------------------------------------------------------------
 targets:
@@ -114,8 +126,7 @@ targets:
       follow_redirects: false
       tls_emit_cert_metrics: true
       expected_status_codes: []
-      # For authenticated proxies, use: http://user:pass@proxy:port
-      proxy_url: "http://infra-proxy.example.internal:8888"
+    proxy_name: infra-egress
     tags:
       service: vpce
       scope: aws-regional
@@ -149,7 +160,7 @@ targets:
     timeout: 5s
     probe_opts:
       tls_skip_verify: false
-      proxy_url: "http://infra-proxy.example.internal:8888"
+    proxy_name: infra-egress
     tags:
       service: vpce
       scope: aws-regional
@@ -283,9 +294,8 @@ targets:
     address: "example.com:443"
     probe_type: proxy_connect
     timeout: 5s
+    proxy_name: fwd-egress
     probe_opts:
-      # For authenticated proxies, use: http://user:pass@proxy:port
-      proxy_url: "http://fwd-proxy.example.internal:8888"
       # Optional: treat an explicit CONNECT denial as success for negative tests.
       # expected_proxy_connect_status_codes: [403]
     tags:

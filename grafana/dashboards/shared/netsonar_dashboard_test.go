@@ -3,6 +3,7 @@ package shared
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -62,6 +63,8 @@ type transformationOption struct {
 	ExcludeByName map[string]bool   `json:"excludeByName"`
 	IndexByName   map[string]int    `json:"indexByName"`
 	RenameByName  map[string]string `json:"renameByName"`
+	Mode          string            `json:"mode"`
+	ValueLabel    string            `json:"valueLabel"`
 }
 
 type fieldConfig struct {
@@ -109,7 +112,7 @@ func TestNetsonarDashboardDurationPanelsUseMedianSeries(t *testing.T) {
 	}{
 		24: {
 			title:  "HTTP Duration median (5m) (Direct)",
-			median: `quantile_over_time(0.5, probe_duration_seconds{job=~"$job", probe_type="http", network_path="direct"}[5m]) unless (probe_timed_out{job=~"$job", probe_type="http", network_path="direct"} == 1)`,
+			median: `quantile_over_time(0.5, probe_duration_seconds{job=~"$job", probe_type="http", proxy_name=""}[5m]) unless (probe_timed_out{job=~"$job", probe_type="http", proxy_name=""} == 1)`,
 		},
 		78: {
 			title:  "HTTP Response Body Duration median (5m)",
@@ -117,7 +120,7 @@ func TestNetsonarDashboardDurationPanelsUseMedianSeries(t *testing.T) {
 		},
 		83: {
 			title:  "HTTP Duration median (5m) (Proxy)",
-			median: `quantile_over_time(0.5, probe_duration_seconds{job=~"$job", probe_type="http", network_path="proxy"}[5m]) unless (probe_timed_out{job=~"$job", probe_type="http", network_path="proxy"} == 1)`,
+			median: `quantile_over_time(0.5, probe_duration_seconds{job=~"$job", probe_type="http", proxy_name!=""}[5m]) unless (probe_timed_out{job=~"$job", probe_type="http", proxy_name!=""} == 1)`,
 		},
 	}
 
@@ -202,6 +205,22 @@ func TestNetsonarStatusTableDoesNotExposePrimaryLatencyColumns(t *testing.T) {
 	}
 }
 
+func TestNetsonarDashboardsDoNotReferenceNetworkPath(t *testing.T) {
+	for _, name := range []string{
+		"netsonar.json",
+		"netsonar-http-details.json",
+		"../metrics-validation/netsonar-metrics-validation.json",
+	} {
+		data, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read dashboard %s: %v", name, err)
+		}
+		if strings.Contains(strings.ToLower(string(data)), "network_path") {
+			t.Fatalf("dashboard %s still references network_path", name)
+		}
+	}
+}
+
 func TestNetsonarStatusTableHidesDuplicateJoinedTagColumns(t *testing.T) {
 	dash := loadDashboard(t)
 	panel := findPanel(t, dash, 7)
@@ -216,43 +235,129 @@ func TestNetsonarStatusTableHidesDuplicateJoinedTagColumns(t *testing.T) {
 	if excluded["target_type"] {
 		t.Fatal("status table excludes base target_type column, want exactly one visible Target Type column")
 	}
-	if got := organize.Options.IndexByName["target_type"]; got != 17 {
-		t.Fatalf("target_type index = %d, want 17", got)
+	if !excluded["Value #G"] {
+		t.Fatal("status table exposes raw proxy info value column Value #G")
+	}
+	if got := organize.Options.IndexByName["proxy_endpoint"]; got != 17 {
+		t.Fatalf("proxy_endpoint index = %d, want 17", got)
+	}
+	if got := organize.Options.RenameByName["proxy_endpoint"]; got != "Proxy Endpoint" {
+		t.Fatalf("proxy_endpoint rename = %q, want Proxy Endpoint", got)
+	}
+	if got := organize.Options.IndexByName["target_type"]; got != 18 {
+		t.Fatalf("target_type index = %d, want 18", got)
 	}
 	if got := organize.Options.RenameByName["target_type"]; got != "Target Type" {
 		t.Fatalf("target_type rename = %q, want Target Type", got)
 	}
 	for field, want := range map[string]int{
-		"target":         3,
-		"target 1":       3,
-		"network_path":   4,
-		"network_path 1": 4,
+		"target":       3,
+		"target 1":     3,
+		"proxy_name":   4,
+		"proxy_name 1": 4,
 	} {
 		if got := organize.Options.IndexByName[field]; got != want {
 			t.Fatalf("status table index %q = %d, want %d", field, got, want)
 		}
 	}
+	assertPanelTarget(t, panel, "G", `netsonar_target_proxy_info{job=~"$job"}`)
 }
 
-func TestNetsonarDashboardProxiedColumnsMapProxyPathToYes(t *testing.T) {
+func TestNetsonarDashboardProxyColumnsShowProxyName(t *testing.T) {
 	dash := loadDashboard(t)
 
 	expected := map[int][]string{
-		7:   {"network_path", "network_path 1"},
-		217: {"network_path 1"},
-		60:  {"network_path"},
-		61:  {"network_path"},
+		7:  {"proxy_name", "proxy_name 1"},
+		60: {"proxy_name"},
+		61: {"proxy_name"},
 	}
 
 	for panelID, fields := range expected {
 		panel := findPanel(t, dash, panelID)
 		renames := firstOrganize(t, panel).Options.RenameByName
 		for _, field := range fields {
-			if got := renames[field]; got != "Proxied" {
-				t.Fatalf("panel %d rename %q = %q, want Proxied", panelID, field, got)
+			if got := renames[field]; got != "Proxy" {
+				t.Fatalf("panel %d rename %q = %q, want Proxy", panelID, field, got)
 			}
 		}
-		assertProxiedOverride(t, panel)
+		assertProxyOverrideDoesNotMapToBoolean(t, panel)
+	}
+}
+
+func TestNetsonarDashboardHTTPBodyStatusTableShowsIdentityColumns(t *testing.T) {
+	dash := loadDashboard(t)
+	panel := findPanel(t, dash, 217)
+	organize := firstOrganize(t, panel)
+
+	if panel.GridPos.H < 8 {
+		t.Fatalf("panel 217 height = %d, want at least 8", panel.GridPos.H)
+	}
+	if len(panel.Targets) != 1 {
+		t.Fatalf("panel 217 targets = %d, want 1", len(panel.Targets))
+	}
+	assertTarget(t, panel.Targets[0], "A", `sum by (target_name, target, proxy_display, metric) (label_replace(label_replace(probe_success{job=~"$job", probe_type="http_body", proxy_name=""}, "metric", "Status", "__name__", ".*"), "proxy_display", "N/A", "proxy_name", ".*") or label_replace(label_replace(probe_success{job=~"$job", probe_type="http_body", proxy_name!=""}, "metric", "Status", "__name__", ".*"), "proxy_display", "$1", "proxy_name", "(.+)")) or sum by (target_name, target, proxy_display, metric) (label_replace(label_replace(probe_duration_seconds{job=~"$job", probe_type="http_body", proxy_name=""}, "metric", "Duration (s)", "__name__", ".*"), "proxy_display", "N/A", "proxy_name", ".*") or label_replace(label_replace(probe_duration_seconds{job=~"$job", probe_type="http_body", proxy_name!=""}, "metric", "Duration (s)", "__name__", ".*"), "proxy_display", "$1", "proxy_name", "(.+)")) or sum by (target_name, target, proxy_display, metric) (label_replace(label_replace((probe_http_status_code{job=~"$job", probe_type="http_body", proxy_name=""} or on(target_name, proxy_name) (probe_success{job=~"$job", probe_type="http_body", proxy_name=""} * 0 / 0)), "metric", "HTTP Code", "__name__", ".*"), "proxy_display", "N/A", "proxy_name", ".*") or label_replace(label_replace((probe_http_status_code{job=~"$job", probe_type="http_body", proxy_name!=""} or on(target_name, proxy_name) (probe_success{job=~"$job", probe_type="http_body", proxy_name!=""} * 0 / 0)), "metric", "HTTP Code", "__name__", ".*"), "proxy_display", "$1", "proxy_name", "(.+)")) or sum by (target_name, target, proxy_display, metric) (label_replace(label_replace((probe_http_body_match{job=~"$job", probe_type="http_body", proxy_name=""} or on(target_name, proxy_name) (probe_success{job=~"$job", probe_type="http_body", proxy_name=""} * 0 / 0)), "metric", "Body Match", "__name__", ".*"), "proxy_display", "N/A", "proxy_name", ".*") or label_replace(label_replace((probe_http_body_match{job=~"$job", probe_type="http_body", proxy_name!=""} or on(target_name, proxy_name) (probe_success{job=~"$job", probe_type="http_body", proxy_name!=""} * 0 / 0)), "metric", "Body Match", "__name__", ".*"), "proxy_display", "$1", "proxy_name", "(.+)"))`, "")
+	if got := panel.Targets[0].Format; got != "time_series" {
+		t.Fatalf("panel 217 target format = %q, want time_series", got)
+	}
+	if panel.Transformations[0].ID != "labelsToFields" {
+		t.Fatalf("panel 217 transformation[0] = %q, want labelsToFields", panel.Transformations[0].ID)
+	}
+	labels := panel.Transformations[0].Options
+	if labels.Mode != "columns" || labels.ValueLabel != "metric" {
+		t.Fatalf("panel 217 labelsToFields options = %#v, want columns mode with metric value label", labels)
+	}
+	if panel.Transformations[1].ID != "merge" {
+		t.Fatalf("panel 217 transformation[1] = %q, want merge", panel.Transformations[1].ID)
+	}
+	for field, want := range map[string]int{
+		"Status":        0,
+		"target_name":   1,
+		"target":        2,
+		"proxy_display": 3,
+		"Duration (s)":  4,
+		"HTTP Code":     5,
+		"Body Match":    6,
+	} {
+		if got := organize.Options.IndexByName[field]; got != want {
+			t.Fatalf("panel 217 index %q = %d, want %d", field, got, want)
+		}
+	}
+	if got := organize.Options.RenameByName["target_name"]; got != "Name" {
+		t.Fatalf("panel 217 target_name rename = %q, want Name", got)
+	}
+	if organize.Options.ExcludeByName["target_name"] {
+		t.Fatal("panel 217 excludes target_name, want visible")
+	}
+	if got := organize.Options.RenameByName["target"]; got != "Target" {
+		t.Fatalf("panel 217 target rename = %q, want Target", got)
+	}
+	if organize.Options.ExcludeByName["target"] {
+		t.Fatal("panel 217 excludes target, want visible")
+	}
+	if got := organize.Options.RenameByName["proxy_display"]; got != "Proxy" {
+		t.Fatalf("panel 217 proxy_display rename = %q, want Proxy", got)
+	}
+	if !organize.Options.ExcludeByName["proxy_name"] {
+		t.Fatal("panel 217 exposes raw proxy_name, want proxy_display column only")
+	}
+}
+
+func TestNetsonarDashboardHTTPBodySectionLayout(t *testing.T) {
+	dash := loadDashboard(t)
+
+	expected := map[int]gridPos{
+		217: {H: 8, W: 12, X: 0, Y: 118},
+		70:  {H: 8, W: 12, X: 12, Y: 118},
+		71:  {H: 8, W: 12, X: 0, Y: 126},
+		78:  {H: 8, W: 12, X: 12, Y: 126},
+		209: {H: 10, W: 24, X: 0, Y: 134},
+		210: {H: 8, W: 24, X: 0, Y: 144},
+	}
+	for id, want := range expected {
+		panel := findPanel(t, dash, id)
+		if panel.GridPos != want {
+			t.Fatalf("panel %d gridPos = %+v, want %+v", id, panel.GridPos, want)
+		}
 	}
 }
 
@@ -273,8 +378,8 @@ func TestNetsonarHTTPDetailsProbeInfoAndFixedDurationBackgrounds(t *testing.T) {
 		t.Fatalf("Probe Info target instant/format = %v/%q, want true/table", info.Targets[0].Instant, info.Targets[0].Format)
 	}
 	renames := firstOrganize(t, info).Options.RenameByName
-	if got := renames["network_path"]; got != "Path" {
-		t.Fatalf("Probe Info network_path rename = %q, want Path", got)
+	if got := renames["proxy_name"]; got != "Path" {
+		t.Fatalf("Probe Info proxy_name rename = %q, want Path", got)
 	}
 	if excluded := firstOrganize(t, info).Options.ExcludeByName["probe_type"]; !excluded {
 		t.Fatal("Probe Info exposes probe_type column, want it hidden")
@@ -285,7 +390,7 @@ func TestNetsonarHTTPDetailsProbeInfoAndFixedDurationBackgrounds(t *testing.T) {
 	expectedInfoIndex := map[string]int{
 		"Value":          0,
 		"target":         1,
-		"network_path":   2,
+		"proxy_name":     2,
 		"impact":         3,
 		"service":        4,
 		"scope":          5,
@@ -300,6 +405,9 @@ func TestNetsonarHTTPDetailsProbeInfoAndFixedDurationBackgrounds(t *testing.T) {
 	}
 	if hasOverride(info, "Proxied") {
 		t.Fatal("Probe Info still has Proxied override")
+	}
+	if hasOverride(info, "Proxy") {
+		t.Fatal("Probe Info has Proxy override, want Path-specific display")
 	}
 
 	for _, id := range []int{1, 2, 3, 4} {
@@ -353,13 +461,13 @@ func TestNetsonarDashboardTLSCertificatePhasePanels(t *testing.T) {
 	if breakdown.Title != "TLS Cert Phase Breakdown" || breakdown.Type != "table" {
 		t.Fatalf("panel 207 = %q/%q, want TLS Cert Phase Breakdown/table", breakdown.Title, breakdown.Type)
 	}
-	assertTarget(t, breakdown.Targets[0], "A", `label_join(label_replace(probe_success{job=~"$job", probe_type="tls_cert"}, "phase", "Status", "__name__", ".*"), "target_path", " / ", "target_name", "network_path") or label_join(probe_phase_duration_seconds{job=~"$job", probe_type="tls_cert"}, "target_path", " / ", "target_name", "network_path") or label_replace(label_join(sum by (target_name, network_path) (probe_phase_duration_seconds{job=~"$job", probe_type="tls_cert"}), "target_path", " / ", "target_name", "network_path"), "phase", "total_phases", "__name__", ".*")`, "")
+	assertTarget(t, breakdown.Targets[0], "A", `sum by (target_name, phase) (label_replace(probe_success{job=~"$job", probe_type="tls_cert"}, "phase", "Status", "__name__", ".*")) or sum by (target_name, phase) (probe_phase_duration_seconds{job=~"$job", probe_type="tls_cert"}) or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~"$job", probe_type="tls_cert"}), "phase", "total_phases", "__name__", ".*")`, "")
 
 	timing := findPanel(t, dash, 208)
 	if timing.Title != "TLS Phase Timing" || timing.Type != "timeseries" {
 		t.Fatalf("panel 208 = %q/%q, want TLS Phase Timing/timeseries", timing.Title, timing.Type)
 	}
-	assertTarget(t, timing.Targets[0], "A", `probe_phase_duration_seconds{job=~"$job", probe_type="tls_cert"}`, "{{target_name}} - {{network_path}} - {{phase}}")
+	assertTarget(t, timing.Targets[0], "A", `probe_phase_duration_seconds{job=~"$job", probe_type="tls_cert"}`, "{{target_name}} - {{proxy_name}} - {{phase}}")
 }
 
 func TestNetsonarDashboardProbeSectionsHavePhasePanels(t *testing.T) {
@@ -374,35 +482,35 @@ func TestNetsonarDashboardProbeSectionsHavePhasePanels(t *testing.T) {
 		201: {
 			title: "HTTP Phase Breakdown (Direct)",
 			kind:  "table",
-			expr:  `label_replace(probe_success{job=~"$job", probe_type="http", network_path="direct"}, "phase", "Status", "__name__", ".*") or probe_phase_duration_seconds{job=~"$job", probe_type="http", network_path="direct"} or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~"$job", probe_type="http", network_path="direct"}), "phase", "total_phases", "__name__", ".*")`,
+			expr:  `label_replace(probe_success{job=~"$job", probe_type="http", proxy_name=""}, "phase", "Status", "__name__", ".*") or probe_phase_duration_seconds{job=~"$job", probe_type="http", proxy_name=""} or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~"$job", probe_type="http", proxy_name=""}), "phase", "total_phases", "__name__", ".*")`,
 		},
 		206: {
 			title:  "HTTP Phase Timing (Direct)",
 			kind:   "timeseries",
-			expr:   `probe_phase_duration_seconds{job=~"$job", probe_type="http", network_path="direct"}`,
+			expr:   `probe_phase_duration_seconds{job=~"$job", probe_type="http", proxy_name=""}`,
 			legend: "{{target_name}} - {{phase}}",
 		},
 		204: {
 			title: "HTTP Phase Breakdown (Proxy)",
 			kind:  "table",
-			expr:  `label_replace(probe_success{job=~"$job", probe_type="http", network_path="proxy"}, "phase", "Status", "__name__", ".*") or probe_phase_duration_seconds{job=~"$job", probe_type="http", network_path="proxy"} or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~"$job", probe_type="http", network_path="proxy"}), "phase", "total_phases", "__name__", ".*")`,
+			expr:  `sum by (target_name, proxy_name, phase) (label_replace(probe_success{job=~"$job", probe_type="http", proxy_name!=""}, "phase", "Status", "__name__", ".*")) or sum by (target_name, proxy_name, phase) (probe_phase_duration_seconds{job=~"$job", probe_type="http", proxy_name!=""}) or label_replace(sum by (target_name, proxy_name) (probe_phase_duration_seconds{job=~"$job", probe_type="http", proxy_name!=""}), "phase", "total_phases", "__name__", ".*")`,
 		},
 		205: {
 			title:  "HTTP Phase Timing (Proxy)",
 			kind:   "timeseries",
-			expr:   `probe_phase_duration_seconds{job=~"$job", probe_type="http", network_path="proxy"}`,
+			expr:   `probe_phase_duration_seconds{job=~"$job", probe_type="http", proxy_name!=""}`,
 			legend: "{{target_name}} - {{phase}}",
 		},
 		209: {
 			title: "HTTP Response Body Phase Breakdown",
 			kind:  "table",
-			expr:  `label_join(label_replace(probe_success{job=~"$job", probe_type="http_body"}, "phase", "Status", "__name__", ".*"), "target_path", " / ", "target_name", "network_path") or label_join(probe_phase_duration_seconds{job=~"$job", probe_type="http_body"}, "target_path", " / ", "target_name", "network_path") or label_replace(label_join(sum by (target_name, network_path) (probe_phase_duration_seconds{job=~"$job", probe_type="http_body"}), "target_path", " / ", "target_name", "network_path"), "phase", "total_phases", "__name__", ".*")`,
+			expr:  `sum by (target_name, phase) (label_replace(probe_success{job=~"$job", probe_type="http_body"}, "phase", "Status", "__name__", ".*")) or sum by (target_name, phase) (probe_phase_duration_seconds{job=~"$job", probe_type="http_body"}) or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~"$job", probe_type="http_body"}), "phase", "total_phases", "__name__", ".*")`,
 		},
 		210: {
 			title:  "HTTP Response Body Phase Timing",
 			kind:   "timeseries",
 			expr:   `probe_phase_duration_seconds{job=~"$job", probe_type="http_body"}`,
-			legend: "{{target_name}} - {{network_path}} - {{phase}}",
+			legend: "{{target_name}} - {{proxy_name}} - {{phase}}",
 		},
 		211: {
 			title: "Proxy CONNECT Phase Breakdown",
@@ -429,13 +537,13 @@ func TestNetsonarDashboardProbeSectionsHavePhasePanels(t *testing.T) {
 		207: {
 			title: "TLS Cert Phase Breakdown",
 			kind:  "table",
-			expr:  `label_join(label_replace(probe_success{job=~"$job", probe_type="tls_cert"}, "phase", "Status", "__name__", ".*"), "target_path", " / ", "target_name", "network_path") or label_join(probe_phase_duration_seconds{job=~"$job", probe_type="tls_cert"}, "target_path", " / ", "target_name", "network_path") or label_replace(label_join(sum by (target_name, network_path) (probe_phase_duration_seconds{job=~"$job", probe_type="tls_cert"}), "target_path", " / ", "target_name", "network_path"), "phase", "total_phases", "__name__", ".*")`,
+			expr:  `sum by (target_name, phase) (label_replace(probe_success{job=~"$job", probe_type="tls_cert"}, "phase", "Status", "__name__", ".*")) or sum by (target_name, phase) (probe_phase_duration_seconds{job=~"$job", probe_type="tls_cert"}) or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~"$job", probe_type="tls_cert"}), "phase", "total_phases", "__name__", ".*")`,
 		},
 		208: {
 			title:  "TLS Phase Timing",
 			kind:   "timeseries",
 			expr:   `probe_phase_duration_seconds{job=~"$job", probe_type="tls_cert"}`,
-			legend: "{{target_name}} - {{network_path}} - {{phase}}",
+			legend: "{{target_name}} - {{proxy_name}} - {{phase}}",
 		},
 	}
 
@@ -445,6 +553,124 @@ func TestNetsonarDashboardProbeSectionsHavePhasePanels(t *testing.T) {
 			t.Fatalf("panel %d = %q/%q, want %q/%q", id, panel.Title, panel.Type, want.title, want.kind)
 		}
 		assertTarget(t, panel.Targets[0], "A", want.expr, want.legend)
+	}
+}
+
+func TestNetsonarDashboardHTTPBodyPhaseBreakdownDoesNotShowPath(t *testing.T) {
+	dash := loadDashboard(t)
+	panel := findPanel(t, dash, 209)
+
+	if got := panel.Targets[0].Format; got != "time_series" {
+		t.Fatalf("panel 209 target format = %q, want time_series", got)
+	}
+	if panel.Transformations[0].ID != "labelsToFields" {
+		t.Fatalf("panel 209 transformation[0] = %q, want labelsToFields", panel.Transformations[0].ID)
+	}
+	labels := panel.Transformations[0].Options
+	if labels.Mode != "columns" || labels.ValueLabel != "phase" {
+		t.Fatalf("panel 209 labelsToFields options = %#v, want columns mode with phase value label", labels)
+	}
+	if panel.Transformations[1].ID != "merge" {
+		t.Fatalf("panel 209 transformation[1] = %q, want merge", panel.Transformations[1].ID)
+	}
+
+	index := lastOrganizeIndex(t, panel)
+	if got := index["target_name"]; got != 0 {
+		t.Fatalf("panel 209 target_name column index = %d, want 0", got)
+	}
+	if got := index["Status"]; got != 1 {
+		t.Fatalf("panel 209 Status column index = %d, want 1", got)
+	}
+	if index["proxy_name"] != 0 {
+		t.Fatalf("panel 209 uses proxy_name as a visible indexed column, want hidden")
+	}
+
+	renames := lastOrganize(t, panel).Options.RenameByName
+	if got := renames["target_name"]; got != "Target" {
+		t.Fatalf("panel 209 target_name rename = %q, want Target", got)
+	}
+	for _, forbidden := range []string{"Target / Path", "Path"} {
+		if hasOverride(panel, forbidden) {
+			t.Fatalf("panel 209 still has %s override", forbidden)
+		}
+	}
+}
+
+func TestNetsonarDashboardTLSCertPhaseBreakdownDoesNotShowPath(t *testing.T) {
+	dash := loadDashboard(t)
+	panel := findPanel(t, dash, 207)
+
+	if got := panel.Targets[0].Format; got != "time_series" {
+		t.Fatalf("panel 207 target format = %q, want time_series", got)
+	}
+	if panel.Transformations[0].ID != "labelsToFields" {
+		t.Fatalf("panel 207 transformation[0] = %q, want labelsToFields", panel.Transformations[0].ID)
+	}
+	labels := panel.Transformations[0].Options
+	if labels.Mode != "columns" || labels.ValueLabel != "phase" {
+		t.Fatalf("panel 207 labelsToFields options = %#v, want columns mode with phase value label", labels)
+	}
+	if panel.Transformations[1].ID != "merge" {
+		t.Fatalf("panel 207 transformation[1] = %q, want merge", panel.Transformations[1].ID)
+	}
+
+	index := lastOrganizeIndex(t, panel)
+	if got := index["target_name"]; got != 0 {
+		t.Fatalf("panel 207 target_name column index = %d, want 0", got)
+	}
+	if got := index["Status"]; got != 1 {
+		t.Fatalf("panel 207 Status column index = %d, want 1", got)
+	}
+	for _, hidden := range []string{"target", "proxy_name"} {
+		if index[hidden] != 0 {
+			t.Fatalf("panel 207 uses %s as a visible indexed column, want hidden", hidden)
+		}
+	}
+	renames := lastOrganize(t, panel).Options.RenameByName
+	if got := renames["target_name"]; got != "Target" {
+		t.Fatalf("panel 207 target_name rename = %q, want Target", got)
+	}
+	for _, forbidden := range []string{"Target / Path", "Path"} {
+		if hasOverride(panel, forbidden) {
+			t.Fatalf("panel 207 still has %s override", forbidden)
+		}
+	}
+}
+
+func TestNetsonarDashboardHTTPProxyPhaseBreakdownSplitsRowsByProxy(t *testing.T) {
+	dash := loadDashboard(t)
+	panel := findPanel(t, dash, 204)
+
+	if got := panel.Targets[0].Format; got != "time_series" {
+		t.Fatalf("panel 204 target format = %q, want time_series", got)
+	}
+	if panel.Transformations[0].ID != "labelsToFields" {
+		t.Fatalf("panel 204 transformation[0] = %q, want labelsToFields", panel.Transformations[0].ID)
+	}
+	labels := panel.Transformations[0].Options
+	if labels.Mode != "columns" || labels.ValueLabel != "phase" {
+		t.Fatalf("panel 204 labelsToFields options = %#v, want columns mode with phase value label", labels)
+	}
+	if panel.Transformations[1].ID != "merge" {
+		t.Fatalf("panel 204 transformation[1] = %q, want merge", panel.Transformations[1].ID)
+	}
+
+	index := lastOrganizeIndex(t, panel)
+	if got := index["target_name"]; got != 0 {
+		t.Fatalf("panel 204 target_name column index = %d, want 0", got)
+	}
+	if got := index["Status"]; got != 1 {
+		t.Fatalf("panel 204 Status column index = %d, want 1", got)
+	}
+	if got := index["proxy_name"]; got != 2 {
+		t.Fatalf("panel 204 proxy_name column index = %d, want 2", got)
+	}
+	renames := lastOrganize(t, panel).Options.RenameByName
+	if got := renames["target_name"]; got != "Target" {
+		t.Fatalf("panel 204 target_name rename = %q, want Target", got)
+	}
+	if got := renames["proxy_name"]; got != "Proxy" {
+		t.Fatalf("panel 204 proxy_name rename = %q, want Proxy", got)
 	}
 }
 
@@ -620,25 +846,27 @@ func hasOverride(panel dashboardPanel, name string) bool {
 	return false
 }
 
-func assertProxiedOverride(t *testing.T, panel dashboardPanel) {
+func assertProxyOverrideDoesNotMapToBoolean(t *testing.T, panel dashboardPanel) {
 	t.Helper()
 
-	override := findOverride(t, panel, "Proxied")
-	mappings := overridePropertyValue(t, override, "mappings").([]any)
-	options := mappings[0].(map[string]any)["options"].(map[string]any)
-	proxy := options["proxy"].(map[string]any)
-	direct := options["direct"].(map[string]any)
-	if proxy["text"] != "YES" || proxy["color"] != "blue" {
-		t.Fatalf("panel %d proxied proxy mapping = %+v, want YES/blue", panel.ID, proxy)
+	if hasOverride(panel, "Proxied") {
+		t.Fatalf("panel %d still has Proxied override", panel.ID)
 	}
-	if direct["text"] != "" || direct["color"] != "transparent" {
-		t.Fatalf("panel %d proxied direct mapping = %+v, want blank/transparent", panel.ID, direct)
+	override := findOverride(t, panel, "Proxy")
+	for _, forbidden := range []string{"mappings", "custom.cellOptions", "color"} {
+		if hasOverrideProperty(override, forbidden) {
+			t.Fatalf("panel %d Proxy override still has boolean/color property %q", panel.ID, forbidden)
+		}
 	}
+}
 
-	cellOptions := overridePropertyValue(t, override, "custom.cellOptions").(map[string]any)
-	if cellOptions["type"] != "color-background" {
-		t.Fatalf("panel %d proxied cell option = %+v, want color-background", panel.ID, cellOptions)
+func hasOverrideProperty(override fieldOverride, id string) bool {
+	for _, property := range override.Properties {
+		if property.ID == id {
+			return true
+		}
 	}
+	return false
 }
 
 func findOverride(t *testing.T, panel dashboardPanel, name string) fieldOverride {
@@ -653,16 +881,16 @@ func findOverride(t *testing.T, panel dashboardPanel, name string) fieldOverride
 	return fieldOverride{}
 }
 
-func overridePropertyValue(t *testing.T, override fieldOverride, id string) any {
+func assertPanelTarget(t *testing.T, panel dashboardPanel, refID, expr string) {
 	t.Helper()
 
-	for _, property := range override.Properties {
-		if property.ID == id {
-			return property.Value
+	for _, target := range panel.Targets {
+		if target.RefID == refID {
+			assertTarget(t, target, refID, expr, "")
+			return
 		}
 	}
-	t.Fatalf("override %q has no property %q", override.Matcher.Options, id)
-	return nil
+	t.Fatalf("panel %d has no target %q", panel.ID, refID)
 }
 
 func assertTarget(t *testing.T, target dashboardTarget, refID, expr, legend string) {

@@ -13,6 +13,10 @@ agent:
     - target_type
     - target_account
 
+proxies:
+  fake-egress:
+    url: "http://fake-targets:8888"
+
 targets:
   - name: tcp-open
     address: "fake-targets:9000"
@@ -186,7 +190,7 @@ targets:
     probe_opts:
       method: GET
       expected_status_codes: [200]
-      proxy_url: "http://fake-targets:8888"
+    proxy_name: fake-egress
     tags:
       service: fake-proxy
       scope: local
@@ -202,7 +206,7 @@ targets:
       method: GET
       expected_status_codes: [200]
       tls_skip_verify: true
-      proxy_url: "http://fake-targets:8888"
+    proxy_name: fake-egress
     tags:
       service: fake-proxy
       scope: local
@@ -218,7 +222,7 @@ targets:
     probe_opts:
       method: GET
       expected_status_codes: [200]
-      proxy_url: "http://fake-targets:8888"
+    proxy_name: fake-egress
     tags:
       service: fake-proxy
       scope: external
@@ -230,8 +234,7 @@ targets:
   - name: proxy-connect-ok
     address: "fake-targets:9000"
     probe_type: proxy_connect
-    probe_opts:
-      proxy_url: "http://fake-targets:8888"
+    proxy_name: fake-egress
     tags:
       service: fake-proxy
       scope: local
@@ -243,8 +246,8 @@ targets:
   - name: proxy-connect-denied
     address: "fake-targets:9001"
     probe_type: proxy_connect
+    proxy_name: fake-egress
     probe_opts:
-      proxy_url: "http://fake-targets:8888"
       expected_proxy_connect_status_codes: [403]
     tags:
       service: fake-proxy
@@ -259,7 +262,7 @@ targets:
     probe_type: tls_cert
     probe_opts:
       tls_skip_verify: true
-      proxy_url: "http://fake-targets:8888"
+    proxy_name: fake-egress
     tags:
       service: fake-proxy
       scope: local

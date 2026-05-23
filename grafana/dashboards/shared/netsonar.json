@@ -876,43 +876,12 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Proxied"
+              "options": "Proxy"
             },
             "properties": [
               {
                 "id": "custom.width",
                 "value": 90
-              },
-              {
-                "id": "mappings",
-                "value": [
-                  {
-                    "options": {
-                      "proxy": {
-                        "color": "blue",
-                        "text": "YES"
-                      },
-                      "direct": {
-                        "color": "transparent",
-                        "text": ""
-                      }
-                    },
-                    "type": "value"
-                  }
-                ]
-              },
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background"
-                }
-              },
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "transparent"
-                }
               },
               {
                 "id": "custom.align",
@@ -990,7 +959,7 @@
         }
       },
       "title": "All Probes \u2014 Status Table",
-      "description": "Current status of every configured probe target. Sorted by Status so failures appear first.\n\nColumn legend:\n- Status: latest probe outcome from probe_success. OK = succeeded, FAIL = failed.\n- Timed Out: YES means the latest probe reached or exceeded its configured timeout. Blank means the latest result did not hit the timeout.\n- Total Probe Time: wall-clock duration of the latest probe (probe_duration_seconds).\n- Time Limit: effective configured per-target timeout in seconds (probe_timeout_seconds).\n- Limit Used: latest Total Probe Time divided by Time Limit. This is a tuning signal, not the source of truth for timeout classification.\n- Name / Probe / Target / Proxied: target identity and probe route. Proxied shows YES when network_path=\"proxy\" and stays blank for direct traffic.\n- Service / Host / Port / Scope / Region / Partition / Account / Impact / Target Type: routing and ownership labels from the target config. Dynamic tag columns are shown once; duplicate columns from joined queries are hidden.",
+      "description": "Current status of every configured probe target. Sorted by Status so failures appear first.\n\nColumn legend:\n- Status: latest probe outcome from probe_success. OK = succeeded, FAIL = failed.\n- Timed Out: YES means the latest probe reached or exceeded its configured timeout. Blank means the latest result did not hit the timeout.\n- Total Probe Time: wall-clock duration of the latest probe (probe_duration_seconds).\n- Time Limit: effective configured per-target timeout in seconds (probe_timeout_seconds).\n- Limit Used: latest Total Probe Time divided by Time Limit. This is a tuning signal, not the source of truth for timeout classification.\n- Name / Probe / Target / Proxy / Proxy Endpoint: target identity and probe route. Proxy shows the configured proxy_name and stays blank for direct traffic. Proxy Endpoint is populated from netsonar_target_proxy_info for proxied targets.\n- Service / Host / Port / Scope / Region / Partition / Account / Impact / Target Type: routing and ownership labels from the target config. Dynamic tag columns are shown once; duplicate columns from joined queries are hidden.",
       "type": "table",
       "transformations": [
         {
@@ -1116,13 +1085,20 @@
               "target_name 4": true,
               "target_name 5": true,
               "target_name 6": true,
-              "network_path 2": true,
-              "network_path 3": true,
-              "network_path 4": true,
-              "network_path 5": true,
-              "network_path 6": true,
+              "proxy_name 2": true,
+              "proxy_name 3": true,
+              "proxy_name 4": true,
+              "proxy_name 5": true,
+              "proxy_name 6": true,
+              "proxy_endpoint 1": true,
+              "proxy_endpoint 2": true,
+              "proxy_endpoint 3": true,
+              "proxy_endpoint 4": true,
+              "proxy_endpoint 5": true,
+              "proxy_endpoint 6": true,
               "phase": true,
               "Value #B": true,
+              "Value #G": true,
               "target_type 1": true,
               "target_type 2": true,
               "target_type 3": true,
@@ -1135,8 +1111,8 @@
               "target_name": 1,
               "probe_type": 2,
               "probe_type 1": 2,
-              "network_path": 4,
-              "network_path 1": 4,
+              "proxy_name": 4,
+              "proxy_name 1": 4,
               "Value #D": 5,
               "Value #C": 6,
               "Value #E": 7,
@@ -1159,7 +1135,8 @@
               "target_account 1": 15,
               "impact": 16,
               "impact 1": 16,
-              "target_type": 17
+              "proxy_endpoint": 17,
+              "target_type": 18
             },
             "renameByName": {
               "target_name": "Name",
@@ -1175,8 +1152,9 @@
               "impact 1": "Impact",
               "probe_type": "Probe",
               "probe_type 1": "Probe",
-              "network_path": "Proxied",
-              "network_path 1": "Proxied",
+              "proxy_name": "Proxy",
+              "proxy_name 1": "Proxy",
+              "proxy_endpoint": "Proxy Endpoint",
               "target": "Target",
               "target 1": "Target",
               "port": "Port",
@@ -1228,6 +1206,13 @@
           "expr": "probe_duration_seconds{job=~\"$job\"} / on(job, target_name) group_left() probe_timeout_seconds{job=~\"$job\"}",
           "legendFormat": "",
           "refId": "F",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "netsonar_target_proxy_info{job=~\"$job\"}",
+          "legendFormat": "",
+          "refId": "G",
           "instant": true,
           "format": "table"
         }
@@ -1354,13 +1339,13 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "count(probe_success{job=~\"$job\", probe_type=\"http\", network_path=\"direct\"})",
+          "expr": "count(probe_success{job=~\"$job\", probe_type=\"http\", proxy_name=\"\"})",
           "legendFormat": "Total HTTP Direct",
           "refId": "A",
           "instant": true
         }
       ],
-      "description": "Total direct HTTP probe targets (probe_type=\"http\", network_path=\"direct\")."
+      "description": "Total direct HTTP probe targets (probe_type=\"http\", proxy_name=\"\")."
     },
     {
       "datasource": {
@@ -1410,7 +1395,7 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "count(probe_success{job=~\"$job\", probe_type=\"http\", network_path=\"direct\"} == 1)",
+          "expr": "count(probe_success{job=~\"$job\", probe_type=\"http\", proxy_name=\"\"} == 1)",
           "legendFormat": "Reachable",
           "refId": "A",
           "instant": true
@@ -1470,7 +1455,7 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "count(probe_success{job=~\"$job\", probe_type=\"http\", network_path=\"direct\"} == 0) OR on() vector(0)",
+          "expr": "count(probe_success{job=~\"$job\", probe_type=\"http\", proxy_name=\"\"} == 0) OR on() vector(0)",
           "legendFormat": "Unreachable",
           "refId": "A",
           "instant": true
@@ -1528,7 +1513,7 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "avg(probe_duration_seconds{job=~\"$job\", probe_type=\"http\", network_path=\"direct\"})",
+          "expr": "avg(probe_duration_seconds{job=~\"$job\", probe_type=\"http\", proxy_name=\"\"})",
           "legendFormat": "Avg Duration",
           "refId": "A",
           "instant": true
@@ -1605,12 +1590,12 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "quantile_over_time(0.5, probe_duration_seconds{job=~\"$job\", probe_type=\"http\", network_path=\"direct\"}[5m]) unless (probe_timed_out{job=~\"$job\", probe_type=\"http\", network_path=\"direct\"} == 1)",
+          "expr": "quantile_over_time(0.5, probe_duration_seconds{job=~\"$job\", probe_type=\"http\", proxy_name=\"\"}[5m]) unless (probe_timed_out{job=~\"$job\", probe_type=\"http\", proxy_name=\"\"} == 1)",
           "legendFormat": "{{target_name}}",
           "refId": "A"
         }
       ],
-      "description": "Median total duration over 5 minutes for direct HTTP probes only (network_path=direct). Threshold lines are hidden to keep the panel visually clean; use the phase panels below for latency diagnosis."
+      "description": "Median total duration over 5 minutes for direct HTTP probes only (proxy_name=\"\"). Threshold lines are hidden to keep the panel visually clean; use the phase panels below for latency diagnosis."
     },
     {
       "datasource": {
@@ -1661,7 +1646,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "probe_http_status_code{job=~\"$job\", probe_type=\"http\", network_path=\"direct\"}",
+          "expr": "probe_http_status_code{job=~\"$job\", probe_type=\"http\", proxy_name=\"\"}",
           "legendFormat": "{{target_name}}",
           "refId": "A"
         }
@@ -1729,7 +1714,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "probe_http_response_truncated{job=~\"$job\", probe_type=\"http\", network_path=\"direct\"}",
+          "expr": "probe_http_response_truncated{job=~\"$job\", probe_type=\"http\", proxy_name=\"\"}",
           "legendFormat": "{{target_name}}",
           "refId": "A"
         }
@@ -1788,7 +1773,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "topk(10, probe_duration_seconds{job=~\"$job\", probe_type=\"http\", network_path=\"direct\"})",
+          "expr": "topk(10, probe_duration_seconds{job=~\"$job\", probe_type=\"http\", proxy_name=\"\"})",
           "legendFormat": "{{target_name}}",
           "refId": "A"
         }
@@ -2010,7 +1995,7 @@
       "type": "table",
       "targets": [
         {
-          "expr": "label_replace(probe_success{job=~\"$job\", probe_type=\"http\", network_path=\"direct\"}, \"phase\", \"Status\", \"__name__\", \".*\") or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", network_path=\"direct\"} or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", network_path=\"direct\"}), \"phase\", \"total_phases\", \"__name__\", \".*\")",
+          "expr": "label_replace(probe_success{job=~\"$job\", probe_type=\"http\", proxy_name=\"\"}, \"phase\", \"Status\", \"__name__\", \".*\") or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", proxy_name=\"\"} or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", proxy_name=\"\"}), \"phase\", \"total_phases\", \"__name__\", \".*\")",
           "format": "table",
           "instant": true,
           "refId": "A"
@@ -2026,7 +2011,7 @@
               "instance": true,
               "job": true,
               "probe_type": true,
-              "network_path": true,
+              "proxy_name": true,
               "scope": true,
               "service": true,
               "target": true,
@@ -2126,7 +2111,7 @@
       "type": "bargauge",
       "targets": [
         {
-          "expr": "probe_duration_seconds{job=~\"$job\", probe_type=\"http\", network_path=\"direct\"} unless (probe_timed_out{job=~\"$job\", probe_type=\"http\", network_path=\"direct\"} == 1)",
+          "expr": "probe_duration_seconds{job=~\"$job\", probe_type=\"http\", proxy_name=\"\"} unless (probe_timed_out{job=~\"$job\", probe_type=\"http\", proxy_name=\"\"} == 1)",
           "legendFormat": "{{target_name}}",
           "refId": "A"
         }
@@ -2189,7 +2174,7 @@
       "pluginVersion": "12.0.2",
       "targets": [
         {
-          "expr": "probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", network_path=\"direct\"}",
+          "expr": "probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", proxy_name=\"\"}",
           "legendFormat": "{{target_name}} - {{phase}}",
           "refId": "A"
         }
@@ -2259,13 +2244,13 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "count(probe_success{job=~\"$job\", probe_type=\"http\", network_path=\"proxy\"})",
+          "expr": "count(probe_success{job=~\"$job\", probe_type=\"http\", proxy_name!=\"\"})",
           "legendFormat": "Total HTTP (Proxy)",
           "refId": "A",
           "instant": true
         }
       ],
-      "description": "Total proxied HTTP probe targets (probe_type=\"http\", network_path=\"proxy\")."
+      "description": "Total proxied HTTP probe targets (probe_type=\"http\", proxy_name!=\"\")."
     },
     {
       "datasource": {
@@ -2315,13 +2300,13 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "count(probe_success{job=~\"$job\", probe_type=\"http\", network_path=\"proxy\"} == 1)",
+          "expr": "count(probe_success{job=~\"$job\", probe_type=\"http\", proxy_name!=\"\"} == 1)",
           "legendFormat": "Reachable HTTP",
           "refId": "A",
           "instant": true
         }
       ],
-      "description": "Proxied HTTP targets whose latest probe result succeeded."
+      "description": "Proxy-path HTTP targets whose latest probe result succeeded."
     },
     {
       "datasource": {
@@ -2375,13 +2360,13 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "count(probe_success{job=~\"$job\", probe_type=\"http\", network_path=\"proxy\"} == 0) OR on() vector(0)",
+          "expr": "count(probe_success{job=~\"$job\", probe_type=\"http\", proxy_name!=\"\"} == 0) OR on() vector(0)",
           "legendFormat": "Unreachable HTTP",
           "refId": "A",
           "instant": true
         }
       ],
-      "description": "Proxied HTTP targets whose latest probe result failed."
+      "description": "Proxy-path HTTP targets whose latest probe result failed."
     },
     {
       "datasource": {
@@ -2433,7 +2418,7 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "avg(probe_duration_seconds{job=~\"$job\", probe_type=\"http\", network_path=\"proxy\"})",
+          "expr": "avg(probe_duration_seconds{job=~\"$job\", probe_type=\"http\", proxy_name!=\"\"})",
           "legendFormat": "Avg HTTP (Proxy)",
           "refId": "A",
           "instant": true
@@ -2510,12 +2495,12 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "quantile_over_time(0.5, probe_duration_seconds{job=~\"$job\", probe_type=\"http\", network_path=\"proxy\"}[5m]) unless (probe_timed_out{job=~\"$job\", probe_type=\"http\", network_path=\"proxy\"} == 1)",
+          "expr": "quantile_over_time(0.5, probe_duration_seconds{job=~\"$job\", probe_type=\"http\", proxy_name!=\"\"}[5m]) unless (probe_timed_out{job=~\"$job\", probe_type=\"http\", proxy_name!=\"\"} == 1)",
           "legendFormat": "{{target_name}}",
           "refId": "A"
         }
       ],
-      "description": "Median total duration over 5 minutes for proxied HTTP probes only (network_path=proxy). Threshold lines are hidden to keep the panel visually clean; use the phase panels below for latency diagnosis."
+      "description": "Median total duration over 5 minutes for proxy-path HTTP probes only (proxy_name!=\"\"). Threshold lines are hidden to keep the panel visually clean; use the phase panels below for latency diagnosis."
     },
     {
       "datasource": {
@@ -2729,17 +2714,28 @@
         ]
       },
       "title": "HTTP Phase Breakdown (Proxy)",
-      "description": "Instant snapshot of proxied HTTP phase durations pivoted by target. This panel shows the full HTTP flow through the proxy, not only the proxy hop.\n\nColumn legend:\n- Target: HTTP target name; click to drill down to HTTP Details.\n- Status: latest probe outcome from probe_success. OK = succeeded, FAIL = failed.\n\nProxy setup phases:\n- proxy_dial: TCP connection to the proxy, including proxy hostname DNS when applicable.\n- proxy_tls: TLS handshake with an HTTPS proxy. N/A for plain HTTP proxies.\n- proxy_connect: CONNECT request/response with the proxy for HTTPS targets. N/A for plain HTTP targets through a forward proxy.\n\nTarget HTTP exchange phases:\n- tls_handshake: TLS handshake with the target through the proxy tunnel for HTTPS targets.\n- request_write: HTTP request write after proxy setup and target TLS readiness.\n- ttfb: Time from request write completion to first response byte.\n- transfer: Response body read time up to response_body_limit_bytes.\n- total_phases: sum of observed phase timings for this target.\n\nrequest_write, ttfb, and transfer are expected for proxied HTTP because NetSonar still performs the target HTTP exchange after proxy setup completes. Only Status and total_phases use background color; ordinary phase cells are uncolored.",
+      "description": "Instant snapshot of proxied HTTP phase durations pivoted by target and proxy. This panel shows the full HTTP flow through the proxy, not only the proxy hop.\n\nColumn legend:\n- Target: HTTP target name; click to drill down to HTTP Details.\n- Status: latest probe outcome from probe_success. OK = succeeded, FAIL = failed.\n- Proxy: configured proxy_name used for this target path.\n\nProxy setup phases:\n- proxy_dial: TCP connection to the proxy, including proxy hostname DNS when applicable.\n- proxy_tls: TLS handshake with an HTTPS proxy. N/A for plain HTTP proxies.\n- proxy_connect: CONNECT request/response with the proxy for HTTPS targets. N/A for plain HTTP targets through a forward proxy.\n\nTarget HTTP exchange phases:\n- tls_handshake: TLS handshake with the target through the proxy tunnel for HTTPS targets.\n- request_write: HTTP request write after proxy setup and target TLS readiness.\n- ttfb: Time from request write completion to first response byte.\n- transfer: Response body read time up to response_body_limit_bytes.\n- total_phases: sum of observed phase timings for this target/proxy path.\n\nrequest_write, ttfb, and transfer are expected for proxied HTTP because NetSonar still performs the target HTTP exchange after proxy setup completes. Only Status and total_phases use background color; ordinary phase cells are uncolored.",
       "type": "table",
       "targets": [
         {
-          "expr": "label_replace(probe_success{job=~\"$job\", probe_type=\"http\", network_path=\"proxy\"}, \"phase\", \"Status\", \"__name__\", \".*\") or probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", network_path=\"proxy\"} or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", network_path=\"proxy\"}), \"phase\", \"total_phases\", \"__name__\", \".*\")",
-          "format": "table",
+          "expr": "sum by (target_name, proxy_name, phase) (label_replace(probe_success{job=~\"$job\", probe_type=\"http\", proxy_name!=\"\"}, \"phase\", \"Status\", \"__name__\", \".*\")) or sum by (target_name, proxy_name, phase) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", proxy_name!=\"\"}) or label_replace(sum by (target_name, proxy_name) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", proxy_name!=\"\"}), \"phase\", \"total_phases\", \"__name__\", \".*\")",
+          "format": "time_series",
           "instant": true,
           "refId": "A"
         }
       ],
       "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns",
+            "valueLabel": "phase"
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
         {
           "id": "organize",
           "options": {
@@ -2749,7 +2745,6 @@
               "instance": true,
               "job": true,
               "probe_type": true,
-              "network_path": true,
               "scope": true,
               "service": true,
               "target": true,
@@ -2760,36 +2755,20 @@
             },
             "indexByName": {
               "target_name": 0,
-              "phase": 1,
-              "Value": 2
-            }
-          }
-        },
-        {
-          "id": "groupingToMatrix",
-          "options": {
-            "columnField": "phase",
-            "rowField": "target_name",
-            "valueField": "Value"
-          }
-        },
-        {
-          "id": "organize",
-          "options": {
-            "indexByName": {
-              "target_name\\phase": 0,
               "Status": 1,
-              "proxy_dial": 2,
-              "proxy_tls": 3,
-              "proxy_connect": 4,
-              "tls_handshake": 5,
-              "request_write": 6,
-              "ttfb": 7,
-              "transfer": 8,
-              "total_phases": 9
+              "proxy_name": 2,
+              "proxy_dial": 3,
+              "proxy_tls": 4,
+              "proxy_connect": 5,
+              "tls_handshake": 6,
+              "request_write": 7,
+              "ttfb": 8,
+              "transfer": 9,
+              "total_phases": 10
             },
             "renameByName": {
-              "target_name\\phase": "Target"
+              "target_name": "Target",
+              "proxy_name": "Proxy"
             }
           }
         }
@@ -2852,7 +2831,7 @@
       "pluginVersion": "12.0.2",
       "targets": [
         {
-          "expr": "probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", network_path=\"proxy\"}",
+          "expr": "probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http\", proxy_name!=\"\"}",
           "legendFormat": "{{target_name}} - {{phase}}",
           "refId": "A"
         }
@@ -3103,43 +3082,12 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Proxied"
+              "options": "Proxy"
             },
             "properties": [
               {
                 "id": "custom.width",
                 "value": 90
-              },
-              {
-                "id": "mappings",
-                "value": [
-                  {
-                    "options": {
-                      "proxy": {
-                        "color": "blue",
-                        "text": "YES"
-                      },
-                      "direct": {
-                        "color": "transparent",
-                        "text": ""
-                      }
-                    },
-                    "type": "value"
-                  }
-                ]
-              },
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background"
-                }
-              },
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "transparent"
-                }
               },
               {
                 "id": "custom.align",
@@ -3198,8 +3146,8 @@
         ]
       },
       "gridPos": {
-        "h": 5,
-        "w": 24,
+        "h": 8,
+        "w": 12,
         "x": 0,
         "y": 118
       },
@@ -3221,171 +3169,58 @@
       "type": "table",
       "transformations": [
         {
-          "id": "joinByField",
+          "id": "labelsToFields",
           "options": {
-            "byField": "target_path",
-            "mode": "outer"
+            "mode": "columns",
+            "valueLabel": "metric"
           }
+        },
+        {
+          "id": "merge",
+          "options": {}
         },
         {
           "id": "organize",
           "options": {
             "excludeByName": {
               "Time": true,
-              "Time 1": true,
-              "Time 2": true,
-              "Time 3": true,
-              "Time 4": true,
               "__name__": true,
-              "__name__ 1": true,
-              "__name__ 2": true,
-              "__name__ 3": true,
-              "__name__ 4": true,
               "job": true,
-              "job 1": true,
-              "job 2": true,
-              "job 3": true,
-              "job 4": true,
               "instance": true,
-              "instance 1": true,
-              "instance 2": true,
-              "instance 3": true,
-              "instance 4": true,
-              "url": true,
-              "url 1": true,
-              "url 2": true,
-              "url 3": true,
-              "url 4": true,
-              "host": true,
-              "host 1": true,
-              "host 2": true,
-              "host 3": true,
-              "host 4": true,
-              "monitor": true,
-              "monitor 1": true,
-              "monitor 2": true,
-              "monitor 3": true,
-              "monitor 4": true,
-              "port": true,
-              "port 1": true,
-              "port 2": true,
-              "port 3": true,
-              "port 4": true,
-              "visibility": true,
-              "visibility 1": true,
-              "visibility 2": true,
-              "visibility 3": true,
-              "visibility 4": true,
-              "provider": true,
-              "provider 1": true,
-              "provider 2": true,
-              "provider 3": true,
-              "provider 4": true,
               "probe_type": true,
-              "probe_type 1": true,
-              "probe_type 2": true,
-              "probe_type 3": true,
-              "probe_type 4": true,
-              "target_partition": true,
-              "target_partition 1": true,
-              "target_partition 2": true,
-              "target_partition 3": true,
-              "target_partition 4": true,
-              "impact 1": true,
-              "impact 2": true,
-              "impact 3": true,
-              "impact 4": true,
-              "scope 1": true,
-              "scope 2": true,
-              "scope 3": true,
-              "scope 4": true,
-              "service 1": true,
-              "service 2": true,
-              "service 3": true,
-              "service 4": true,
-              "target 1": true,
-              "target 2": true,
-              "target 3": true,
-              "target 4": true,
-              "target_account 1": true,
-              "target_account 2": true,
-              "target_account 3": true,
-              "target_account 4": true,
-              "target_region 1": true,
-              "target_region 2": true,
-              "target_region 3": true,
-              "target_region 4": true,
-              "target_type 1": true,
-              "target_type 2": true,
-              "target_type 3": true,
-              "target_type 4": true,
-              "network_path 2": true,
-              "network_path 3": true,
-              "network_path 4": true,
-              "target_name 2": true,
-              "target_name 3": true,
-              "target_name 4": true,
-              "target_path 1": true,
-              "target_path 2": true,
-              "target_path 3": true,
               "service": true,
-              "target": true,
               "scope": true,
               "target_region": true,
               "impact": true,
               "target_account": true,
               "target_type": true,
               "target_path": true,
-              "target_name": true,
-              "network_path": true
+              "proxy_name": true
             },
             "indexByName": {
-              "Value #A": 0,
-              "target_name 1": 1,
-              "network_path 1": 2,
-              "Value #B": 3,
-              "Value #C": 4,
-              "Value #D": 5
+              "Status": 0,
+              "target_name": 1,
+              "target": 2,
+              "proxy_display": 3,
+              "Duration (s)": 4,
+              "HTTP Code": 5,
+              "Body Match": 6
             },
             "renameByName": {
-              "Value #A": "Status",
-              "target_name 1": "Name",
-              "network_path 1": "Proxied",
-              "Value #B": "Duration (s)",
-              "Value #C": "HTTP Code",
-              "Value #D": "Body Match"
+              "target_name": "Name",
+              "target": "Target",
+              "proxy_display": "Proxy"
             }
           }
         }
       ],
       "targets": [
         {
-          "expr": "label_join(probe_success{job=~\"$job\", probe_type=\"http_body\"}, \"target_path\", \" / \", \"target_name\", \"network_path\")",
+          "expr": "sum by (target_name, target, proxy_display, metric) (label_replace(label_replace(probe_success{job=~\"$job\", probe_type=\"http_body\", proxy_name=\"\"}, \"metric\", \"Status\", \"__name__\", \".*\"), \"proxy_display\", \"N/A\", \"proxy_name\", \".*\") or label_replace(label_replace(probe_success{job=~\"$job\", probe_type=\"http_body\", proxy_name!=\"\"}, \"metric\", \"Status\", \"__name__\", \".*\"), \"proxy_display\", \"$1\", \"proxy_name\", \"(.+)\")) or sum by (target_name, target, proxy_display, metric) (label_replace(label_replace(probe_duration_seconds{job=~\"$job\", probe_type=\"http_body\", proxy_name=\"\"}, \"metric\", \"Duration (s)\", \"__name__\", \".*\"), \"proxy_display\", \"N/A\", \"proxy_name\", \".*\") or label_replace(label_replace(probe_duration_seconds{job=~\"$job\", probe_type=\"http_body\", proxy_name!=\"\"}, \"metric\", \"Duration (s)\", \"__name__\", \".*\"), \"proxy_display\", \"$1\", \"proxy_name\", \"(.+)\")) or sum by (target_name, target, proxy_display, metric) (label_replace(label_replace((probe_http_status_code{job=~\"$job\", probe_type=\"http_body\", proxy_name=\"\"} or on(target_name, proxy_name) (probe_success{job=~\"$job\", probe_type=\"http_body\", proxy_name=\"\"} * 0 / 0)), \"metric\", \"HTTP Code\", \"__name__\", \".*\"), \"proxy_display\", \"N/A\", \"proxy_name\", \".*\") or label_replace(label_replace((probe_http_status_code{job=~\"$job\", probe_type=\"http_body\", proxy_name!=\"\"} or on(target_name, proxy_name) (probe_success{job=~\"$job\", probe_type=\"http_body\", proxy_name!=\"\"} * 0 / 0)), \"metric\", \"HTTP Code\", \"__name__\", \".*\"), \"proxy_display\", \"$1\", \"proxy_name\", \"(.+)\")) or sum by (target_name, target, proxy_display, metric) (label_replace(label_replace((probe_http_body_match{job=~\"$job\", probe_type=\"http_body\", proxy_name=\"\"} or on(target_name, proxy_name) (probe_success{job=~\"$job\", probe_type=\"http_body\", proxy_name=\"\"} * 0 / 0)), \"metric\", \"Body Match\", \"__name__\", \".*\"), \"proxy_display\", \"N/A\", \"proxy_name\", \".*\") or label_replace(label_replace((probe_http_body_match{job=~\"$job\", probe_type=\"http_body\", proxy_name!=\"\"} or on(target_name, proxy_name) (probe_success{job=~\"$job\", probe_type=\"http_body\", proxy_name!=\"\"} * 0 / 0)), \"metric\", \"Body Match\", \"__name__\", \".*\"), \"proxy_display\", \"$1\", \"proxy_name\", \"(.+)\"))",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
-          "format": "table"
-        },
-        {
-          "expr": "label_join(probe_duration_seconds{job=~\"$job\", probe_type=\"http_body\"}, \"target_path\", \" / \", \"target_name\", \"network_path\")",
-          "legendFormat": "",
-          "refId": "B",
-          "instant": true,
-          "format": "table"
-        },
-        {
-          "expr": "label_join((probe_http_status_code{job=~\"$job\", probe_type=\"http_body\"} or on(target_name, network_path) (probe_success{job=~\"$job\", probe_type=\"http_body\"} * 0 / 0)), \"target_path\", \" / \", \"target_name\", \"network_path\")",
-          "legendFormat": "",
-          "refId": "C",
-          "instant": true,
-          "format": "table"
-        },
-        {
-          "expr": "label_join((probe_http_body_match{job=~\"$job\", probe_type=\"http_body\"} or on(target_name, network_path) (probe_success{job=~\"$job\", probe_type=\"http_body\"} * 0 / 0)), \"target_path\", \" / \", \"target_name\", \"network_path\")",
-          "legendFormat": "",
-          "refId": "D",
-          "instant": true,
-          "format": "table"
+          "format": "time_series"
         }
       ]
     },
@@ -3659,9 +3494,9 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 123
+        "w": 12,
+        "x": 12,
+        "y": 118
       },
       "id": 70,
       "options": {
@@ -3714,9 +3549,9 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 123
+        "w": 12,
+        "x": 0,
+        "y": 126
       },
       "id": 71,
       "options": {
@@ -3788,9 +3623,9 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 123
+        "w": 12,
+        "x": 12,
+        "y": 126
       },
       "id": 78,
       "options": {
@@ -3920,25 +3755,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Target / Path"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "auto"
-                }
-              },
-              {
-                "id": "unit",
-                "value": "string"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Target / Path"
+              "options": "Target"
             },
             "properties": [
               {
@@ -3997,7 +3814,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 131
+        "y": 134
       },
       "id": 209,
       "options": {
@@ -4010,17 +3827,28 @@
         ]
       },
       "title": "HTTP Response Body Phase Breakdown",
-      "description": "Instant snapshot of HTTP response body probe phase durations pivoted by target and path. Status is the latest probe outcome from probe_success. Direct probes can emit dns_resolve, tcp_connect, tls_handshake, request_write, ttfb, and transfer. Proxy-path probes can emit proxy_dial, optional proxy_tls, proxy_connect, tls_handshake, request_write, ttfb, and transfer. total_phases is the sum of observed phase timings for this target/path. Only Status and total_phases use background color; ordinary phase cells are uncolored. N/A cells mean the phase was not observed or does not apply.",
+      "description": "Instant snapshot of HTTP response body probe phase durations pivoted by target. Status is the latest probe outcome from probe_success. Direct probes can emit dns_resolve, tcp_connect, tls_handshake, request_write, ttfb, and transfer. Proxy-path probes can emit proxy_dial, optional proxy_tls, proxy_connect, tls_handshake, request_write, ttfb, and transfer. total_phases is the sum of observed phase timings for this target. Only Status and total_phases use background color; ordinary phase cells are uncolored. N/A cells mean the phase was not observed or does not apply.",
       "type": "table",
       "targets": [
         {
-          "expr": "label_join(label_replace(probe_success{job=~\"$job\", probe_type=\"http_body\"}, \"phase\", \"Status\", \"__name__\", \".*\"), \"target_path\", \" / \", \"target_name\", \"network_path\") or label_join(probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http_body\"}, \"target_path\", \" / \", \"target_name\", \"network_path\") or label_replace(label_join(sum by (target_name, network_path) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http_body\"}), \"target_path\", \" / \", \"target_name\", \"network_path\"), \"phase\", \"total_phases\", \"__name__\", \".*\")",
-          "format": "table",
+          "expr": "sum by (target_name, phase) (label_replace(probe_success{job=~\"$job\", probe_type=\"http_body\"}, \"phase\", \"Status\", \"__name__\", \".*\")) or sum by (target_name, phase) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http_body\"}) or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http_body\"}), \"phase\", \"total_phases\", \"__name__\", \".*\")",
+          "format": "time_series",
           "instant": true,
           "refId": "A"
         }
       ],
       "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns",
+            "valueLabel": "phase"
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
         {
           "id": "organize",
           "options": {
@@ -4030,36 +3858,17 @@
               "instance": true,
               "job": true,
               "probe_type": true,
-              "network_path": true,
+              "proxy_name": true,
               "scope": true,
               "service": true,
               "target": true,
               "impact": true,
               "target_account": true,
               "target_partition": true,
-              "target_region": true,
-              "target_name": true
+              "target_region": true
             },
             "indexByName": {
-              "target_path": 0,
-              "phase": 1,
-              "Value": 2
-            }
-          }
-        },
-        {
-          "id": "groupingToMatrix",
-          "options": {
-            "columnField": "phase",
-            "rowField": "target_path",
-            "valueField": "Value"
-          }
-        },
-        {
-          "id": "organize",
-          "options": {
-            "indexByName": {
-              "target_path\\phase": 0,
+              "target_name": 0,
               "Status": 1,
               "dns_resolve": 2,
               "tcp_connect": 3,
@@ -4073,7 +3882,7 @@
               "total_phases": 11
             },
             "renameByName": {
-              "target_path\\phase": "Target / Path"
+              "target_name": "Target"
             }
           }
         }
@@ -4088,7 +3897,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 141
+        "y": 144
       },
       "fieldConfig": {
         "defaults": {
@@ -4137,7 +3946,7 @@
       "targets": [
         {
           "expr": "probe_phase_duration_seconds{job=~\"$job\", probe_type=\"http_body\"}",
-          "legendFormat": "{{target_name}} - {{network_path}} - {{phase}}",
+          "legendFormat": "{{target_name}} - {{proxy_name}} - {{phase}}",
           "refId": "A"
         }
       ],
@@ -4152,7 +3961,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 149
+        "y": 152
       },
       "id": 109,
       "title": "Proxy CONNECT Probes",
@@ -4185,7 +3994,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 150
+        "y": 153
       },
       "id": 84,
       "options": {
@@ -4241,7 +4050,7 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 150
+        "y": 153
       },
       "id": 85,
       "options": {
@@ -4301,7 +4110,7 @@
         "h": 4,
         "w": 6,
         "x": 12,
-        "y": 150
+        "y": 153
       },
       "id": 86,
       "options": {
@@ -4359,7 +4168,7 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 150
+        "y": 153
       },
       "id": 87,
       "options": {
@@ -4577,7 +4386,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 154
+        "y": 157
       },
       "id": 89,
       "options": {
@@ -4650,10 +4459,10 @@
               "probe_type 1": true,
               "probe_type 2": true,
               "probe_type 3": true,
-              "network_path": true,
-              "network_path 1": true,
-              "network_path 2": true,
-              "network_path 3": true,
+              "proxy_name": true,
+              "proxy_name 1": true,
+              "proxy_name 2": true,
+              "proxy_name 3": true,
               "impact 3": true,
               "target_partition 3": true,
               "target_region 3": true,
@@ -4757,7 +4566,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 162
+        "y": 165
       },
       "id": 88,
       "options": {
@@ -4964,7 +4773,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 170
+        "y": 173
       },
       "id": 211,
       "options": {
@@ -4997,7 +4806,7 @@
               "instance": true,
               "job": true,
               "probe_type": true,
-              "network_path": true,
+              "proxy_name": true,
               "scope": true,
               "service": true,
               "target": true,
@@ -5067,7 +4876,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 180
+        "y": 183
       },
       "id": 77,
       "options": {
@@ -5085,7 +4894,7 @@
         }
       },
       "title": "Proxy CONNECT Phase Timing",
-      "description": "Phases observed in the latest CONNECT probe result. Shown for both successful and failed probes; missing phases mean the probe did not reach that phase.\n\nPhase legend:\n- proxy_dial: TCP connection to the proxy.\n- proxy_tls: TLS handshake with the proxy, only for HTTPS proxy URLs.\n- proxy_connect: CONNECT request/response with the proxy. High values usually point to proxy latency or upstream tunnel establishment delay.",
+      "description": "Phases observed in the latest CONNECT probe result. Shown for both successful and failed probes; missing phases mean the probe did not reach that phase.\n\nPhase legend:\n- proxy_dial: TCP connection to the proxy.\n- proxy_tls: TLS handshake with the proxy, only for HTTPS proxy endpoints.\n- proxy_connect: CONNECT request/response with the proxy. High values usually point to proxy latency or upstream tunnel establishment delay.",
       "type": "timeseries",
       "targets": [
         {
@@ -5101,7 +4910,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 188
+        "y": 191
       },
       "id": 101,
       "title": "TCP Connectivity",
@@ -5152,7 +4961,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 189
+        "y": 192
       },
       "id": 10,
       "options": {
@@ -5225,7 +5034,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 189
+        "y": 192
       },
       "id": 11,
       "options": {
@@ -5298,7 +5107,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 197
+        "y": 200
       },
       "id": 12,
       "options": {
@@ -5505,7 +5314,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 205
+        "y": 208
       },
       "id": 212,
       "options": {
@@ -5538,7 +5347,7 @@
               "instance": true,
               "job": true,
               "probe_type": true,
-              "network_path": true,
+              "proxy_name": true,
               "scope": true,
               "service": true,
               "target": true,
@@ -5588,7 +5397,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 215
+        "y": 218
       },
       "fieldConfig": {
         "defaults": {
@@ -5652,7 +5461,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 223
+        "y": 226
       },
       "id": 105,
       "title": "DNS Resolution",
@@ -5999,7 +5808,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 224
+        "y": 227
       },
       "id": 214,
       "options": {
@@ -6062,9 +5871,9 @@
               "probe_type": true,
               "probe_type 1": true,
               "probe_type 2": true,
-              "network_path": true,
-              "network_path 1": true,
-              "network_path 2": true,
+              "proxy_name": true,
+              "proxy_name 1": true,
+              "proxy_name 2": true,
               "impact 2": true,
               "target_partition 2": true,
               "target_region 2": true,
@@ -6166,7 +5975,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 232
+        "y": 235
       },
       "id": 50,
       "options": {
@@ -6236,7 +6045,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 232
+        "y": 235
       },
       "id": 51,
       "options": {
@@ -6268,7 +6077,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 240
+        "y": 243
       },
       "id": 106,
       "title": "TLS Certificate Expiry",
@@ -6350,40 +6159,9 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Proxied"
+              "options": "Proxy"
             },
             "properties": [
-              {
-                "id": "mappings",
-                "value": [
-                  {
-                    "options": {
-                      "proxy": {
-                        "color": "blue",
-                        "text": "YES"
-                      },
-                      "direct": {
-                        "color": "transparent",
-                        "text": ""
-                      }
-                    },
-                    "type": "value"
-                  }
-                ]
-              },
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background"
-                }
-              },
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "transparent"
-                }
-              },
               {
                 "id": "custom.align",
                 "value": "center"
@@ -6424,7 +6202,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 241
+        "y": 244
       },
       "id": 60,
       "options": {
@@ -6463,7 +6241,7 @@
             "renameByName": {
               "target_name": "Name",
               "target": "Target",
-              "network_path": "Proxied",
+              "proxy_name": "Proxy",
               "service": "Service",
               "impact": "Impact",
               "scope": "Scope",
@@ -6475,7 +6253,7 @@
             "indexByName": {
               "target_name": 1,
               "target": 2,
-              "network_path": 3,
+              "proxy_name": 3,
               "service": 4,
               "impact": 5,
               "scope": 6,
@@ -6585,43 +6363,12 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Proxied"
+              "options": "Proxy"
             },
             "properties": [
               {
                 "id": "custom.width",
                 "value": 70
-              },
-              {
-                "id": "mappings",
-                "value": [
-                  {
-                    "options": {
-                      "proxy": {
-                        "color": "blue",
-                        "text": "YES"
-                      },
-                      "direct": {
-                        "color": "transparent",
-                        "text": ""
-                      }
-                    },
-                    "type": "value"
-                  }
-                ]
-              },
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background"
-                }
-              },
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "transparent"
-                }
               },
               {
                 "id": "custom.align",
@@ -6671,7 +6418,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 249
+        "y": 252
       },
       "id": 61,
       "options": {
@@ -6710,7 +6457,7 @@
             "renameByName": {
               "target_name": "Name",
               "target": "Target",
-              "network_path": "Proxied",
+              "proxy_name": "Proxy",
               "cert_index": "Chain Depth",
               "cert_role": "Chain Role",
               "service": "Service",
@@ -6724,7 +6471,7 @@
             "indexByName": {
               "target_name": 1,
               "target": 2,
-              "network_path": 3,
+              "proxy_name": 3,
               "cert_index": 4,
               "cert_role": 5,
               "service": 6,
@@ -6868,7 +6615,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Target / Path"
+              "options": "Target"
             },
             "properties": [
               {
@@ -6927,7 +6674,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 257
+        "y": 260
       },
       "id": 207,
       "options": {
@@ -6940,17 +6687,28 @@
         ]
       },
       "title": "TLS Cert Phase Breakdown",
-      "description": "Instant snapshot of TLS certificate probe phase durations pivoted by target and path. Direct tls_cert probes can emit dns_resolve, tcp_connect, and tls_handshake. Proxy-path tls_cert probes emit proxy_dial, optional proxy_tls, proxy_connect, and tls_handshake; they do not send an HTTP request to the target.\n\nColumn legend:\n- Target / Path: TLS cert target name and network_path.\n- Status: latest probe outcome from probe_success. OK = succeeded, FAIL = failed.\n- dns_resolve: DNS lookup time for direct hostname targets.\n- tcp_connect: TCP connection establishment time for direct probes.\n- proxy_dial: TCP connection to the proxy, including proxy hostname DNS when applicable.\n- proxy_tls: TLS handshake with an HTTPS proxy. N/A for plain HTTP proxies.\n- proxy_connect: CONNECT request/response with the proxy.\n- tls_handshake: TLS handshake with the target, directly or through the proxy tunnel.\n- total_phases: sum of observed phase timings for this target/path.\n\nOnly Status and total_phases use background color. Ordinary phase cells are uncolored; N/A means the phase was not observed or does not apply.",
+      "description": "Instant snapshot of TLS certificate probe phase durations pivoted by target. Direct tls_cert probes can emit dns_resolve, tcp_connect, and tls_handshake. Proxy-path tls_cert probes emit proxy_dial, optional proxy_tls, proxy_connect, and tls_handshake; they do not send an HTTP request to the target.\n\nColumn legend:\n- Target: TLS cert target name.\n- Status: latest probe outcome from probe_success. OK = succeeded, FAIL = failed.\n- dns_resolve: DNS lookup time for direct hostname targets.\n- tcp_connect: TCP connection establishment time for direct probes.\n- proxy_dial: TCP connection to the proxy, including proxy hostname DNS when applicable.\n- proxy_tls: TLS handshake with an HTTPS proxy. N/A for plain HTTP proxies.\n- proxy_connect: CONNECT request/response with the proxy.\n- tls_handshake: TLS handshake with the target, directly or through the proxy tunnel.\n- total_phases: sum of observed phase timings for this target.\n\nOnly Status and total_phases use background color. Ordinary phase cells are uncolored; N/A means the phase was not observed or does not apply.",
       "type": "table",
       "targets": [
         {
-          "expr": "label_join(label_replace(probe_success{job=~\"$job\", probe_type=\"tls_cert\"}, \"phase\", \"Status\", \"__name__\", \".*\"), \"target_path\", \" / \", \"target_name\", \"network_path\") or label_join(probe_phase_duration_seconds{job=~\"$job\", probe_type=\"tls_cert\"}, \"target_path\", \" / \", \"target_name\", \"network_path\") or label_replace(label_join(sum by (target_name, network_path) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"tls_cert\"}), \"target_path\", \" / \", \"target_name\", \"network_path\"), \"phase\", \"total_phases\", \"__name__\", \".*\")",
-          "format": "table",
+          "expr": "sum by (target_name, phase) (label_replace(probe_success{job=~\"$job\", probe_type=\"tls_cert\"}, \"phase\", \"Status\", \"__name__\", \".*\")) or sum by (target_name, phase) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"tls_cert\"}) or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~\"$job\", probe_type=\"tls_cert\"}), \"phase\", \"total_phases\", \"__name__\", \".*\")",
+          "format": "time_series",
           "instant": true,
           "refId": "A"
         }
       ],
       "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns",
+            "valueLabel": "phase"
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
         {
           "id": "organize",
           "options": {
@@ -6960,36 +6718,17 @@
               "instance": true,
               "job": true,
               "probe_type": true,
-              "network_path": true,
               "scope": true,
               "service": true,
+              "proxy_name": true,
               "target": true,
               "impact": true,
               "target_account": true,
               "target_partition": true,
-              "target_region": true,
-              "target_name": true
+              "target_region": true
             },
             "indexByName": {
-              "target_path": 0,
-              "phase": 1,
-              "Value": 2
-            }
-          }
-        },
-        {
-          "id": "groupingToMatrix",
-          "options": {
-            "columnField": "phase",
-            "rowField": "target_path",
-            "valueField": "Value"
-          }
-        },
-        {
-          "id": "organize",
-          "options": {
-            "indexByName": {
-              "target_path\\phase": 0,
+              "target_name": 0,
               "Status": 1,
               "dns_resolve": 2,
               "tcp_connect": 3,
@@ -7000,7 +6739,7 @@
               "total_phases": 8
             },
             "renameByName": {
-              "target_path\\phase": "Target / Path"
+              "target_name": "Target"
             }
           }
         }
@@ -7015,7 +6754,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 267
+        "y": 270
       },
       "fieldConfig": {
         "defaults": {
@@ -7064,7 +6803,7 @@
       "targets": [
         {
           "expr": "probe_phase_duration_seconds{job=~\"$job\", probe_type=\"tls_cert\"}",
-          "legendFormat": "{{target_name}} - {{network_path}} - {{phase}}",
+          "legendFormat": "{{target_name}} - {{proxy_name}} - {{phase}}",
           "refId": "A"
         }
       ],
@@ -7079,7 +6818,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 275
+        "y": 278
       },
       "id": 103,
       "title": "ICMP Ping",
@@ -7358,7 +7097,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 276
+        "y": 279
       },
       "id": 215,
       "options": {
@@ -7432,10 +7171,10 @@
               "probe_type 1": true,
               "probe_type 2": true,
               "probe_type 3": true,
-              "network_path": true,
-              "network_path 1": true,
-              "network_path 2": true,
-              "network_path 3": true,
+              "proxy_name": true,
+              "proxy_name 1": true,
+              "proxy_name 2": true,
+              "proxy_name 3": true,
               "target_partition": true,
               "target_partition 1": true,
               "target_partition 2": true,
@@ -7554,7 +7293,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 284
+        "y": 287
       },
       "id": 30,
       "options": {
@@ -7614,7 +7353,7 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 284
+        "y": 287
       },
       "id": 31,
       "options": {
@@ -7672,7 +7411,7 @@
         "h": 4,
         "w": 6,
         "x": 12,
-        "y": 284
+        "y": 287
       },
       "id": 32,
       "options": {
@@ -7732,7 +7471,7 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 284
+        "y": 287
       },
       "id": 33,
       "options": {
@@ -7789,7 +7528,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 288
+        "y": 291
       },
       "id": 34,
       "options": {
@@ -7864,7 +7603,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 288
+        "y": 291
       },
       "id": 35,
       "options": {
@@ -7921,7 +7660,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 296
+        "y": 299
       },
       "id": 36,
       "options": {
@@ -7955,7 +7694,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 304
+        "y": 307
       },
       "id": 104,
       "title": "MTU Detection",
@@ -7988,7 +7727,7 @@
         "h": 4,
         "w": 8,
         "x": 0,
-        "y": 305
+        "y": 308
       },
       "id": 40,
       "options": {
@@ -8048,7 +7787,7 @@
         "h": 4,
         "w": 8,
         "x": 8,
-        "y": 305
+        "y": 308
       },
       "id": 41,
       "options": {
@@ -8114,7 +7853,7 @@
         "h": 4,
         "w": 8,
         "x": 16,
-        "y": 305
+        "y": 308
       },
       "id": 42,
       "options": {
@@ -8315,7 +8054,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 309
+        "y": 312
       },
       "id": 43,
       "options": {
@@ -8384,9 +8123,9 @@
               "target_partition": true,
               "target_partition 1": true,
               "target_partition 2": true,
-              "network_path": true,
-              "network_path 1": true,
-              "network_path 2": true,
+              "proxy_name": true,
+              "proxy_name 1": true,
+              "proxy_name 2": true,
               "target_account": true,
               "target_account 1": true,
               "target_account 2": true,
@@ -8503,7 +8242,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 317
+        "y": 320
       },
       "id": 46,
       "options": {
@@ -8565,7 +8304,7 @@
         "h": 8,
         "w": 16,
         "x": 0,
-        "y": 325
+        "y": 328
       },
       "id": 44,
       "options": {

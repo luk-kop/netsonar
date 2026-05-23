@@ -17,11 +17,10 @@ import (
 )
 
 // commonLabels are the Prometheus labels applied to every probe metric.
-// The first four ("target", "target_name", "probe_type", "network_path") are
-// always present; "network_path" is automatically set to "proxy" when the
-// target uses a proxy_url, "direct" otherwise. The rest are derived
+// The first four ("target", "target_name", "probe_type", "proxy_name") are
+// always present. The rest are derived
 // dynamically from the tag keys found in the configuration.
-var baseLabels = []string{"target", "target_name", "probe_type", "network_path"}
+var baseLabels = []string{"target", "target_name", "probe_type", "proxy_name"}
 
 // MetricsExporter registers Prometheus metric descriptors, records probe
 // results, and serves the /metrics HTTP endpoint using a custom registry.
@@ -66,10 +65,11 @@ type MetricsExporter struct {
 	probeSkippedOverlapTotal *prometheus.CounterVec
 
 	// NetSonar metadata.
-	buildInfo      *prometheus.GaugeVec
-	configInfo     *prometheus.GaugeVec
-	targetsTotal   prometheus.Gauge
-	configReloadTS prometheus.Gauge
+	buildInfo       *prometheus.GaugeVec
+	configInfo      *prometheus.GaugeVec
+	targetProxyInfo *prometheus.GaugeVec
+	targetsTotal    prometheus.Gauge
+	configReloadTS  prometheus.Gauge
 }
 
 // ExporterOptions controls optional metric collectors.
@@ -132,7 +132,7 @@ func NewMetricsExporter(tagKeys []string, opts ExporterOptions) *MetricsExporter
 
 		proxyConnectStatusCode: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "probe_proxy_connect_status_code",
-			Help: "HTTP status code returned by the proxy to a CONNECT request. Emitted by probe_type=proxy_connect, and by probe_type=http, http_body, or tls_cert when proxy_url targets an HTTPS destination that requires CONNECT.",
+			Help: "HTTP status code returned by the proxy to a CONNECT request. Emitted by probe_type=proxy_connect, and by probe_type=http, http_body, or tls_cert when proxy_name routes an HTTPS destination through a proxy.",
 		}, commonLabels),
 
 		tlsCertExpiry: prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -205,6 +205,11 @@ func NewMetricsExporter(tagKeys []string, opts ExporterOptions) *MetricsExporter
 			Help: "Hash of the effective configuration currently in use (always 1).",
 		}, []string{"hash"}),
 
+		targetProxyInfo: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "netsonar_target_proxy_info",
+			Help: "Target-to-proxy mapping for proxied targets (always 1).",
+		}, []string{"target_name", "proxy_name", "proxy_endpoint"}),
+
 		targetsTotal: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "netsonar_targets_total",
 			Help: "Total number of configured targets.",
@@ -240,6 +245,7 @@ func NewMetricsExporter(tagKeys []string, opts ExporterOptions) *MetricsExporter
 		m.httpResponseTruncated,
 		m.buildInfo,
 		m.configInfo,
+		m.targetProxyInfo,
 		m.targetsTotal,
 		m.configReloadTS,
 	)
@@ -268,15 +274,11 @@ func (m *MetricsExporter) Handler() http.Handler {
 // Tags map, plus the target address and probe_type. Tag keys are determined
 // dynamically from the exporter's tagKeys slice.
 func (m *MetricsExporter) buildLabels(target config.TargetConfig) prometheus.Labels {
-	networkPath := "direct"
-	if target.ProbeOpts.ProxyURL != "" {
-		networkPath = "proxy"
-	}
 	labels := prometheus.Labels{
-		"target":       target.Address,
-		"target_name":  target.Name,
-		"probe_type":   string(target.ProbeType),
-		"network_path": networkPath,
+		"target":      target.Address,
+		"target_name": target.Name,
+		"probe_type":  string(target.ProbeType),
+		"proxy_name":  target.ProxyName,
 	}
 	for _, key := range m.tagKeys {
 		val := ""
@@ -502,6 +504,7 @@ func (m *MetricsExporter) DeleteTarget(target config.TargetConfig) {
 	m.dnsResultMatch.Delete(labels)
 	m.httpBodyMatch.Delete(labels)
 	m.httpResponseTruncated.Delete(labels)
+	m.deleteTargetProxyInfo(target)
 
 	for _, phase := range knownPhases {
 		phaseLabels := cloneLabels(labels)
@@ -517,6 +520,25 @@ func (m *MetricsExporter) EnsureTarget(target config.TargetConfig) {
 	m.probeTimeout.With(labels).Set(target.Timeout.Seconds())
 	m.probeInterval.With(labels).Set(target.Interval.Seconds())
 	m.probeSkippedOverlapTotal.With(labels)
+	if target.ResolvedProxy != nil && target.ProxyName != "" {
+		m.targetProxyInfo.With(prometheus.Labels{
+			"target_name":    target.Name,
+			"proxy_name":     target.ProxyName,
+			"proxy_endpoint": target.ResolvedProxy.Endpoint,
+		}).Set(1)
+	}
+}
+
+func (m *MetricsExporter) deleteTargetProxyInfo(target config.TargetConfig) {
+	if target.ProxyName == "" || target.ResolvedProxy == nil {
+		m.targetProxyInfo.DeletePartialMatch(prometheus.Labels{"target_name": target.Name})
+		return
+	}
+	m.targetProxyInfo.Delete(prometheus.Labels{
+		"target_name":    target.Name,
+		"proxy_name":     target.ProxyName,
+		"proxy_endpoint": target.ResolvedProxy.Endpoint,
+	})
 }
 
 // IncrSkippedOverlap increments the probe_skipped_overlap_total counter

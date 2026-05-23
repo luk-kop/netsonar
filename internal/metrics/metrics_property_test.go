@@ -67,7 +67,7 @@ func genTargetWithTags() gopter.Gen {
 		genTagValue(),      // visibility
 		genTagValue(),      // port
 		genTagValue(),      // impact
-		gen.Bool(),         // has proxy URL
+		gen.Bool(),         // has proxy name
 	).Map(func(vals []interface{}) targetWithTags {
 		address := vals[0].(string) + ".example.com:443"
 		pt := vals[1].(config.ProbeType)
@@ -92,17 +92,17 @@ func genTargetWithTags() gopter.Gen {
 			}
 		}
 
-		// Build the expected label map: target + target_name + probe_type + network_path + all 8 tag keys.
+		// Build the expected label map: target + target_name + probe_type + proxy_name + all 8 tag keys.
 		// Missing tags should default to "".
-		networkPath := "direct"
+		proxyName := ""
 		if hasProxy {
-			networkPath = "proxy"
+			proxyName = "prop-egress"
 		}
 		expected := map[string]string{
-			"target":       address,
-			"target_name":  "prop-test",
-			"probe_type":   string(pt),
-			"network_path": networkPath,
+			"target":      address,
+			"target_name": "prop-test",
+			"probe_type":  string(pt),
+			"proxy_name":  proxyName,
 		}
 		for i, key := range tagKeyNames {
 			expected[key] = tagValues[i]
@@ -117,7 +117,8 @@ func genTargetWithTags() gopter.Gen {
 			Tags:      tags,
 		}
 		if hasProxy {
-			target.ProbeOpts.ProxyURL = "http://proxy.example.com:3128"
+			target.ProxyName = proxyName
+			target.ResolvedProxy = &config.ResolvedProxyConfig{Endpoint: "http://proxy.example.com:3128"}
 		}
 
 		return targetWithTags{Target: target, ExpectedLabels: expected}

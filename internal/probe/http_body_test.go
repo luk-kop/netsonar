@@ -34,7 +34,7 @@ func TestHTTPBodyProber_RegexMatchSuccess(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPBodyProber(false, true, "", target.ProbeOpts.BodyMatchRegex)
+	prober := NewHTTPBodyProber(false, true, nil, target.ProbeOpts.BodyMatchRegex)
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {
@@ -70,7 +70,7 @@ func TestHTTPBodyProber_RegexMatchFailure(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPBodyProber(false, true, "", target.ProbeOpts.BodyMatchRegex)
+	prober := NewHTTPBodyProber(false, true, nil, target.ProbeOpts.BodyMatchRegex)
 	result := prober.Probe(ctx, target)
 
 	if result.Success {
@@ -103,7 +103,7 @@ func TestHTTPBodyProber_SubstringMatchSuccess(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPBodyProber(false, true, "", "")
+	prober := NewHTTPBodyProber(false, true, nil, "")
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {
@@ -136,7 +136,7 @@ func TestHTTPBodyProber_SubstringMatchFailure(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPBodyProber(false, true, "", "")
+	prober := NewHTTPBodyProber(false, true, nil, "")
 	result := prober.Probe(ctx, target)
 
 	if result.Success {
@@ -169,7 +169,7 @@ func TestHTTPBodyProber_InvalidRegex(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPBodyProber(false, true, "", target.ProbeOpts.BodyMatchRegex)
+	prober := NewHTTPBodyProber(false, true, nil, target.ProbeOpts.BodyMatchRegex)
 	result := prober.Probe(ctx, target)
 
 	if result.Success {
@@ -203,7 +203,7 @@ func TestHTTPBodyProber_StatusCodeRecording(t *testing.T) {
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
-		prober := NewHTTPBodyProber(false, true, "", "")
+		prober := NewHTTPBodyProber(false, true, nil, "")
 		result := prober.Probe(ctx, target)
 		cancel()
 		srv.Close()
@@ -237,7 +237,7 @@ func TestHTTPBodyProber_ExpectedStatusCodesMismatch(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPBodyProber(false, true, "", "")
+	prober := NewHTTPBodyProber(false, true, nil, "")
 	result := prober.Probe(ctx, target)
 
 	if result.Success {
@@ -273,7 +273,7 @@ func TestHTTPBodyProber_NeitherPatternConfigured(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPBodyProber(false, true, "", "")
+	prober := NewHTTPBodyProber(false, true, nil, "")
 	result := prober.Probe(ctx, target)
 
 	if result.Success {
@@ -310,7 +310,7 @@ func TestHTTPBodyProber_RegexPrecedenceOverSubstring(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPBodyProber(false, true, "", target.ProbeOpts.BodyMatchRegex)
+	prober := NewHTTPBodyProber(false, true, nil, target.ProbeOpts.BodyMatchRegex)
 	result := prober.Probe(ctx, target)
 
 	if result.Success {
@@ -345,7 +345,7 @@ func TestHTTPBodyProber_DefaultMethodGET(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPBodyProber(false, true, "", "")
+	prober := NewHTTPBodyProber(false, true, nil, "")
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {
@@ -386,7 +386,7 @@ func TestHTTPBodyProber_CustomHeaders(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPBodyProber(false, true, "", "")
+	prober := NewHTTPBodyProber(false, true, nil, "")
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {
@@ -432,7 +432,7 @@ func TestHTTPBodyProber_BodyFullyReadAndClosed(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPBodyProber(false, true, "", "")
+	prober := NewHTTPBodyProber(false, true, nil, "")
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {
@@ -472,7 +472,7 @@ func TestHTTPBodyProber_BodyExceedsLimit(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPBodyProber(false, true, "", "")
+	prober := NewHTTPBodyProber(false, true, nil, "")
 	result := prober.Probe(ctx, target)
 
 	if result.Success {
@@ -504,7 +504,7 @@ func TestHTTPBodyProber_BodyExactlyAtLimit(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPBodyProber(false, true, "", "")
+	prober := NewHTTPBodyProber(false, true, nil, "")
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {

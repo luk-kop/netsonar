@@ -10,12 +10,15 @@ METRICS_URL = os.environ.get("METRICS_URL", "http://netsonar:9275/metrics")
 
 EXPECTATIONS = [
     ("probe_success", {"target_name": "tcp-open"}, 1.0),
+    ("probe_success", {"target_name": "tcp-open", "proxy_name": ""}, 1.0),
     ("probe_timeout_seconds", {"target_name": "tcp-open"}, 1.0),
     ("probe_interval_seconds", {"target_name": "tcp-open"}, 2.0),
     ("probe_timed_out", {"target_name": "tcp-open"}, 0.0),
     ("probe_success", {"target_name": "tcp-closed"}, 0.0),
+    ("probe_success", {"target_name": "tcp-closed", "proxy_name": ""}, 0.0),
     ("probe_timed_out", {"target_name": "tcp-closed"}, 0.0),
     ("probe_success", {"target_name": "http-ok"}, 1.0),
+    ("probe_success", {"target_name": "http-ok", "proxy_name": ""}, 1.0),
     ("probe_http_status_code", {"target_name": "http-ok"}, 200.0),
     ("probe_success", {"target_name": "http-500-expected-200"}, 0.0),
     ("probe_http_status_code", {"target_name": "http-500-expected-200"}, 500.0),
@@ -37,18 +40,25 @@ EXPECTATIONS = [
     ("probe_http_body_match", {"target_name": "http-body-bad-status"}, 1.0),
     ("probe_http_status_code", {"target_name": "http-body-bad-status"}, 500.0),
     ("probe_success", {"target_name": "http-via-proxy"}, 1.0),
+    ("probe_success", {"target_name": "http-via-proxy", "proxy_name": "fake-egress"}, 1.0),
     ("probe_http_status_code", {"target_name": "http-via-proxy"}, 200.0),
     ("probe_success", {"target_name": "http-https-via-proxy"}, 1.0),
+    ("probe_success", {"target_name": "http-https-via-proxy", "proxy_name": "fake-egress"}, 1.0),
     ("probe_http_status_code", {"target_name": "http-https-via-proxy"}, 200.0),
     ("probe_proxy_connect_status_code", {"target_name": "http-https-via-proxy"}, 200.0),
     ("probe_success", {"target_name": "proxy-connect-ok"}, 1.0),
+    ("probe_success", {"target_name": "proxy-connect-ok", "proxy_name": "fake-egress"}, 1.0),
     ("probe_proxy_connect_status_code", {"target_name": "proxy-connect-ok"}, 200.0),
     ("probe_success", {"target_name": "proxy-connect-denied"}, 1.0),
+    ("probe_success", {"target_name": "proxy-connect-denied", "proxy_name": "fake-egress"}, 1.0),
     ("probe_proxy_connect_status_code", {"target_name": "proxy-connect-denied"}, 403.0),
     ("probe_success", {"target_name": "tls-cert-via-proxy"}, 1.0),
+    ("probe_success", {"target_name": "tls-cert-via-proxy", "proxy_name": "fake-egress"}, 1.0),
     ("probe_success", {"target_name": "tls-cert-connect-fail"}, 0.0),
+    ("probe_success", {"target_name": "tls-cert-connect-fail", "proxy_name": "fake-egress"}, 0.0),
     ("probe_proxy_connect_status_code", {"target_name": "tls-cert-connect-fail"}, 403.0),
     ("probe_success", {"target_name": "dns-fake-targets"}, 1.0),
+    ("probe_success", {"target_name": "dns-fake-targets", "proxy_name": ""}, 1.0),
     ("probe_success", {"target_name": "dns-localhost-match"}, 1.0),
     ("probe_dns_result_match", {"target_name": "dns-localhost-match"}, 1.0),
     ("probe_success", {"target_name": "dns-localhost-mismatch"}, 0.0),
@@ -61,6 +71,12 @@ EXPECTATIONS = [
     ("probe_success", {"target_name": "mtu-fake-targets"}, 1.0),
     ("probe_success", {"target_name": "mtu-no-resolve"}, 0.0),
     ("netsonar_build_info", {"version": "e2e"}, 1.0),
+    ("netsonar_target_proxy_info", {"target_name": "http-via-proxy", "proxy_name": "fake-egress", "proxy_endpoint": "http://fake-targets:8888"}, 1.0),
+    ("netsonar_target_proxy_info", {"target_name": "http-https-via-proxy", "proxy_name": "fake-egress", "proxy_endpoint": "http://fake-targets:8888"}, 1.0),
+    ("netsonar_target_proxy_info", {"target_name": "proxy-connect-ok", "proxy_name": "fake-egress", "proxy_endpoint": "http://fake-targets:8888"}, 1.0),
+    ("netsonar_target_proxy_info", {"target_name": "proxy-connect-denied", "proxy_name": "fake-egress", "proxy_endpoint": "http://fake-targets:8888"}, 1.0),
+    ("netsonar_target_proxy_info", {"target_name": "tls-cert-via-proxy", "proxy_name": "fake-egress", "proxy_endpoint": "http://fake-targets:8888"}, 1.0),
+    ("netsonar_target_proxy_info", {"target_name": "tls-cert-connect-fail", "proxy_name": "fake-egress", "proxy_endpoint": "http://fake-targets:8888"}, 1.0),
 ]
 
 RANGE_EXPECTATIONS = [
@@ -93,7 +109,16 @@ ABSENT_EXPECTATIONS = [
     ("probe_icmp_stddev_rtt_seconds", {"target_name": "icmp-single-reply"}),
     ("probe_mtu_bytes", {"target_name": "mtu-no-resolve"}),
     ("probe_icmp_avg_rtt_seconds", {"target_name": "mtu-no-resolve"}),
+    ("netsonar_target_proxy_info", {"target_name": "http-ok"}),
+    ("netsonar_target_proxy_info", {"target_name": "tcp-open"}),
 ]
+
+FORBIDDEN_LABELS = {
+    "probe_": {"network_path", "proxy_endpoint"},
+    "netsonar_target_proxy_info": {"target", "probe_type", "service", "suite", "network_path"},
+    "netsonar_build_info": {"target", "target_name", "probe_type", "proxy_name", "proxy_endpoint"},
+    "netsonar_config_info": {"target", "target_name", "probe_type", "proxy_name", "proxy_endpoint"},
+}
 
 
 def scrape():
@@ -166,6 +191,15 @@ def check(metrics):
         got = metric_value(metrics, name, labels)
         if got is not None:
             failures.append(f"{name}{labels} present, want absent")
+
+    for metric_name, labels, _ in metrics:
+        forbidden = set()
+        for prefix_or_name, label_names in FORBIDDEN_LABELS.items():
+            if metric_name == prefix_or_name or metric_name.startswith(prefix_or_name):
+                forbidden.update(label_names)
+        for label_name in sorted(forbidden):
+            if label_name in labels:
+                failures.append(f"{metric_name} has forbidden label {label_name}={labels[label_name]!r}")
 
     return failures
 

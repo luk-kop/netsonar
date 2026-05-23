@@ -17,9 +17,6 @@ func TestParse_Valid(t *testing.T) {
 		{"https-with-port", "https://proxy.example.com:8443", "proxy.example.com", "8443"},
 		{"ipv4-with-port", "http://10.0.0.1:3128", "10.0.0.1", "3128"},
 		{"ipv6-with-port", "http://[2001:db8::1]:8080", "2001:db8::1", "8080"},
-		{"root-path", "http://proxy.example.com/", "proxy.example.com", ""},
-		{"with-userinfo", "http://user:pass@proxy.example.com:8080", "proxy.example.com", "8080"},
-		{"user-only", "http://user@proxy.example.com:8080", "proxy.example.com", "8080"},
 		{"max-port", "http://proxy.example.com:65535", "proxy.example.com", "65535"},
 	}
 
@@ -51,7 +48,10 @@ func TestParse_Invalid(t *testing.T) {
 		{"wrong-scheme-socks5", "socks5://proxy.example.com:1080", "scheme must be http or https"},
 		{"opaque", "http:proxy.example.com", "must use scheme://host form"},
 		{"no-host", "http://", "host is required"},
+		{"root-path", "http://proxy.example.com/", "path is not allowed"},
 		{"path", "http://proxy.example.com/path", "path is not allowed"},
+		{"with-userinfo", "http://user:pass@proxy.example.com:8080", "userinfo is not supported"},
+		{"user-only", "http://user@proxy.example.com:8080", "userinfo is not supported"},
 		{"query", "http://proxy.example.com?x=1", "query is not allowed"},
 		{"fragment-rejected-by-parse-request-uri", "http://proxy.example.com#frag", "not a valid absolute URL"},
 		{"port-zero", "http://proxy.example.com:0", "port must be in range 1-65535"},

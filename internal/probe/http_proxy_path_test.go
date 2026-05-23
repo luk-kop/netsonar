@@ -180,7 +180,7 @@ func TestHTTPProber_ProxyPath_HTTPTarget_PlainProxy(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPProber(false, true, "http://"+proxyAddr)
+	prober := NewHTTPProber(false, true, testResolvedProxy("http://"+proxyAddr))
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {
@@ -214,7 +214,7 @@ func TestHTTPBodyProber_ProxyPath_HTTPTarget_PlainProxy(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPBodyProber(false, true, "http://"+proxyAddr, "")
+	prober := NewHTTPBodyProber(false, true, testResolvedProxy("http://"+proxyAddr), "")
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {
@@ -256,7 +256,7 @@ func TestHTTPProber_ProxyPath_HTTPSTarget_ConnectDelay(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPProber(true, true, "http://"+proxyAddr)
+	prober := NewHTTPProber(true, true, testResolvedProxy("http://"+proxyAddr))
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {
@@ -303,7 +303,7 @@ func TestHTTPBodyProber_ProxyPath_HTTPSTarget_ConnectDelay(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPBodyProber(true, true, "http://"+proxyAddr, "")
+	prober := NewHTTPBodyProber(true, true, testResolvedProxy("http://"+proxyAddr), "")
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {
@@ -349,7 +349,7 @@ func TestHTTPProber_ProxyPath_HTTPTarget_HTTPSProxy(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPProber(true, true, "https://"+proxyAddr)
+	prober := NewHTTPProber(true, true, testResolvedProxyWithTLSSkipVerify("https://"+proxyAddr))
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {
@@ -359,6 +359,87 @@ func TestHTTPProber_ProxyPath_HTTPTarget_HTTPSProxy(t *testing.T) {
 		[]string{"proxy_dial", "proxy_tls", "request_write", "ttfb", "transfer"},
 		[]string{"tcp_connect", "tls_handshake", "proxy_connect", "dns_resolve"},
 	)
+}
+
+func TestHTTPProber_ProxyPath_HTTPTarget_HTTPSProxyRequiresProxyTLSSkipVerify(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer backend.Close()
+
+	certSrv := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer certSrv.Close()
+	tlsCfg := certSrv.TLS.Clone()
+	tlsCfg.NextProtos = nil
+
+	proxyAddr, cleanup := httpsProxyListener(t, tlsCfg)
+	defer cleanup()
+
+	target := config.TargetConfig{
+		Name:      "proxy-http-target-https-proxy-requires-proxy-tls-skip",
+		Address:   backend.URL,
+		ProbeType: config.ProbeTypeHTTP,
+		Timeout:   5 * time.Second,
+		ProbeOpts: config.ProbeOptions{TLSSkipVerify: true},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
+	defer cancel()
+
+	prober := NewHTTPProber(true, true, testResolvedProxy("https://"+proxyAddr))
+	result := prober.Probe(ctx, target)
+
+	if result.Success {
+		t.Fatal("expected Success=false when HTTPS proxy has untrusted cert and proxy tls_skip_verify is false")
+	}
+	if !strings.Contains(result.Error, "proxy tls handshake") {
+		t.Fatalf("expected proxy TLS handshake error, got %q", result.Error)
+	}
+	if result.Phases["proxy_tls"] <= 0 {
+		t.Fatalf("expected proxy_tls phase on proxy TLS failure, got %v", result.Phases)
+	}
+}
+
+func TestHTTPBodyProber_ProxyPath_HTTPTarget_HTTPSProxyRequiresProxyTLSSkipVerify(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("healthy"))
+	}))
+	defer backend.Close()
+
+	certSrv := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer certSrv.Close()
+	tlsCfg := certSrv.TLS.Clone()
+	tlsCfg.NextProtos = nil
+
+	proxyAddr, cleanup := httpsProxyListener(t, tlsCfg)
+	defer cleanup()
+
+	target := config.TargetConfig{
+		Name:      "body-proxy-http-target-https-proxy-requires-proxy-tls-skip",
+		Address:   backend.URL,
+		ProbeType: config.ProbeTypeHTTPBody,
+		Timeout:   5 * time.Second,
+		ProbeOpts: config.ProbeOptions{
+			TLSSkipVerify:   true,
+			BodyMatchString: "healthy",
+		},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
+	defer cancel()
+
+	prober := NewHTTPBodyProber(true, true, testResolvedProxy("https://"+proxyAddr), "")
+	result := prober.Probe(ctx, target)
+
+	if result.Success {
+		t.Fatal("expected Success=false when HTTPS proxy has untrusted cert and proxy tls_skip_verify is false")
+	}
+	if !strings.Contains(result.Error, "proxy tls handshake") {
+		t.Fatalf("expected proxy TLS handshake error, got %q", result.Error)
+	}
+	if result.Phases["proxy_tls"] <= 0 {
+		t.Fatalf("expected proxy_tls phase on proxy TLS failure, got %v", result.Phases)
+	}
 }
 
 // TestHTTPProber_ProxyPath_RoutesThroughProxy checks that the proxy-aware
@@ -401,7 +482,7 @@ func TestHTTPProber_ProxyPath_RoutesThroughProxy(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPProber(false, true, "http://"+ln.Addr().String())
+	prober := NewHTTPProber(false, true, testResolvedProxy("http://"+ln.Addr().String()))
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {
@@ -435,7 +516,7 @@ func TestHTTPProber_ProxyPath_SumApproximatesDuration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPProber(true, true, "http://"+proxyAddr)
+	prober := NewHTTPProber(true, true, testResolvedProxy("http://"+proxyAddr))
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {
@@ -507,7 +588,7 @@ func TestHTTPProber_ProxyPath_HTTPSTarget_TLSCertExtraction(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPProber(true, true, "http://"+proxyAddr)
+	prober := NewHTTPProber(true, true, testResolvedProxy("http://"+proxyAddr))
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {

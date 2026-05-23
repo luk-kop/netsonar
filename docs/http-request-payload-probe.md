@@ -141,7 +141,7 @@ HTTP response.
     method: POST
     request_body_bytes: 262144
     expected_status_codes: []
-    proxy_url: "http://infra-proxy.example.internal:8888"
+  proxy_name: infra-egress
 ```
 
 This checks the full configured HTTP proxy path, not only direct connectivity.

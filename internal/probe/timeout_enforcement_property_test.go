@@ -125,8 +125,9 @@ func buildTimeoutTarget(
 			target.Address = "192.0.2.1:443"
 			target.ProbeOpts.TLSSkipVerify = true
 		case config.ProbeTypeProxyConnect:
-			target.Address = "https://192.0.2.1"
-			target.ProbeOpts.ProxyURL = "http://192.0.2.1:8888"
+			target.Address = "192.0.2.1:443"
+			target.ProxyName = "test-egress"
+			target.ResolvedProxy = &config.ResolvedProxyConfig{Endpoint: "http://192.0.2.1:8888"}
 		}
 	} else {
 		// Use local test servers for the fast-success path.
@@ -154,8 +155,9 @@ func buildTimeoutTarget(
 			target.Address = httpsAddr
 			target.ProbeOpts.TLSSkipVerify = true
 		case config.ProbeTypeProxyConnect:
-			target.Address = "https://example.com"
-			target.ProbeOpts.ProxyURL = "http://127.0.0.1:19999"
+			target.Address = "example.com:443"
+			target.ProxyName = "test-egress"
+			target.ResolvedProxy = &config.ResolvedProxyConfig{Endpoint: "http://127.0.0.1:19999"}
 		}
 	}
 

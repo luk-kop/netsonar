@@ -88,27 +88,27 @@
       },
       "targets": [
         {
-          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\", phase=\"dns_resolve\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"resolve\"}[5m]))",
+          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", proxy_name=\"\", target_name=~\"$target_name\", phase=\"dns_resolve\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"resolve\"}[5m]))",
           "legendFormat": "dns {{target_name}}",
           "refId": "A"
         },
         {
-          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\", phase=\"tcp_connect\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"connect\"}[5m]))",
+          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", proxy_name=\"\", target_name=~\"$target_name\", phase=\"tcp_connect\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"connect\"}[5m]))",
           "legendFormat": "connect {{target_name}}",
           "refId": "B"
         },
         {
-          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\", phase=\"tls_handshake\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"tls\"}[5m]))",
+          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", proxy_name=\"\", target_name=~\"$target_name\", phase=\"tls_handshake\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"tls\"}[5m]))",
           "legendFormat": "tls {{target_name}}",
           "refId": "C"
         },
         {
-          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\", phase=\"ttfb\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"processing\"}[5m]))",
+          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", proxy_name=\"\", target_name=~\"$target_name\", phase=\"ttfb\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"processing\"}[5m]))",
           "legendFormat": "ttfb {{target_name}}",
           "refId": "D"
         },
         {
-          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\", phase=\"transfer\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"transfer\"}[5m]))",
+          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", proxy_name=\"\", target_name=~\"$target_name\", phase=\"transfer\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"transfer\"}[5m]))",
           "legendFormat": "transfer {{target_name}}",
           "refId": "E"
         }
@@ -162,27 +162,27 @@
       },
       "targets": [
         {
-          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\", phase=\"dns_resolve\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"resolve\"}[5m]))",
+          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", proxy_name=\"\", target_name=~\"$target_name\", phase=\"dns_resolve\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"resolve\"}[5m]))",
           "legendFormat": "dns {{target_name}}",
           "refId": "A"
         },
         {
-          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\", phase=\"tcp_connect\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"connect\"}[5m]))",
+          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", proxy_name=\"\", target_name=~\"$target_name\", phase=\"tcp_connect\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"connect\"}[5m]))",
           "legendFormat": "connect {{target_name}}",
           "refId": "B"
         },
         {
-          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\", phase=\"tls_handshake\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"tls\"}[5m]))",
+          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", proxy_name=\"\", target_name=~\"$target_name\", phase=\"tls_handshake\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"tls\"}[5m]))",
           "legendFormat": "tls {{target_name}}",
           "refId": "C"
         },
         {
-          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\", phase=\"ttfb\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"processing\"}[5m]))",
+          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", proxy_name=\"\", target_name=~\"$target_name\", phase=\"ttfb\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"processing\"}[5m]))",
           "legendFormat": "ttfb {{target_name}}",
           "refId": "D"
         },
         {
-          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\", phase=\"transfer\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"transfer\"}[5m]))",
+          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", proxy_name=\"\", target_name=~\"$target_name\", phase=\"transfer\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"transfer\"}[5m]))",
           "legendFormat": "transfer {{target_name}}",
           "refId": "E"
         }
@@ -236,27 +236,27 @@
       },
       "targets": [
         {
-          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\", phase=\"dns_resolve\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"resolve\"}[5m])) / on(target_name) clamp_min(quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"resolve\"}[5m]), 0.025)",
+          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", proxy_name=\"\", target_name=~\"$target_name\", phase=\"dns_resolve\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"resolve\"}[5m])) / on(target_name) clamp_min(quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"resolve\"}[5m]), 0.025)",
           "legendFormat": "dns {{target_name}}",
           "refId": "A"
         },
         {
-          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\", phase=\"tcp_connect\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"connect\"}[5m])) / on(target_name) clamp_min(quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"connect\"}[5m]), 0.025)",
+          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", proxy_name=\"\", target_name=~\"$target_name\", phase=\"tcp_connect\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"connect\"}[5m])) / on(target_name) clamp_min(quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"connect\"}[5m]), 0.025)",
           "legendFormat": "connect {{target_name}}",
           "refId": "B"
         },
         {
-          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\", phase=\"tls_handshake\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"tls\"}[5m])) / on(target_name) clamp_min(quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"tls\"}[5m]), 0.025)",
+          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", proxy_name=\"\", target_name=~\"$target_name\", phase=\"tls_handshake\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"tls\"}[5m])) / on(target_name) clamp_min(quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"tls\"}[5m]), 0.025)",
           "legendFormat": "tls {{target_name}}",
           "refId": "C"
         },
         {
-          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\", phase=\"ttfb\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"processing\"}[5m])) / on(target_name) clamp_min(quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"processing\"}[5m]), 0.025)",
+          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", proxy_name=\"\", target_name=~\"$target_name\", phase=\"ttfb\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"processing\"}[5m])) / on(target_name) clamp_min(quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"processing\"}[5m]), 0.025)",
           "legendFormat": "ttfb {{target_name}}",
           "refId": "D"
         },
         {
-          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\", phase=\"transfer\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"transfer\"}[5m])) / on(target_name) clamp_min(quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"transfer\"}[5m]), 0.025)",
+          "expr": "abs(quantile_over_time(0.5, probe_phase_duration_seconds{job=\"netsonar\", probe_type=\"http\", proxy_name=\"\", target_name=~\"$target_name\", phase=\"transfer\"}[5m]) - on(target_name) quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"transfer\"}[5m])) / on(target_name) clamp_min(quantile_over_time(0.5, probe_http_duration_seconds{job=~\"blackbox-.*\", target_name=~\"$target_name\", phase=\"transfer\"}[5m]), 0.025)",
           "legendFormat": "transfer {{target_name}}",
           "refId": "E"
         }
@@ -308,7 +308,7 @@
       },
       "targets": [
         {
-          "expr": "quantile_over_time(0.5, probe_duration_seconds{job=\"netsonar\", probe_type=\"http\", network_path=\"direct\", target_name=~\"$target_name\"}[5m])",
+          "expr": "quantile_over_time(0.5, probe_duration_seconds{job=\"netsonar\", probe_type=\"http\", proxy_name=\"\", target_name=~\"$target_name\"}[5m])",
           "legendFormat": "netsonar {{target_name}}",
           "refId": "A"
         },

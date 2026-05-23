@@ -45,7 +45,7 @@ func TestHTTPProber_PhaseBreakdownPresence(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPProber(false, true, "")
+	prober := NewHTTPProber(false, true, nil)
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {
@@ -99,7 +99,7 @@ func TestHTTPProber_PhaseBreakdownHTTPS(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPProber(true, true, "")
+	prober := NewHTTPProber(true, true, nil)
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {
@@ -150,7 +150,7 @@ func TestHTTPProber_PhaseTTFBIncludesHandlerDelay(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPProber(false, true, "")
+	prober := NewHTTPProber(false, true, nil)
 	result := prober.Probe(ctx, target)
 
 	assertHTTPProbeSuccess(t, result)
@@ -196,7 +196,7 @@ func TestHTTPProber_PhaseTransferIncludesSlowBody(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPProber(false, true, "")
+	prober := NewHTTPProber(false, true, nil)
 	result := prober.Probe(ctx, target)
 
 	assertHTTPProbeSuccess(t, result)
@@ -300,7 +300,7 @@ func TestHTTPProber_StatusCodeRecording(t *testing.T) {
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
-		prober := NewHTTPProber(false, true, "")
+		prober := NewHTTPProber(false, true, nil)
 		result := prober.Probe(ctx, target)
 		cancel()
 		srv.Close()
@@ -333,7 +333,7 @@ func TestHTTPProber_ExpectedStatusCodesEmpty(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPProber(false, true, "")
+	prober := NewHTTPProber(false, true, nil)
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {
@@ -362,7 +362,7 @@ func TestHTTPProber_ExpectedStatusCodesMatch(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPProber(false, true, "")
+	prober := NewHTTPProber(false, true, nil)
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {
@@ -395,7 +395,7 @@ func TestHTTPProber_ExpectedStatusCodesMismatch(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPProber(false, true, "")
+	prober := NewHTTPProber(false, true, nil)
 	result := prober.Probe(ctx, target)
 
 	if result.Success {
@@ -428,7 +428,7 @@ func TestHTTPProber_TLSCertExtraction(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPProber(true, true, "")
+	prober := NewHTTPProber(true, true, nil)
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {
@@ -461,7 +461,7 @@ func TestHTTPProber_TLSCertAbsentForHTTP(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPProber(false, true, "")
+	prober := NewHTTPProber(false, true, nil)
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {
@@ -506,7 +506,7 @@ func TestHTTPProber_BodyCleanup(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPProber(false, true, "")
+	prober := NewHTTPProber(false, true, nil)
 	result := prober.Probe(ctx, target)
 
 	if !result.Success {
@@ -575,7 +575,7 @@ func TestHTTPProber_RequestBodyBytes(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPProber(false, true, "")
+	prober := NewHTTPProber(false, true, nil)
 	result := prober.Probe(ctx, target)
 
 	assertHTTPProbeSuccess(t, result)
@@ -630,7 +630,7 @@ func TestHTTPProber_RequestBodyPreservesContentType(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPProber(false, true, "")
+	prober := NewHTTPProber(false, true, nil)
 	result := prober.Probe(ctx, target)
 
 	assertHTTPProbeSuccess(t, result)
@@ -665,7 +665,7 @@ func TestHTTPProber_LargeBodyCapped(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPProber(false, true, "")
+	prober := NewHTTPProber(false, true, nil)
 	result := prober.Probe(ctx, target)
 
 	// The probe should succeed — large body is not an error.
@@ -701,7 +701,7 @@ func TestHTTPProber_BodyReadErrorFailsProbe(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 	defer cancel()
 
-	prober := NewHTTPProber(false, true, "")
+	prober := NewHTTPProber(false, true, nil)
 	result := prober.Probe(ctx, target)
 
 	if result.Success {

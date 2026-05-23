@@ -144,7 +144,7 @@ func TestPropertyHTTPPhaseBreakdownCompleteness(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 			defer cancel()
 
-			prober := NewHTTPProber(sc.UseTLS, true, "")
+			prober := NewHTTPProber(sc.UseTLS, true, nil)
 			result := prober.Probe(ctx, target)
 
 			// We only check phase properties on successful probes where
@@ -272,7 +272,7 @@ func TestPropertyHTTPPhaseNonNegative(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 			defer cancel()
 
-			prober := NewHTTPProber(sc.UseTLS, true, "")
+			prober := NewHTTPProber(sc.UseTLS, true, nil)
 			result := prober.Probe(ctx, target)
 
 			if result.Phases == nil {
@@ -321,7 +321,7 @@ func TestPropertyHTTPTLSPhasePresence(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 			defer cancel()
 
-			prober := NewHTTPProber(sc.UseTLS, true, "")
+			prober := NewHTTPProber(sc.UseTLS, true, nil)
 			result := prober.Probe(ctx, target)
 
 			if !result.Success || result.Phases == nil {
@@ -413,7 +413,7 @@ func TestPropertyHTTPExpectedStatusCodeLogic(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
 			defer cancel()
 
-			prober := NewHTTPProber(false, true, "")
+			prober := NewHTTPProber(false, true, nil)
 			result := prober.Probe(ctx, target)
 
 			// Verify the status code was recorded correctly.
