@@ -84,13 +84,20 @@ If you run a mix of probe intervals (e.g. 30s for TCP/HTTP and 300s for MTU), sc
 target's metric series when that target is removed or materially changed during
 a config reload. If the same Prometheus series appears again after reload
 (same scrape labels such as `job`/`instance`, plus the same NetSonar labels such
-as `target`, `target_name`, `probe_type`, `network_path`, and dynamic tag
+as `target`, `target_name`, `probe_type`, `proxy_name`, and dynamic tag
 labels), Prometheus may observe the series starting from zero and treat it as a
 counter reset.
 
 This reset is expected after reloads that recreate target series. Use PromQL
 functions such as `increase()` or `rate()` over a range that tolerates counter
 resets when alerting on skipped overlaps.
+
+Proxy credential env/file sources are resolved during startup and every reload
+attempt. If resolution fails, the reload is rejected and the previous config
+continues running. Changing only the secret value behind the same credential
+source reference does not change the config hash and does not restart targets;
+change the proxy endpoint, TLS policy, target `proxy_name`, or credential source
+reference when you need a reload to materially change target routing.
 
 ## Dashboard Layout
 

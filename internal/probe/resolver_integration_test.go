@@ -184,7 +184,7 @@ func TestHTTPBodyProber_HonorsTargetDNSResolver(t *testing.T) {
 	mock := newMockDNSListener(t)
 	defer mock.cleanup()
 
-	prober := NewHTTPBodyProber(false, true, "", "")
+	prober := NewHTTPBodyProber(false, true, nil, "")
 	target := config.TargetConfig{
 		Name:        "httpbody-mock-resolver",
 		Address:     "http://host.invalid/",
@@ -222,7 +222,7 @@ func TestHTTPProber_ProxyPath_HonorsTargetDNSResolver(t *testing.T) {
 	mock := newMockDNSListener(t)
 	defer mock.cleanup()
 
-	prober := NewHTTPProber(false, true, "http://proxy.invalid:8080")
+	prober := NewHTTPProber(false, true, testResolvedProxy("http://proxy.invalid:8080"))
 	target := config.TargetConfig{
 		Name:        "http-via-proxy-mock-resolver",
 		Address:     "http://api.example.invalid/",

@@ -98,6 +98,63 @@ JSON log example:
 {"time":"2026-04-15T20:31:22.123456789Z","level":"WARN","msg":"probe failed","target_name":"egress-proxy","target":"example.com:443","probe_type":"proxy_connect","duration":"23ms","error":"proxy CONNECT returned status 407"}
 ```
 
+## Proxy Registry
+
+Proxy-capable targets reference proxies by name. Define those proxies once in
+the top-level `proxies` registry:
+
+Migrating to `v0.8.0` from the older per-target proxy field is covered in
+[Proxy Registry Migration](migrations/proxy-registry.md).
+
+```yaml
+proxies:
+  infra-egress:
+    url: "https://infra-proxy.example.internal:8443"
+    tls_skip_verify: false
+    username_env: "NETSONAR_PROXY_USER"
+    password_file: "/run/secrets/netsonar_proxy_pass"
+```
+
+Registry keys are the `proxy_name` values used by targets. Names must match
+`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`, and a config may define at most 64
+proxies. This is a guardrail against generated-config mistakes, not a
+performance tuning target.
+
+Every proxy entry is fully validated and credential-resolved at startup and on
+every reload attempt, even when no current target references it. Invalid unused
+entries, missing credential environment variables, or unreadable credential
+files reject the config load/reload.
+
+`proxies.<name>.url` must be a clean `http://host[:port]` or
+`https://host[:port]` endpoint. Hostnames, IPv4 literals, and bracketed IPv6
+literals are supported. URL userinfo, path including `/`, query, fragment,
+relative URLs, invalid ports, and non-HTTP schemes are rejected. The effective
+endpoint lowercases the scheme and host, preserves explicit ports, and does not
+add default ports; `http://proxy.example.internal` and
+`http://proxy.example.internal:80` are intentionally different endpoints. The
+same canonical endpoint may not be registered under two proxy names.
+
+Proxy authentication is configured with exactly one username source
+(`username`, `username_env`, or `username_file`) and exactly one password source
+(`password_env` or `password_file`). Inline `password` is not supported.
+`*_file` paths must be absolute. Values read from environment variables or
+files trim only trailing `\n` and `\r`; leading, embedded, tab, and trailing
+non-newline whitespace is preserved.
+
+Resolved credential values are read during startup and reload attempts. Changing
+only the value behind the same env/file source does not change the config hash
+and does not restart targets. If credential resolution fails during reload, the
+reload is rejected and the previous config remains active.
+
+`proxies.<name>.tls_skip_verify` controls TLS verification for an HTTPS proxy
+endpoint only. It is invalid for `http://` proxy endpoints. Target
+`probe_opts.tls_skip_verify` controls only target TLS verification.
+
+Probe traffic ignores `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, and their
+lowercase variants. Proxy routing is controlled only by `target.proxy_name`.
+This rule applies to probe traffic; future non-probe HTTP clients in the agent
+may opt into environment proxy behavior explicitly.
+
 ## Target Definition
 
 ```yaml
@@ -119,6 +176,7 @@ targets:
                                                                         #   field omitted → inherit agent.dns_resolver
                                                                         #   ""           → opt out, use system resolver
                                                                         #   "ip:port"    → use this resolver for this target
+    proxy_name: ""                                                      # Optional for http/http_body/tls_cert, required for proxy_connect
     probe_opts:                                                         # Probe-type-specific options
       # (see Probe Types section)
 ```
@@ -129,7 +187,7 @@ Tag keys are not hardcoded in the agent binary. They are collected dynamically f
 
 When `allowed_tag_keys` is configured, only those keys are permitted — any target using a key outside the list is rejected at config load time. The allowlist itself is limited to **30 entries** (`MaxGlobalTagKeys`). When `allowed_tag_keys` is absent or empty, the agent collects keys dynamically from all targets, subject to the same safety limit of 30 unique keys. This cap exists because every unique tag key becomes a Prometheus label on every metric series, and high label cardinality degrades TSDB performance.
 
-All tag keys (whether from the allowlist or collected dynamically) must be valid Prometheus label names (`[a-zA-Z_][a-zA-Z0-9_]*`) and must not collide with fixed labels (`target`, `target_name`, `probe_type`, `network_path`).
+All tag keys (whether from the allowlist or collected dynamically) must be valid Prometheus label names (`[a-zA-Z_][a-zA-Z0-9_]*`) and must not collide with reserved labels (`target`, `target_name`, `probe_type`, `proxy_name`, `proxy_endpoint`). `network_path` is not reserved; if you use it as a user tag, it has no built-in routing semantics.
 
 ```mermaid
 flowchart TD
@@ -169,7 +227,7 @@ flowchart TD
 - `agent.initial_probe_jitter` must be ≥ 0 and must not exceed the shortest effective target interval
 - `tags` must have at most 20 entries per target (the 4 fixed labels are not counted towards this limit)
 - Tag keys must be valid Prometheus label names (`[a-zA-Z_][a-zA-Z0-9_]*`)
-- Tag keys must not collide with fixed labels (`target`, `target_name`, `probe_type`, `network_path`)
+- Tag keys must not collide with reserved labels (`target`, `target_name`, `probe_type`, `proxy_name`, `proxy_endpoint`)
 - `allowed_tag_keys` must not contain duplicates and must not exceed 30 entries (`MaxGlobalTagKeys`)
 - In dynamic mode (no allowlist), at most 30 unique tag keys across all targets (fixed labels excluded from this count)
 - `icmp` and `mtu` reject literal IPv6 addresses because these probes currently use IPv4-only ICMP sockets
@@ -193,14 +251,15 @@ flowchart TD
 - `tls_emit_cert_metrics: true` is supported only for `http` probes. It emits `probe_tls_cert_*` metrics for HTTPS targets without changing TLS handshake or certificate verification behavior.
 - For `http_body`, `body_match_regex` must be a valid Go regular expression
 - `body_match_regex` and `body_match_string` are supported only by `http_body`
-- `proxy_url` is required when `probe_type` is `proxy_connect`; optional for `http`, `http_body`, and `tls_cert`; rejected when non-empty for `tcp`, `icmp`, `mtu`, and `dns`
+- `proxy_name` is required when `probe_type` is `proxy_connect`; optional for `http`, `http_body`, and `tls_cert`; rejected when non-empty for `tcp`, `icmp`, `mtu`, and `dns`
 - For `proxy_connect`, `address` must be `host:port`, not a URL. CONNECT policy is host-and-port based and does not include an HTTP path.
 - For `tcp`, `address` must be `host:port` with port in range `1`-`65535`. URL syntax is rejected.
 - For `proxy_connect`, `expected_proxy_connect_status_codes` may list valid HTTP status codes in the range `100`-`599`; when set, `probe_success=1` means the proxy returned one of those CONNECT response statuses. Use this for explicit negative tests such as expected Squid `403` denies.
 - `expected_status_codes` is rejected for `proxy_connect`; it applies only to target HTTP responses from `http` and `http_body` probes.
-- When set, `proxy_url` must be `http://[user:pass@]host[:port]` or `https://[user:pass@]host[:port]`; paths other than `/`, query strings, fragments, invalid ports, relative URLs, and non-HTTP schemes are rejected
-- If `proxy_url` includes `user:pass@`, the credentials are used for proxy Basic authentication; `proxy_connect` and `tls_cert` probes over `network_path="proxy"` send them as `Proxy-Authorization` on the CONNECT request
-- For `http` and `http_body`, `tls_skip_verify` applies to both the target TLS connection and the proxy TLS connection when `proxy_url` uses `https://`. For `proxy_connect` and `tls_cert`, it applies only to the target TLS connection; the proxy's own TLS certificate is always validated.
+- Proxy registry keys and target `proxy_name` values must match `^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`
+- `proxies.<name>.url` must be `http://host[:port]` or `https://host[:port]`; URL userinfo, path including `/`, query, fragment, invalid ports, relative URLs, and non-HTTP schemes are rejected
+- Proxy auth uses `username`, `username_env`, or `username_file` plus `password_env` or `password_file`; inline `password` and URL userinfo are not supported
+- `proxies.<name>.tls_skip_verify` controls TLS verification for an HTTPS proxy endpoint only. `probe_opts.tls_skip_verify` applies to target TLS.
 - `mtu_retries` must be ≥ 1 when specified
 - `mtu_per_attempt_timeout` must be > 0 and ≤ `timeout` when specified
 - `icmp_payload_sizes` values must be > 0

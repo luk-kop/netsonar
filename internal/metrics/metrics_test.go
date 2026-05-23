@@ -531,7 +531,8 @@ func TestRecord_ProxyConnectStatusCode(t *testing.T) {
 	target := makeTarget("proxy-connect-status", "example.com:443", config.ProbeTypeProxyConnect, map[string]string{
 		"service": "proxy",
 	})
-	target.ProbeOpts.ProxyURL = "http://proxy.example.com:3128"
+	target.ProxyName = "infra-egress"
+	target.ResolvedProxy = &config.ResolvedProxyConfig{Endpoint: "http://proxy.example.com:3128"}
 
 	m.Record(target, probe.ProbeResult{
 		Success:                      true,
@@ -570,7 +571,8 @@ func TestRecord_ProxyConnectStatusCode_DeletedOnFollowupWithoutResponse(t *testi
 	target := makeTarget("proxy-connect-status-delete", "example.com:443", config.ProbeTypeProxyConnect, map[string]string{
 		"service": "proxy",
 	})
-	target.ProbeOpts.ProxyURL = "http://proxy.example.com:3128"
+	target.ProxyName = "infra-egress"
+	target.ResolvedProxy = &config.ResolvedProxyConfig{Endpoint: "http://proxy.example.com:3128"}
 
 	// First probe observes a CONNECT response — the metric must appear.
 	m.Record(target, probe.ProbeResult{
@@ -1328,8 +1330,11 @@ func TestHandler_ServesPrometheusFormat(t *testing.T) {
 	if !strings.Contains(bodyStr, `probe_type="tcp"`) {
 		t.Error("response body should contain probe_type label")
 	}
-	if !strings.Contains(bodyStr, `network_path="direct"`) {
-		t.Error("response body should contain network_path label")
+	if !strings.Contains(bodyStr, `proxy_name=""`) {
+		t.Error("response body should contain proxy_name label")
+	}
+	if strings.Contains(bodyStr, `network_path=`) {
+		t.Error("response body should not contain network_path label")
 	}
 }
 
@@ -1463,7 +1468,7 @@ func TestBuildLabels_DynamicTagKeys(t *testing.T) {
 		t.Errorf("service: got %q, want %q", labels["service"], "svc")
 	}
 
-	// Expected label count: target + target_name + probe_type + network_path + 2 tag keys = 6.
+	// Expected label count: target + target_name + probe_type + proxy_name + 2 tag keys = 6.
 	if len(labels) != 6 {
 		t.Errorf("expected 6 labels, got %d", len(labels))
 	}
@@ -1852,6 +1857,90 @@ func TestEnsureTarget_EmitsConfigGauges(t *testing.T) {
 	}
 }
 
+func TestEnsureTarget_TargetProxyInfoForProxiedTargetOnly(t *testing.T) {
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
+
+	direct := makeTarget("direct", "https://direct.example.com", config.ProbeTypeHTTP, nil)
+	proxied := makeTarget("proxied", "https://proxied.example.com", config.ProbeTypeHTTP, nil)
+	proxied.ProxyName = "infra-egress"
+	proxied.ResolvedProxy = &config.ResolvedProxyConfig{
+		Endpoint:     "http://proxy.example.com:3128",
+		UsernameEnv:  "NETSONAR_PROXY_USER",
+		PasswordFile: "/run/secrets/proxy-pass",
+		Credentials:  config.NewResolvedProxyCredentials("canary-user", "canary-pass"),
+	}
+
+	m.EnsureTarget(direct)
+	m.EnsureTarget(proxied)
+
+	families := gatherMetrics(t, m)
+	fam, ok := families["netsonar_target_proxy_info"]
+	if !ok {
+		t.Fatal("netsonar_target_proxy_info not found")
+	}
+	if got := len(fam.GetMetric()); got != 1 {
+		t.Fatalf("netsonar_target_proxy_info series count = %d, want 1", got)
+	}
+	metric := fam.GetMetric()[0]
+	if got := labelValue(metric, "target_name"); got != "proxied" {
+		t.Fatalf("target_name = %q, want proxied", got)
+	}
+	if got := labelValue(metric, "proxy_name"); got != "infra-egress" {
+		t.Fatalf("proxy_name = %q, want infra-egress", got)
+	}
+	if got := labelValue(metric, "proxy_endpoint"); got != "http://proxy.example.com:3128" {
+		t.Fatalf("proxy_endpoint = %q, want clean endpoint", got)
+	}
+	for _, forbidden := range []string{"canary-user", "canary-pass", "NETSONAR_PROXY_USER", "/run/secrets/proxy-pass"} {
+		for _, lp := range metric.GetLabel() {
+			if strings.Contains(lp.GetValue(), forbidden) {
+				t.Fatalf("netsonar_target_proxy_info leaked %q in label %s=%q", forbidden, lp.GetName(), lp.GetValue())
+			}
+		}
+	}
+}
+
+func TestDeleteTarget_RemovesTargetProxyInfoForReassignAndDirect(t *testing.T) {
+	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
+
+	oldTarget := makeTarget("proxied", "https://example.com", config.ProbeTypeHTTP, nil)
+	oldTarget.ProxyName = "proxy-a"
+	oldTarget.ResolvedProxy = &config.ResolvedProxyConfig{Endpoint: "http://proxy-a.example.com:3128"}
+	newTarget := oldTarget
+	newTarget.ProxyName = "proxy-b"
+	newTarget.ResolvedProxy = &config.ResolvedProxyConfig{Endpoint: "http://proxy-b.example.com:3128"}
+
+	m.EnsureTarget(oldTarget)
+	m.DeleteTarget(oldTarget)
+	m.EnsureTarget(newTarget)
+
+	fam := gatherMetrics(t, m)["netsonar_target_proxy_info"]
+	if fam == nil {
+		t.Fatal("netsonar_target_proxy_info not found after reassign")
+	}
+	if got := len(fam.GetMetric()); got != 1 {
+		t.Fatalf("series count after reassign = %d, want 1", got)
+	}
+	if got := labelValue(fam.GetMetric()[0], "proxy_name"); got != "proxy-b" {
+		t.Fatalf("proxy_name after reassign = %q, want proxy-b", got)
+	}
+
+	direct := newTarget
+	direct.ProxyName = ""
+	direct.ResolvedProxy = nil
+	m.DeleteTarget(direct)
+
+	fam = gatherMetrics(t, m)["netsonar_target_proxy_info"]
+	if fam != nil {
+		for _, metric := range fam.GetMetric() {
+			if labelValue(metric, "target_name") == "proxied" {
+				t.Fatalf("stale proxy info series still present after direct delete: proxy_name=%s endpoint=%s",
+					labelValue(metric, "proxy_name"), labelValue(metric, "proxy_endpoint"))
+			}
+		}
+	}
+}
+
 func TestDeleteTarget_HTTPPhasesRemoved(t *testing.T) {
 	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
@@ -1914,15 +2003,16 @@ func TestDeleteTarget_ProxyPhasesRemoved(t *testing.T) {
 	}
 }
 
-// ---------- Network Path Label Tests ----------
+// ---------- Proxy Name Label Tests ----------
 
-func TestRecord_NetworkPathProxyWhenProxyURLSet(t *testing.T) {
+func TestRecord_ProxyNameSetForProxiedTarget(t *testing.T) {
 	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
 	target := makeTarget("proxy-path-target", "https://example.com", config.ProbeTypeHTTP, map[string]string{
 		"service": "web",
 	})
-	target.ProbeOpts.ProxyURL = "http://proxy.example.com:3128"
+	target.ProxyName = "infra-egress"
+	target.ResolvedProxy = &config.ResolvedProxyConfig{Endpoint: "http://proxy.example.com:3128"}
 
 	m.Record(target, probe.ProbeResult{
 		Success:              true,
@@ -1938,19 +2028,20 @@ func TestRecord_NetworkPathProxyWhenProxyURLSet(t *testing.T) {
 	}
 
 	metric := fam.GetMetric()[0]
-	if got := labelValue(metric, "network_path"); got != "proxy" {
-		t.Errorf("network_path label: got %q, want %q", got, "proxy")
+	if got := labelValue(metric, "proxy_name"); got != "infra-egress" {
+		t.Errorf("proxy_name label: got %q, want %q", got, "infra-egress")
+	}
+	if got := labelValue(metric, "network_path"); got != "" {
+		t.Errorf("network_path label should be absent, got %q", got)
 	}
 }
 
-func TestRecord_NetworkPathDirectWhenNoProxyURL(t *testing.T) {
+func TestRecord_ProxyNameEmptyForDirectTarget(t *testing.T) {
 	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
 	target := makeTarget("direct-path-target", "https://example.com", config.ProbeTypeHTTP, map[string]string{
 		"service": "web",
 	})
-	// No ProxyURL set.
-
 	m.Record(target, probe.ProbeResult{
 		Success:              true,
 		Duration:             100 * time.Millisecond,
@@ -1965,18 +2056,22 @@ func TestRecord_NetworkPathDirectWhenNoProxyURL(t *testing.T) {
 	}
 
 	metric := fam.GetMetric()[0]
-	if got := labelValue(metric, "network_path"); got != "direct" {
-		t.Errorf("network_path label: got %q, want %q", got, "direct")
+	if got := labelValue(metric, "proxy_name"); got != "" {
+		t.Errorf("proxy_name label: got %q, want empty", got)
+	}
+	if got := labelValue(metric, "network_path"); got != "" {
+		t.Errorf("network_path label should be absent, got %q", got)
 	}
 }
 
-func TestRecord_NetworkPathProxyForProxyProbe(t *testing.T) {
+func TestRecord_ProxyNameForProxyProbe(t *testing.T) {
 	m := NewMetricsExporter(testTagKeys, ExporterOptions{})
 
 	target := makeTarget("proxy-probe-path", "https://example.com", config.ProbeTypeProxyConnect, map[string]string{
 		"service": "proxy",
 	})
-	target.ProbeOpts.ProxyURL = "http://proxy.example.com:3128"
+	target.ProxyName = "infra-egress"
+	target.ResolvedProxy = &config.ResolvedProxyConfig{Endpoint: "http://proxy.example.com:3128"}
 
 	m.Record(target, probe.ProbeResult{
 		Success:  true,
@@ -1997,8 +2092,11 @@ func TestRecord_NetworkPathProxyForProxyProbe(t *testing.T) {
 		if labelValue(metric, "target_name") != "proxy-probe-path" {
 			continue
 		}
-		if got := labelValue(metric, "network_path"); got != "proxy" {
-			t.Errorf("network_path label: got %q, want %q", got, "proxy")
+		if got := labelValue(metric, "proxy_name"); got != "infra-egress" {
+			t.Errorf("proxy_name label: got %q, want %q", got, "infra-egress")
+		}
+		if got := labelValue(metric, "network_path"); got != "" {
+			t.Errorf("network_path label should be absent, got %q", got)
 		}
 		return
 	}

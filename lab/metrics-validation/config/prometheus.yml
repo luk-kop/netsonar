@@ -18,7 +18,6 @@ scrape_configs:
         labels:
           target_name: http-ok
           probe_type: http
-          network_path: direct
     relabel_configs:
       - source_labels: [__address__]
         target_label: __param_target
@@ -39,7 +38,6 @@ scrape_configs:
         labels:
           target_name: https-ok
           probe_type: http
-          network_path: direct
     relabel_configs:
       - source_labels: [__address__]
         target_label: __param_target

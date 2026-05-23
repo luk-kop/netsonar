@@ -28,7 +28,7 @@ func TestHTTPProber_ConcurrentProbesNoRace(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	prober := NewHTTPProber(false, true, "")
+	prober := NewHTTPProber(false, true, nil)
 
 	const goroutines = 32
 	const probesPerGoroutine = 8
@@ -82,7 +82,7 @@ func TestHTTPBodyProber_ConcurrentProbesNoRace(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	prober := NewHTTPBodyProber(false, true, "", "hello")
+	prober := NewHTTPBodyProber(false, true, nil, "hello")
 
 	const goroutines = 32
 	const probesPerGoroutine = 8
@@ -160,7 +160,7 @@ func TestHTTPProber_PerCallResolverWiredIntoTransport(t *testing.T) {
 
 	resolverAddr := pc.LocalAddr().String()
 
-	prober := NewHTTPProber(false, true, "")
+	prober := NewHTTPProber(false, true, nil)
 	target := config.TargetConfig{
 		Name:        "resolver-pin",
 		Address:     "http://example.invalid/",

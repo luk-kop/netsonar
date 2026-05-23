@@ -123,13 +123,18 @@ sudo install -m 0755 netsonar_1.2.3_linux_amd64/netsonar /usr/local/bin/netsonar
 
 ## Configuration Reference
 
-Agent settings, target definition, dynamic tags, and validation rules — see [docs/configuration.md](docs/configuration.md).
+Agent settings, target definition, proxy registry, dynamic tags, and validation
+rules — see [docs/configuration.md](docs/configuration.md).
+For the `v0.8.0` proxy migration procedure, see
+[docs/migrations/proxy-registry.md](docs/migrations/proxy-registry.md).
 
 Quick reference: [`examples/config.yaml`](examples/config.yaml) contains a complete working example.
 
 ## Probe Types
 
 Supported: `tcp`, `http`, `icmp`, `mtu`, `dns`, `tls_cert`, `http_body`, `proxy_connect`.
+HTTP, HTTP body, TLS certificate, and proxy CONNECT probes can route through a
+named proxy from the top-level `proxies` registry via `target.proxy_name`.
 
 Each probe type with full YAML examples, options, and behaviour details — see [docs/probe-types.md](docs/probe-types.md).
 
@@ -143,8 +148,11 @@ Additional deep-dives:
 
 ## Metrics Reference
 
-All probe and agent metadata metrics with labels and types, including RTT vs
-primary-latency semantics — see [docs/metrics.md](docs/metrics.md).
+All probe and agent metadata metrics with labels and types, including proxy
+labels and RTT vs primary-latency semantics — see [docs/metrics.md](docs/metrics.md).
+Probe metrics include `proxy_name`; `netsonar_target_proxy_info` maps proxied
+targets to concrete proxy endpoints without adding endpoint labels to `probe_*`
+metrics.
 Metric validation against independent tools is documented in
 [docs/metrics-validation.md](docs/metrics-validation.md).
 
@@ -416,7 +424,11 @@ and unchanged targets continue without interruption. When a target is removed
 or its configuration changes, the agent also deletes the corresponding time
 series from `/metrics`, so dashboards and alerting never see stale values from
 targets that no longer exist. If the new configuration is invalid, the agent
-continues with the previous configuration and logs the error.
+continues with the previous configuration and logs the error. Proxy credential
+sources are resolved during each reload attempt; a missing or empty env/file
+credential rejects the reload and keeps the previous config active. Changing
+only the value behind the same credential source reference does not change the
+config hash or restart targets.
 
 Some fields are startup-only and cannot be changed via SIGHUP. If the new
 configuration changes any of these, the reload is rejected and the agent

@@ -277,7 +277,7 @@ phases.
 
 ## HTTP/HTTPS
 
-Full HTTP request with `httptrace` phase breakdown (DNS resolve, TCP connect, TLS handshake, request write, TTFB, transfer). For HTTPS targets, can optionally emit TLS certificate expiry metrics from the observed peer chain. Supports optional proxy routing via `proxy_url`.
+Full HTTP request with `httptrace` phase breakdown (DNS resolve, TCP connect, TLS handshake, request write, TTFB, transfer). For HTTPS targets, can optionally emit TLS certificate expiry metrics from the observed peer chain. Supports optional proxy routing via `proxy_name`.
 
 The HTTP probe does not inspect response body content. It discards and reads at
 most the effective response body limit: `probe_opts.response_body_limit_bytes` when set,
@@ -303,7 +303,7 @@ Use `http_body` when response content must be validated.
     expected_status_codes: []       # Empty = accept any status code
     response_body_limit_bytes: 0    # 0/omitted = 1 MiB capped body read
     request_body_bytes: 0           # 0/omitted = no generated request body
-    proxy_url: ""                   # Optional: route through HTTP proxy
+  proxy_name: ""                   # Optional: route through HTTP proxy
 ```
 
 ### HTTP Options
@@ -313,12 +313,12 @@ Use `http_body` when response content must be validated.
 | `method`                    | string              | `GET`         | HTTP method. One of `GET`, `HEAD`, `POST`. Required to be `POST` when `request_body_bytes > 0`.                      |
 | `headers`                   | `map[string]string` | `{}`          | Custom request headers. Sent on every probe request.                                                                 |
 | `follow_redirects`          | bool                | `false`       | Follow 3xx redirects. When `false`, the redirect response is treated as the final response.                          |
-| `tls_skip_verify`           | bool                | `false`       | Skip TLS certificate verification on the **target** connection (HTTPS only). For `http` and `http_body`, it also applies to the proxy TLS connection when `proxy_url` uses `https://`. For `proxy_connect` and `tls_cert`, it applies only to the target; the proxy's TLS certificate is always validated. |
+| `tls_skip_verify`           | bool                | `false`       | Skip TLS certificate verification on the **target** connection (HTTPS only). HTTPS proxy TLS verification is controlled by `proxies.<name>.tls_skip_verify`, not this target option. |
 | `tls_emit_cert_metrics`     | bool                | `false`       | Emit `probe_tls_cert_*` metrics for HTTPS targets. This does not affect TLS handshake, certificate verification, or `tls_handshake` phase metrics. |
 | `expected_status_codes`     | `[]int`             | `[]`          | Allow-list of HTTP status codes that count as success. Empty list accepts any status. See subsection below.          |
 | `response_body_limit_bytes` | int                 | `0` (= 1 MiB) | Cap on response bytes read and discarded. `0` or omitted falls back to the 1 MiB built-in default.                   |
 | `request_body_bytes`        | int                 | `0`           | Generate an outbound request body of exactly this size. Requires `method: POST`. Capped at 16 MiB. See below.        |
-| `proxy_url`                 | string              | `""`          | Route the request through an HTTP forward proxy (`http://` or `https://`). Basic-auth credentials may be embedded.   |
+| `proxy_name`                 | string              | `""`          | Route the request through a named HTTP forward proxy from the top-level `proxies` registry. Configure Basic auth on the proxy entry. |
 
 ### request_body_bytes
 
@@ -361,7 +361,7 @@ Examples:
 - Health check endpoints that return 200 on success — use `[200]` to detect when the service is unhealthy.
 - APIs that may return 200 or 204 — use `[200, 204]` to accept both as valid.
 
-When `proxy_url` is set, the HTTP transport routes all requests through the specified proxy. This is useful for probing public endpoints from private subnets via the infrastructure proxy:
+When `proxy_name` is set, the HTTP transport routes all requests through the specified proxy. This is useful for probing public endpoints from private subnets via the infrastructure proxy:
 
 ```yaml
 - name: "ssm-http-via-proxy"
@@ -372,19 +372,24 @@ When `proxy_url` is set, the HTTP transport routes all requests through the spec
     method: GET
     follow_redirects: false
     expected_status_codes: []
-    proxy_url: "http://infra-proxy.example.internal:8888"
+  proxy_name: infra-egress
 ```
 
-For proxies that require Basic authentication, include credentials in the proxy URL:
+For proxies that require Basic authentication, configure credential sources on the proxy entry:
 
 ```yaml
-proxy_url: "http://username:password@infra-proxy.example.internal:8888"
+proxies:
+  infra-egress:
+    url: "http://infra-proxy.example.internal:8888"
+    username_env: "NETSONAR_PROXY_USER"
+    password_file: "/run/secrets/netsonar_proxy_pass"
 ```
 
-For `http` and `http_body`, `tls_skip_verify` applies to both the target TLS
-connection and the proxy TLS connection when `proxy_url` uses `https://`. For
-`proxy_connect` and `tls_cert`, it applies only to the target TLS connection;
-the proxy's own TLS certificate is always validated.
+For `http`, `http_body`, `proxy_connect`, and `tls_cert`, target
+`probe_opts.tls_skip_verify` applies only to the target TLS connection. HTTPS
+proxy TLS verification is controlled on the selected proxy entry with
+`proxies.<name>.tls_skip_verify`; setting it to `true` is valid only for
+`https://` proxy endpoints.
 
 ## ICMP
 
@@ -635,7 +640,7 @@ On mismatch, the agent logs the actual vs expected values: `dns expected result 
 
 ## TLS Certificate Expiry
 
-Performs a TLS handshake and extracts certificate expiry from the observed peer chain. The alert-oriented `probe_tls_cert_expiry_timestamp_seconds` metric reports the earliest `NotAfter` timestamp in the chain, while `probe_tls_cert_chain_expiry_timestamp_seconds` emits one series per observed certificate with `cert_index` and `cert_role` labels. Supports optional proxy routing via `proxy_url`; for proxy-path targets the agent establishes an HTTP CONNECT tunnel first, then performs the TLS handshake through that tunnel.
+Performs a TLS handshake and extracts certificate expiry from the observed peer chain. The alert-oriented `probe_tls_cert_expiry_timestamp_seconds` metric reports the earliest `NotAfter` timestamp in the chain, while `probe_tls_cert_chain_expiry_timestamp_seconds` emits one series per observed certificate with `cert_index` and `cert_role` labels. Supports optional proxy routing via `proxy_name`; for proxy-path targets the agent establishes an HTTP CONNECT tunnel first, then performs the TLS handshake through that tunnel.
 
 ```yaml
 - name: "api-gw-pub-eu-tls"
@@ -645,7 +650,7 @@ Performs a TLS handshake and extracts certificate expiry from the observed peer 
   timeout: 5s
   probe_opts:
     tls_skip_verify: false
-    proxy_url: ""                   # Optional: inspect certificate through HTTP proxy
+  proxy_name: ""                   # Optional: inspect certificate through HTTP proxy
 ```
 
 ### TLS Cert Options
@@ -653,7 +658,7 @@ Performs a TLS handshake and extracts certificate expiry from the observed peer 
 | Option            | Type   | Default | Description                                                                                                                 |
 |-------------------|--------|---------|-----------------------------------------------------------------------------------------------------------------------------|
 | `tls_skip_verify` | bool   | `false` | Skip TLS certificate verification on the target connection. Useful for monitoring expiry of self-signed or untrusted certs. |
-| `proxy_url`       | string | `""`    | Route the TLS handshake through an HTTP CONNECT tunnel. The recorded chain is whatever NetSonar observes from that path.    |
+| `proxy_name`       | string | `""`    | Route the TLS handshake through an HTTP CONNECT tunnel. The recorded chain is whatever NetSonar observes from that path.    |
 
 The reported expiry is based on the certificate chain observed by NetSonar from that network path. With a normal CONNECT proxy this is the origin chain. With TLS inspection, the observed chain may be proxy-issued; this is useful when the operational question is what workloads behind that proxy actually see.
 
@@ -661,7 +666,7 @@ Direct probes emit `probe_phase_duration_seconds` with `phase="tcp_connect"` and
 
 ## HTTP Body Validation
 
-HTTP request with regex or substring match on the response body. The probe succeeds (`probe_success=1`) when **both** conditions are met: the response body matches the configured pattern, and the response status code satisfies the `expected_status_codes` rule (empty list accepts any status; non-empty list requires the status code to be present). When body evaluation completes, the match result is also reported separately via `probe_http_body_match` for diagnostic visibility. If no HTTP response is received or the body cannot be evaluated, `probe_http_body_match` is absent. The agent reads at most 1 MiB of response body; larger responses fail the probe. Supports custom request headers via `headers` and optional proxy routing via `proxy_url`.
+HTTP request with regex or substring match on the response body. The probe succeeds (`probe_success=1`) when **both** conditions are met: the response body matches the configured pattern, and the response status code satisfies the `expected_status_codes` rule (empty list accepts any status; non-empty list requires the status code to be present). When body evaluation completes, the match result is also reported separately via `probe_http_body_match` for diagnostic visibility. If no HTTP response is received or the body cannot be evaluated, `probe_http_body_match` is absent. The agent reads at most 1 MiB of response body; larger responses fail the probe. Supports custom request headers via `headers` and optional proxy routing via `proxy_name`.
 
 `http_body` probes emit the same per-phase timings as `http` through `probe_phase_duration_seconds` (`dns_resolve` for hostname targets, `tcp_connect`, `tls_handshake` for HTTPS targets, `request_write`, `ttfb`, `transfer`). Use the HTTP Response Body Status per Target panel for the current status, HTTP code, and body-match result, and use the phase panels to distinguish request-write, TTFB, transfer, and proxy setup time. The main Grafana status table intentionally stays cross-probe and shows status, timeout, total probe time, timeout limit, limit-used ratio, and target identity labels.
 
@@ -680,7 +685,7 @@ At least one of `body_match_regex` or `body_match_string` must be set — a targ
       X-Custom: "value"
     body_match_string: "ok"         # Substring match
     body_match_regex: "status.*ok"  # Regex match (alternative)
-    proxy_url: ""                   # Optional: route through HTTP proxy
+  proxy_name: ""                   # Optional: route through HTTP proxy
 ```
 
 ### HTTP Body Options
@@ -692,7 +697,7 @@ At least one of `body_match_regex` or `body_match_string` must be set — a targ
 | `body_match_string`     | string              | `""`    | Substring that must appear in the response body. At least one of `body_match_string` / `body_match_regex` is required.               |
 | `body_match_regex`      | string              | `""`    | Go regular expression matched against the response body. Takes precedence over `body_match_string` when both are set.                |
 | `expected_status_codes` | `[]int`             | `[]`    | Allow-list of HTTP status codes that count as success in addition to the body match. Empty list accepts any status.                  |
-| `proxy_url`             | string              | `""`    | Route the request through an HTTP forward proxy.                                                                                     |
+| `proxy_name`             | string              | `""`    | Route the request through a named HTTP forward proxy from the top-level `proxies` registry.                                          |
 
 ## Proxy Connectivity
 
@@ -703,8 +708,8 @@ Establishes a raw HTTP CONNECT tunnel through a configured proxy and measures tu
   address: "example.com:443"
   probe_type: proxy_connect
   timeout: 5s
+  proxy_name: fwd-egress
   probe_opts:
-    proxy_url: "http://fwd-proxy.example.internal:8888"
     # Optional negative test: success means the proxy returned CONNECT 403.
     # expected_proxy_connect_status_codes: [403]
 ```
@@ -713,10 +718,11 @@ Establishes a raw HTTP CONNECT tunnel through a configured proxy and measures tu
 
 | Option                                | Type    | Default      | Description                                                                                                                |
 |---------------------------------------|---------|--------------|----------------------------------------------------------------------------------------------------------------------------|
-| `proxy_url`                           | string  | **required** | HTTP forward proxy URL (`http://` or `https://`). May contain Basic-auth credentials.                                      |
+| `proxy_name`                           | string  | **required** | Name of a proxy entry from the top-level `proxies` registry. Configure Basic auth on the proxy entry.                     |
 | `expected_proxy_connect_status_codes` | `[]int` | `[]`         | Allow-list of CONNECT response codes that count as success. Empty list means any 2xx is success. Use for negative tests.   |
 
-If the proxy URL contains credentials, the CONNECT request includes `Proxy-Authorization: Basic ...`.
+If the proxy entry has credential sources, the CONNECT request includes
+`Proxy-Authorization: Basic ...`. URL userinfo is rejected.
 
 Proxy CONNECT probes expose `probe_proxy_connect_status_code` when the proxy returns a CONNECT response. With no explicit expectation, any 2xx CONNECT response is success. When `expected_proxy_connect_status_codes` is set, success means the proxy's CONNECT response status is in that list. This is intended for explicit negative tests such as Squid ACL denials returning 403.
 
@@ -725,10 +731,10 @@ Proxy CONNECT probes expose phase timings regardless of whether the CONNECT succ
 | Phase | What It Measures |
 |---|---|
 | `proxy_dial` | TCP dial to the proxy |
-| `proxy_tls` | TLS handshake with the proxy, only for `https://` proxy URLs |
+| `proxy_tls` | TLS handshake with the proxy, only for `https://` proxy endpoints |
 | `proxy_connect` | CONNECT request write and proxy response read |
 
-### Proxy CONNECT Probe vs HTTP Probe with `proxy_url`
+### Proxy CONNECT Probe vs HTTP Probe with `proxy_name`
 
 The agent offers two distinct ways to test proxy connectivity. Choosing the wrong one leads to false failures.
 
@@ -740,21 +746,21 @@ Use `proxy_connect` when:
 - Verifying the proxy's CONNECT allowlist (positive and negative tests)
 - Measuring raw tunnel establishment time without TLS or HTTP overhead
 
-**`probe_type: http` with `proxy_url`** — sends a standard HTTP request routed through the configured proxy. For HTTPS targets the prober performs an explicit CONNECT + target TLS handshake + HTTP exchange and measures each step independently so CONNECT latency is visible. For plain HTTP targets the prober uses standard HTTP forward proxying (no CONNECT) — the proxy receives the HTTP request in absolute-URI form.
+**`probe_type: http` with `proxy_name`** — sends a standard HTTP request routed through the configured proxy. For HTTPS targets the prober performs an explicit CONNECT + target TLS handshake + HTTP exchange and measures each step independently so CONNECT latency is visible. For plain HTTP targets the prober uses standard HTTP forward proxying (no CONNECT) — the proxy receives the HTTP request in absolute-URI form.
 
 For `http` and `http_body`, `expected_status_codes` always refers to the target HTTP response, not the proxy's CONNECT response. If an HTTPS proxy CONNECT happens, `probe_proxy_connect_status_code` is diagnostic only and does not change `probe_success`.
 
-**`probe_type: tls_cert` with `proxy_url`** — sends CONNECT to the proxy, then performs only the target TLS handshake through the tunnel and records the observed certificate expiry. It does not send an HTTP request to the target.
+**`probe_type: tls_cert` with `proxy_name`** — sends CONNECT to the proxy, then performs only the target TLS handshake through the tunnel and records the observed certificate expiry. It does not send an HTTP request to the target.
 
-Use `http` with `proxy_url` when:
+Use `http` with `proxy_name` when:
 
 - Testing that a forward proxy can reach a target endpoint (the common case)
 - Verifying proxy connectivity for HTTP/HTTPS traffic as clients actually use it
 - You need full HTTP metrics (status code and phase timing, with TLS certificate expiry when `tls_emit_cert_metrics: true`)
 
-Use `tls_cert` with `proxy_url` when:
+Use `tls_cert` with `proxy_name` when:
 
-- You only need certificate expiry metrics from `network_path="proxy"`
+- You only need certificate expiry metrics from `proxy_name!=""`
 - The target has no useful HTTP endpoint, or a full HTTP request would be too invasive
 - You need to observe certificates as workloads behind an egress proxy see them
 
@@ -764,9 +770,9 @@ Use `tls_cert` with `proxy_url` when:
   address: "https://checkip.amazonaws.com"
   probe_type: http
   timeout: 5s
+  proxy_name: fwd-egress
   probe_opts:
     method: GET
-    proxy_url: "http://fwd-proxy.example.internal:8888"
     follow_redirects: false
     expected_status_codes: [200]
   tags:
@@ -776,18 +782,18 @@ Use `tls_cert` with `proxy_url` when:
 
 ### Interpreting Metrics for Proxy-Path HTTP Probes
 
-When an `http` or `http_body` probe uses `proxy_url`, the phase timing metrics reflect the full proxy path. Phase emission depends on the combination of target URL scheme and proxy URL scheme. `tcp_connect` and `proxy_dial` are **mutually exclusive** per probe execution: direct probes emit `tcp_connect`, proxy-path probes emit `proxy_dial` instead. `dns_resolve` is **not** emitted for proxy-path `http`/`http_body` because proxy hostname resolution is included in `proxy_dial` and the target hostname is resolved by the proxy itself.
+When an `http` or `http_body` probe uses `proxy_name`, the phase timing metrics reflect the full proxy path. Phase emission depends on the combination of target URL scheme and proxy endpoint scheme. `tcp_connect` and `proxy_dial` are **mutually exclusive** per probe execution: direct probes emit `tcp_connect`, proxy-path probes emit `proxy_dial` instead. `dns_resolve` is **not** emitted for proxy-path `http`/`http_body` because proxy hostname resolution is included in `proxy_dial` and the target hostname is resolved by the proxy itself.
 
-| Target URL  | Proxy URL   | Proxy Phases Emitted                                            | Target Phases Emitted |
-|-------------|-------------|-----------------------------------------------------------------|-----------------------|
+| Target URL  | Proxy endpoint scheme | Proxy Phases Emitted                                            | Target Phases Emitted |
+|-------------|-----------------------|-----------------------------------------------------------------|-----------------------|
 | `http://`   | `http://`   | `proxy_dial`                                                    | `request_write`, `ttfb`, `transfer` |
 | `http://`   | `https://`  | `proxy_dial`, `proxy_tls`                                       | `request_write`, `ttfb`, `transfer` |
 | `https://`  | `http://`   | `proxy_dial`, `proxy_connect`                                   | `tls_handshake`, `request_write`, `ttfb`, `transfer` |
 | `https://`  | `https://`  | `proxy_dial`, `proxy_tls`, `proxy_connect`                      | `tls_handshake`, `request_write`, `ttfb`, `transfer` |
 
-Individual phase meaning when `network_path="proxy"`:
+Individual phase meaning when `proxy_name!=""`:
 
-| Phase            | What It Measures (`network_path="proxy"`) |
+| Phase            | What It Measures (`proxy_name!=""`) |
 |------------------|-------------------------------------------|
 | `proxy_dial`     | TCP dial to the proxy (includes proxy hostname DNS resolution) |
 | `proxy_tls`      | TLS handshake with the proxy (only for `https://` proxies) |
@@ -799,27 +805,30 @@ Individual phase meaning when `network_path="proxy"`:
 
 CONNECT request/response latency is reported in `proxy_connect`, not `tcp_connect` — compare a proxy-path probe's `proxy_connect` against a `probe_type: proxy_connect` probe's `proxy_connect` to isolate target-side CONNECT handling from pure proxy overhead.
 
-When a `tls_cert` probe uses `proxy_url`, phase timing metrics show the CONNECT tunnel setup and target TLS handshake:
+When a `tls_cert` probe uses `proxy_name`, phase timing metrics show the CONNECT tunnel setup and target TLS handshake:
 
-| Phase | What It Measures (`tls_cert` over `network_path="proxy"`) |
+| Phase | What It Measures (`tls_cert` over `proxy_name!=""`) |
 |---|---|
 | `proxy_dial` | TCP dial to the proxy |
-| `proxy_tls` | TLS handshake with the proxy, only for `https://` proxy URLs |
+| `proxy_tls` | TLS handshake with the proxy, only for `https://` proxy endpoints |
 | `proxy_connect` | CONNECT request write and proxy response read |
 | `tls_handshake` | TLS handshake with the target through the tunnel |
 
 ### Identifying Proxy-Path Probes on the Dashboard
 
-The agent automatically adds a `network_path` label to every probe metric: `"proxy"` when the target has a `proxy_url` configured, `"direct"` otherwise. This requires no manual configuration — the agent detects it from `probe_opts.proxy_url`.
+The agent automatically adds a `proxy_name` label to every probe metric. Direct
+targets get `proxy_name=""`; proxied targets get the configured proxy registry
+name, such as `proxy_name="infra-egress"`. This requires no manual metric-label
+configuration — the agent derives it from `target.proxy_name`.
 
 On the Grafana dashboard:
 
 - The "All Probes — Status Table" includes a "Path" column.
-- The "HTTP Probes (Proxy)" section filters by `probe_type="http", network_path="proxy"`.
+- The "HTTP Probes (Proxy)" section filters by `probe_type="http", proxy_name!=""`.
 - The "HTTP Phase Timing (Proxy)" panel shows HTTP phase timings for proxy-path HTTP probes.
 - The "HTTP Response Body Probes" section shows `probe_type="http_body"` status, body-match, duration, and phase panels.
 - The "Proxy CONNECT Probes" section filters by `probe_type="proxy_connect"`.
 - The "Proxy CONNECT Phase Timing" panel shows raw CONNECT probe phases: `proxy_dial`, `proxy_tls`, and `proxy_connect`.
-- PromQL filter: `probe_success{network_path="proxy"}` selects all proxy-path probes regardless of probe type or service name.
+- PromQL filter: `probe_success{proxy_name!=""}` selects all proxy-path probes regardless of probe type or service name.
 
 For a detailed explanation of how HTTP proxies work, when to use each probe type, and how to interpret proxy-path metrics, see [proxy-probing.md](proxy-probing.md).

@@ -24,6 +24,15 @@ import (
 	"netsonar/internal/scheduler"
 )
 
+type staticSuccessProber struct{}
+
+func (staticSuccessProber) Probe(context.Context, config.TargetConfig) probe.ProbeResult {
+	return probe.ProbeResult{
+		Success:  true,
+		Duration: 10 * time.Millisecond,
+	}
+}
+
 // TestIntegration_MetricsEndpoint starts the agent in-process, runs a TCP
 // probe against a local listener, scrapes /metrics, and verifies that all
 // expected metric names and labels are present.
@@ -57,6 +66,11 @@ func TestIntegration_MetricsEndpoint(t *testing.T) {
 			"default_interval": "30s",
 			"log_level":        "info",
 		},
+		"proxies": map[string]interface{}{
+			"fake-egress": map[string]interface{}{
+				"url": "http://proxy.example.internal:8888",
+			},
+		},
 		"targets": []map[string]interface{}{
 			{
 				"name":       "test-tcp-target",
@@ -73,6 +87,24 @@ func TestIntegration_MetricsEndpoint(t *testing.T) {
 					"visibility":       "internal",
 					"port":             tcpPort,
 					"impact":           "low",
+				},
+			},
+			{
+				"name":       "test-http-via-proxy",
+				"address":    "https://example.test/ok",
+				"probe_type": "http",
+				"proxy_name": "fake-egress",
+				"interval":   "5s",
+				"timeout":    "2s",
+				"tags": map[string]string{
+					"service":          "test-proxy-svc",
+					"scope":            "external",
+					"provider":         "test",
+					"target_region":    "test-region",
+					"target_partition": "test",
+					"visibility":       "external",
+					"port":             "443",
+					"impact":           "high",
 				},
 			},
 		},
@@ -102,7 +134,10 @@ func TestIntegration_MetricsEndpoint(t *testing.T) {
 	exporter := metrics.NewMetricsExporter(config.CollectTagKeys(cfg), metrics.ExporterOptions{EnableRuntimeMetrics: cfg.Agent.EnableRuntimeMetrics})
 
 	proberFactory := func(target config.TargetConfig) probe.Prober {
-		return &probe.TCPProber{}
+		if target.ProbeType == config.ProbeTypeTCP {
+			return &probe.TCPProber{}
+		}
+		return staticSuccessProber{}
 	}
 
 	sched := scheduler.New(exporter, proberFactory)
@@ -169,8 +204,10 @@ func TestIntegration_MetricsEndpoint(t *testing.T) {
 		"probe_success",
 		"probe_duration_seconds",
 		"netsonar_build_info",
+		"netsonar_config_info",
 		"netsonar_targets_total",
 		"netsonar_config_reload_timestamp_seconds",
+		"netsonar_target_proxy_info",
 	}
 
 	for _, name := range expectedMetrics {
@@ -182,8 +219,9 @@ func TestIntegration_MetricsEndpoint(t *testing.T) {
 	// --- 9. Verify common labels on probe metrics ---
 	expectedLabels := []string{
 		"target",
+		"target_name",
 		"probe_type",
-		"network_path",
+		"proxy_name",
 		"service",
 		"scope",
 		"provider",
@@ -218,6 +256,21 @@ func TestIntegration_MetricsEndpoint(t *testing.T) {
 		}
 	}
 
+	assertProbeSeriesLabels(t, families, "test-tcp-target", map[string]string{
+		"proxy_name": "",
+		"probe_type": "tcp",
+	})
+	assertProbeSeriesLabels(t, families, "test-http-via-proxy", map[string]string{
+		"proxy_name": "fake-egress",
+		"probe_type": "http",
+	})
+	assertProbeSeriesDoesNotHaveLabels(t, families, "test-http-via-proxy", "network_path", "proxy_endpoint")
+	assertTargetProxyInfo(t, families, map[string]string{
+		"target_name":    "test-http-via-proxy",
+		"proxy_name":     "fake-egress",
+		"proxy_endpoint": "http://proxy.example.internal:8888",
+	})
+
 	// --- 10. Verify netsonar_build_info carries build metadata only ---
 	if fam, ok := families["netsonar_build_info"]; ok {
 		if len(fam.GetMetric()) == 0 {
@@ -245,6 +298,9 @@ func TestIntegration_MetricsEndpoint(t *testing.T) {
 				if _, ok := labelSet[label]; ok {
 					t.Errorf("netsonar_build_info must not carry probe label %q", label)
 				}
+			}
+			if _, ok := labelSet["proxy_endpoint"]; ok {
+				t.Error("netsonar_build_info must not carry proxy_endpoint label")
 			}
 		}
 	}
@@ -545,6 +601,82 @@ func TestIntegration_ConfigReloadSIGHUP(t *testing.T) {
 	if total := getAgentTargetsTotal(families); total != 2 {
 		t.Errorf("after invalid reload netsonar_targets_total = %v, want 2 (should keep previous config)", total)
 	}
+}
+
+func assertProbeSeriesLabels(t *testing.T, families map[string]*dto.MetricFamily, targetName string, want map[string]string) {
+	t.Helper()
+
+	metric := findMetricByLabel(t, families, "probe_success", "target_name", targetName)
+	labels := metricLabels(metric)
+	for name, wantValue := range want {
+		if got := labels[name]; got != wantValue {
+			t.Fatalf("probe_success{%s=%q} label %q = %q, want %q", "target_name", targetName, name, got, wantValue)
+		}
+	}
+}
+
+func assertProbeSeriesDoesNotHaveLabels(t *testing.T, families map[string]*dto.MetricFamily, targetName string, names ...string) {
+	t.Helper()
+
+	metric := findMetricByLabel(t, families, "probe_success", "target_name", targetName)
+	labels := metricLabels(metric)
+	for _, name := range names {
+		if got, ok := labels[name]; ok {
+			t.Fatalf("probe_success{target_name=%q} has forbidden label %q=%q", targetName, name, got)
+		}
+	}
+}
+
+func assertTargetProxyInfo(t *testing.T, families map[string]*dto.MetricFamily, want map[string]string) {
+	t.Helper()
+
+	fam, ok := families["netsonar_target_proxy_info"]
+	if !ok {
+		t.Fatal("netsonar_target_proxy_info not found")
+	}
+	if got := len(fam.GetMetric()); got != 1 {
+		t.Fatalf("netsonar_target_proxy_info series count = %d, want 1", got)
+	}
+
+	metric := fam.GetMetric()[0]
+	if got := metric.GetGauge().GetValue(); got != 1 {
+		t.Fatalf("netsonar_target_proxy_info value = %f, want 1", got)
+	}
+	labels := metricLabels(metric)
+	for name, wantValue := range want {
+		if got := labels[name]; got != wantValue {
+			t.Fatalf("netsonar_target_proxy_info label %q = %q, want %q", name, got, wantValue)
+		}
+	}
+	for _, name := range []string{"target", "probe_type", "service", "scope", "provider", "network_path"} {
+		if got, ok := labels[name]; ok {
+			t.Fatalf("netsonar_target_proxy_info has forbidden label %q=%q", name, got)
+		}
+	}
+}
+
+func findMetricByLabel(t *testing.T, families map[string]*dto.MetricFamily, metricName, labelName, labelValue string) *dto.Metric {
+	t.Helper()
+
+	fam, ok := families[metricName]
+	if !ok {
+		t.Fatalf("%s not found", metricName)
+	}
+	for _, metric := range fam.GetMetric() {
+		if metricLabels(metric)[labelName] == labelValue {
+			return metric
+		}
+	}
+	t.Fatalf("%s series with %s=%q not found", metricName, labelName, labelValue)
+	return nil
+}
+
+func metricLabels(metric *dto.Metric) map[string]string {
+	labels := make(map[string]string, len(metric.GetLabel()))
+	for _, lp := range metric.GetLabel() {
+		labels[lp.GetName()] = lp.GetValue()
+	}
+	return labels
 }
 
 // TestIntegration_GracefulShutdown verifies that calling the shutdown function

@@ -33,7 +33,7 @@ Covered in the basic harness:
 - `http`: expected status match, expected status mismatch, and accept-any status
 - `http`: connection-refused case where HTTP response-derived metrics must stay absent
 - `http_body`: body match, body mismatch, and body match with unexpected status
-- `http` with `proxy_url`: regular HTTP forwarded through the fake proxy
+- `http` with `proxy_name`: regular HTTP forwarded through the fake proxy
 - `proxy_connect`: CONNECT accepted and expected-denied
 - `dns`: resolution, expected-result match, expected-result mismatch, and no-expected absence semantics
 - `icmp`: echo success against the fake target container, including a single-reply case where stddev must stay absent
@@ -62,7 +62,7 @@ If that case reports `probe_success=1`, the agent is overstating health for
 
 The `http-via-proxy` case is separate from the raw CONNECT proxy cases:
 
-- target config uses `probe_type: http` with `proxy_url`
+- target config uses `probe_type: http` with `proxy_name`
 - fake proxy forwards `GET http://fake-targets:8080/ok`
 - expected metrics are `probe_success=1` and `probe_http_status_code=200`
 
@@ -72,13 +72,13 @@ tunnel behaviour.
 
 The `tls-cert-via-proxy` case covers certificate inspection through CONNECT:
 
-- target config uses `probe_type: tls_cert` with `proxy_url`
+- target config uses `probe_type: tls_cert` with `proxy_name`
 - fake proxy opens a CONNECT tunnel to `fake-targets:9443`
 - expected metrics are `probe_success=1` and a populated
   `probe_tls_cert_expiry_timestamp_seconds`
 
 This catches regressions where `tls_cert` targets are labelled with
-`network_path="proxy"` but would accidentally dial the target directly.
+`proxy_name!=""` but would accidentally dial the target directly.
 
 The DNS result-match cases are intentionally paired:
 

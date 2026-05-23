@@ -38,7 +38,7 @@ func TestAllPhasesCoversEmittedPhases(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), httpsTarget.Timeout)
 	defer cancel()
 
-	httpResult := NewHTTPProber(true, true, "").Probe(ctx, httpsTarget)
+	httpResult := NewHTTPProber(true, true, nil).Probe(ctx, httpsTarget)
 	if !httpResult.Success {
 		t.Fatalf("HTTPS probe failed: %s", httpResult.Error)
 	}
@@ -109,11 +109,12 @@ func TestAllPhasesCoversEmittedPhases(t *testing.T) {
 	defer cleanup()
 
 	proxyTarget := config.TargetConfig{
-		Name:      "phases-proxy",
-		Address:   "example.com:443",
-		ProbeType: config.ProbeTypeProxyConnect,
-		Timeout:   5 * time.Second,
-		ProbeOpts: config.ProbeOptions{ProxyURL: "http://" + proxyAddr},
+		Name:          "phases-proxy",
+		Address:       "example.com:443",
+		ProbeType:     config.ProbeTypeProxyConnect,
+		Timeout:       5 * time.Second,
+		ProxyName:     "test-egress",
+		ResolvedProxy: &config.ResolvedProxyConfig{Endpoint: "http://" + proxyAddr},
 	}
 	proxyCtx, proxyCancel := context.WithTimeout(context.Background(), proxyTarget.Timeout)
 	defer proxyCancel()

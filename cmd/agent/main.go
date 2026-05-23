@@ -262,7 +262,7 @@ func newProber(target config.TargetConfig) probe.Prober {
 	case config.ProbeTypeTCP:
 		return &probe.TCPProber{}
 	case config.ProbeTypeHTTP:
-		return probe.NewHTTPProber(target.ProbeOpts.TLSSkipVerify, target.ProbeOpts.FollowRedirects, target.ProbeOpts.ProxyURL)
+		return probe.NewHTTPProber(target.ProbeOpts.TLSSkipVerify, target.ProbeOpts.FollowRedirects, target.ResolvedProxy)
 	case config.ProbeTypeICMP:
 		return &probe.ICMPProber{}
 	case config.ProbeTypeMTU:
@@ -272,7 +272,7 @@ func newProber(target config.TargetConfig) probe.Prober {
 	case config.ProbeTypeTLSCert:
 		return &probe.TLSCertProber{}
 	case config.ProbeTypeHTTPBody:
-		return probe.NewHTTPBodyProber(target.ProbeOpts.TLSSkipVerify, target.ProbeOpts.FollowRedirects, target.ProbeOpts.ProxyURL, target.ProbeOpts.BodyMatchRegex)
+		return probe.NewHTTPBodyProber(target.ProbeOpts.TLSSkipVerify, target.ProbeOpts.FollowRedirects, target.ResolvedProxy, target.ProbeOpts.BodyMatchRegex)
 	case config.ProbeTypeProxyConnect:
 		return &probe.ProxyProber{}
 	default:

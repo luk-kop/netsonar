@@ -607,12 +607,13 @@ func TestTLSCertProber_ProxyTunnelSuccess(t *testing.T) {
 	defer cleanup()
 
 	target := config.TargetConfig{
-		Name:      "test-tls-via-proxy",
-		Address:   targetAddr,
-		ProbeType: config.ProbeTypeTLSCert,
-		Timeout:   5 * time.Second,
+		Name:          "test-tls-via-proxy",
+		Address:       targetAddr,
+		ProbeType:     config.ProbeTypeTLSCert,
+		Timeout:       5 * time.Second,
+		ProxyName:     "test-egress",
+		ResolvedProxy: &config.ResolvedProxyConfig{Endpoint: "http://" + proxyAddr},
 		ProbeOpts: config.ProbeOptions{
-			ProxyURL:      "http://" + proxyAddr,
 			TLSSkipVerify: true,
 		},
 	}
@@ -645,13 +646,12 @@ func TestTLSCertProber_ProxyDefaultPortConnectTarget(t *testing.T) {
 	defer cleanup()
 
 	target := config.TargetConfig{
-		Name:      "test-tls-proxy-default-port",
-		Address:   "example.com",
-		ProbeType: config.ProbeTypeTLSCert,
-		Timeout:   2 * time.Second,
-		ProbeOpts: config.ProbeOptions{
-			ProxyURL: "http://" + proxyAddr,
-		},
+		Name:          "test-tls-proxy-default-port",
+		Address:       "example.com",
+		ProbeType:     config.ProbeTypeTLSCert,
+		Timeout:       2 * time.Second,
+		ProxyName:     "test-egress",
+		ResolvedProxy: &config.ResolvedProxyConfig{Endpoint: "http://" + proxyAddr},
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
@@ -674,13 +674,12 @@ func TestTLSCertProber_ProxyConnectRejectedPreservesPhases(t *testing.T) {
 	defer cleanup()
 
 	target := config.TargetConfig{
-		Name:      "test-tls-proxy-407",
-		Address:   "example.com:443",
-		ProbeType: config.ProbeTypeTLSCert,
-		Timeout:   2 * time.Second,
-		ProbeOpts: config.ProbeOptions{
-			ProxyURL: "http://" + proxyAddr,
-		},
+		Name:          "test-tls-proxy-407",
+		Address:       "example.com:443",
+		ProbeType:     config.ProbeTypeTLSCert,
+		Timeout:       2 * time.Second,
+		ProxyName:     "test-egress",
+		ResolvedProxy: &config.ResolvedProxyConfig{Endpoint: "http://" + proxyAddr},
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
@@ -724,12 +723,13 @@ func TestTLSCertProber_ProxyTunnelHandshakeFailurePreservesPhases(t *testing.T) 
 	defer cleanup()
 
 	target := config.TargetConfig{
-		Name:      "test-tls-proxy-handshake-failure",
-		Address:   ln.Addr().String(),
-		ProbeType: config.ProbeTypeTLSCert,
-		Timeout:   2 * time.Second,
+		Name:          "test-tls-proxy-handshake-failure",
+		Address:       ln.Addr().String(),
+		ProbeType:     config.ProbeTypeTLSCert,
+		Timeout:       2 * time.Second,
+		ProxyName:     "test-egress",
+		ResolvedProxy: &config.ResolvedProxyConfig{Endpoint: "http://" + proxyAddr},
 		ProbeOpts: config.ProbeOptions{
-			ProxyURL:      "http://" + proxyAddr,
 			TLSSkipVerify: true,
 		},
 	}
@@ -762,13 +762,12 @@ func TestTLSCertProber_ProxyDialFailure(t *testing.T) {
 	_ = ln.Close()
 
 	target := config.TargetConfig{
-		Name:      "test-tls-proxy-dial-failure",
-		Address:   "example.com:443",
-		ProbeType: config.ProbeTypeTLSCert,
-		Timeout:   2 * time.Second,
-		ProbeOpts: config.ProbeOptions{
-			ProxyURL: "http://" + proxyAddr,
-		},
+		Name:          "test-tls-proxy-dial-failure",
+		Address:       "example.com:443",
+		ProbeType:     config.ProbeTypeTLSCert,
+		Timeout:       2 * time.Second,
+		ProxyName:     "test-egress",
+		ResolvedProxy: &config.ResolvedProxyConfig{Endpoint: "http://" + proxyAddr},
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)

@@ -92,6 +92,21 @@ func basicProxyAuth(username, password string) string {
 	return "Basic " + token
 }
 
+func testResolvedProxy(endpoint string) *config.ResolvedProxyConfig {
+	return &config.ResolvedProxyConfig{Endpoint: endpoint}
+}
+
+func testResolvedProxyWithTLSSkipVerify(endpoint string) *config.ResolvedProxyConfig {
+	return &config.ResolvedProxyConfig{Endpoint: endpoint, TLSSkipVerify: true}
+}
+
+func testResolvedProxyAuth(endpoint, username, password string) *config.ResolvedProxyConfig {
+	return &config.ResolvedProxyConfig{
+		Endpoint:    endpoint,
+		Credentials: config.NewResolvedProxyCredentials(username, password),
+	}
+}
+
 func mockClosingProxy(t *testing.T) (string, func()) {
 	t.Helper()
 
@@ -120,13 +135,12 @@ func TestProxyProber_Success(t *testing.T) {
 	defer cleanup()
 
 	target := config.TargetConfig{
-		Name:      "test-proxy-success",
-		Address:   "example.com:443",
-		ProbeType: config.ProbeTypeProxyConnect,
-		Timeout:   5 * time.Second,
-		ProbeOpts: config.ProbeOptions{
-			ProxyURL: "http://" + proxyAddr,
-		},
+		Name:          "test-proxy-success",
+		Address:       "example.com:443",
+		ProbeType:     config.ProbeTypeProxyConnect,
+		Timeout:       5 * time.Second,
+		ProxyName:     "test-egress",
+		ResolvedProxy: testResolvedProxy("http://" + proxyAddr),
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
@@ -162,18 +176,17 @@ func TestProxyProber_Success(t *testing.T) {
 	}
 }
 
-func TestProxyProber_SendsProxyAuthorizationFromURLUserinfo(t *testing.T) {
+func TestProxyProber_SendsProxyAuthorizationFromResolvedCredentials(t *testing.T) {
 	proxyAddr, cleanup := mockAuthProxy(t, basicProxyAuth("user", "pass"))
 	defer cleanup()
 
 	target := config.TargetConfig{
-		Name:      "test-proxy-auth",
-		Address:   "example.com:443",
-		ProbeType: config.ProbeTypeProxyConnect,
-		Timeout:   5 * time.Second,
-		ProbeOpts: config.ProbeOptions{
-			ProxyURL: "http://user:pass@" + proxyAddr,
-		},
+		Name:          "test-proxy-auth",
+		Address:       "example.com:443",
+		ProbeType:     config.ProbeTypeProxyConnect,
+		Timeout:       5 * time.Second,
+		ProxyName:     "test-egress",
+		ResolvedProxy: testResolvedProxyAuth("http://"+proxyAddr, "user", "pass"),
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
@@ -192,13 +205,12 @@ func TestProxyProber_SendsProxyAuthorizationWithEmptyPassword(t *testing.T) {
 	defer cleanup()
 
 	target := config.TargetConfig{
-		Name:      "test-proxy-auth-empty-password",
-		Address:   "example.com:443",
-		ProbeType: config.ProbeTypeProxyConnect,
-		Timeout:   5 * time.Second,
-		ProbeOpts: config.ProbeOptions{
-			ProxyURL: "http://user@" + proxyAddr,
-		},
+		Name:          "test-proxy-auth-empty-password",
+		Address:       "example.com:443",
+		ProbeType:     config.ProbeTypeProxyConnect,
+		Timeout:       5 * time.Second,
+		ProxyName:     "test-egress",
+		ResolvedProxy: testResolvedProxyAuth("http://"+proxyAddr, "user", ""),
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
@@ -217,13 +229,12 @@ func TestProxyProber_DoesNotSendProxyAuthorizationWithoutURLUserinfo(t *testing.
 	defer cleanup()
 
 	target := config.TargetConfig{
-		Name:      "test-proxy-no-auth",
-		Address:   "example.com:443",
-		ProbeType: config.ProbeTypeProxyConnect,
-		Timeout:   5 * time.Second,
-		ProbeOpts: config.ProbeOptions{
-			ProxyURL: "http://" + proxyAddr,
-		},
+		Name:          "test-proxy-no-auth",
+		Address:       "example.com:443",
+		ProbeType:     config.ProbeTypeProxyConnect,
+		Timeout:       5 * time.Second,
+		ProxyName:     "test-egress",
+		ResolvedProxy: testResolvedProxy("http://" + proxyAddr),
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
@@ -242,13 +253,12 @@ func TestProxyProber_DoesNotLeakProxyCredentialsInErrors(t *testing.T) {
 	defer cleanup()
 
 	target := config.TargetConfig{
-		Name:      "test-proxy-auth-error-redaction",
-		Address:   "example.com:443",
-		ProbeType: config.ProbeTypeProxyConnect,
-		Timeout:   5 * time.Second,
-		ProbeOpts: config.ProbeOptions{
-			ProxyURL: "http://user:secret@" + proxyAddr,
-		},
+		Name:          "test-proxy-auth-error-redaction",
+		Address:       "example.com:443",
+		ProbeType:     config.ProbeTypeProxyConnect,
+		Timeout:       5 * time.Second,
+		ProxyName:     "test-egress",
+		ResolvedProxy: testResolvedProxyAuth("http://"+proxyAddr, "user", "secret"),
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
@@ -270,13 +280,12 @@ func TestProxyProber_PreservesPhasesOnHTTPSProxyTLSFailure(t *testing.T) {
 	defer cleanup()
 
 	target := config.TargetConfig{
-		Name:      "test-proxy-tls-failure-phases",
-		Address:   "example.com:443",
-		ProbeType: config.ProbeTypeProxyConnect,
-		Timeout:   5 * time.Second,
-		ProbeOpts: config.ProbeOptions{
-			ProxyURL: "https://" + proxyAddr,
-		},
+		Name:          "test-proxy-tls-failure-phases",
+		Address:       "example.com:443",
+		ProbeType:     config.ProbeTypeProxyConnect,
+		Timeout:       5 * time.Second,
+		ProxyName:     "test-egress",
+		ResolvedProxy: testResolvedProxy("https://" + proxyAddr),
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
@@ -306,13 +315,12 @@ func TestProxyProber_ProxyReturnsNon200(t *testing.T) {
 	defer cleanup()
 
 	target := config.TargetConfig{
-		Name:      "test-proxy-non200",
-		Address:   "example.com:443",
-		ProbeType: config.ProbeTypeProxyConnect,
-		Timeout:   5 * time.Second,
-		ProbeOpts: config.ProbeOptions{
-			ProxyURL: "http://" + proxyAddr,
-		},
+		Name:          "test-proxy-non200",
+		Address:       "example.com:443",
+		ProbeType:     config.ProbeTypeProxyConnect,
+		Timeout:       5 * time.Second,
+		ProxyName:     "test-egress",
+		ResolvedProxy: testResolvedProxy("http://" + proxyAddr),
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
@@ -351,12 +359,13 @@ func TestProxyProber_ExpectedProxyConnectStatus(t *testing.T) {
 	defer cleanup()
 
 	target := config.TargetConfig{
-		Name:      "test-proxy-expected-deny",
-		Address:   "example.com:443",
-		ProbeType: config.ProbeTypeProxyConnect,
-		Timeout:   5 * time.Second,
+		Name:          "test-proxy-expected-deny",
+		Address:       "example.com:443",
+		ProbeType:     config.ProbeTypeProxyConnect,
+		Timeout:       5 * time.Second,
+		ProxyName:     "test-egress",
+		ResolvedProxy: testResolvedProxy("http://" + proxyAddr),
 		ProbeOpts: config.ProbeOptions{
-			ProxyURL:                        "http://" + proxyAddr,
 			ExpectedProxyConnectStatusCodes: []int{http.StatusForbidden},
 		},
 	}
@@ -383,12 +392,13 @@ func TestProxyProber_UnexpectedProxyConnectStatus(t *testing.T) {
 	defer cleanup()
 
 	target := config.TargetConfig{
-		Name:      "test-proxy-unexpected-allow",
-		Address:   "example.com:443",
-		ProbeType: config.ProbeTypeProxyConnect,
-		Timeout:   5 * time.Second,
+		Name:          "test-proxy-unexpected-allow",
+		Address:       "example.com:443",
+		ProbeType:     config.ProbeTypeProxyConnect,
+		Timeout:       5 * time.Second,
+		ProxyName:     "test-egress",
+		ResolvedProxy: testResolvedProxy("http://" + proxyAddr),
 		ProbeOpts: config.ProbeOptions{
-			ProxyURL:                        "http://" + proxyAddr,
 			ExpectedProxyConnectStatusCodes: []int{http.StatusForbidden},
 		},
 	}
@@ -410,17 +420,14 @@ func TestProxyProber_UnexpectedProxyConnectStatus(t *testing.T) {
 	}
 }
 
-// TestProxyProber_InvalidProxyURL verifies that an invalid proxy URL
-// results in Success=false with a descriptive error.
-func TestProxyProber_InvalidProxyURL(t *testing.T) {
+// TestProxyProber_MissingResolvedProxy verifies that a target not enriched by
+// config validation fails clearly.
+func TestProxyProber_MissingResolvedProxy(t *testing.T) {
 	target := config.TargetConfig{
 		Name:      "test-proxy-invalid-url",
 		Address:   "example.com:443",
 		ProbeType: config.ProbeTypeProxyConnect,
 		Timeout:   2 * time.Second,
-		ProbeOpts: config.ProbeOptions{
-			ProxyURL: "://not-a-valid-url",
-		},
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
@@ -430,10 +437,10 @@ func TestProxyProber_InvalidProxyURL(t *testing.T) {
 	result := prober.Probe(ctx, target)
 
 	if result.Success {
-		t.Fatal("expected Success=false for invalid proxy URL")
+		t.Fatal("expected Success=false for missing resolved proxy")
 	}
-	if result.Error == "" {
-		t.Fatal("expected non-empty Error for invalid proxy URL")
+	if result.Error != "missing resolved proxy" {
+		t.Fatalf("expected missing resolved proxy error, got %q", result.Error)
 	}
 }
 
@@ -444,13 +451,12 @@ func TestProxyProber_InvalidTargetAddress(t *testing.T) {
 	defer cleanup()
 
 	target := config.TargetConfig{
-		Name:      "test-proxy-invalid-target",
-		Address:   "not-a-url-or-host-port",
-		ProbeType: config.ProbeTypeProxyConnect,
-		Timeout:   2 * time.Second,
-		ProbeOpts: config.ProbeOptions{
-			ProxyURL: "http://" + proxyAddr,
-		},
+		Name:          "test-proxy-invalid-target",
+		Address:       "not-a-url-or-host-port",
+		ProbeType:     config.ProbeTypeProxyConnect,
+		Timeout:       2 * time.Second,
+		ProxyName:     "test-egress",
+		ResolvedProxy: testResolvedProxy("http://" + proxyAddr),
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
@@ -477,13 +483,12 @@ func TestProxyProber_RejectsURLAddress(t *testing.T) {
 	defer cleanup()
 
 	target := config.TargetConfig{
-		Name:      "test-proxy-url-address",
-		Address:   "https://example.com",
-		ProbeType: config.ProbeTypeProxyConnect,
-		Timeout:   2 * time.Second,
-		ProbeOpts: config.ProbeOptions{
-			ProxyURL: "http://" + proxyAddr,
-		},
+		Name:          "test-proxy-url-address",
+		Address:       "https://example.com",
+		ProbeType:     config.ProbeTypeProxyConnect,
+		Timeout:       2 * time.Second,
+		ProxyName:     "test-egress",
+		ResolvedProxy: testResolvedProxy("http://" + proxyAddr),
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)
@@ -512,13 +517,12 @@ func TestProxyProber_ConnectionRefused(t *testing.T) {
 	_ = ln.Close()
 
 	target := config.TargetConfig{
-		Name:      "test-proxy-refused",
-		Address:   "example.com:443",
-		ProbeType: config.ProbeTypeProxyConnect,
-		Timeout:   2 * time.Second,
-		ProbeOpts: config.ProbeOptions{
-			ProxyURL: "http://" + addr,
-		},
+		Name:          "test-proxy-refused",
+		Address:       "example.com:443",
+		ProbeType:     config.ProbeTypeProxyConnect,
+		Timeout:       2 * time.Second,
+		ProxyName:     "test-egress",
+		ResolvedProxy: testResolvedProxy("http://" + addr),
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout)

@@ -60,29 +60,39 @@ type HTTPProber struct {
 	// proxy-aware code path that measures proxy phases (proxy_dial,
 	// proxy_tls, proxy_connect) instead of hiding them inside Go's
 	// default http.Transport.
-	proxyURL *url.URL
+	proxyURL           *url.URL
+	proxyTLSSkipVerify bool
+	proxyAuthHeader    string
 }
 
-// NewHTTPProber creates an HTTPProber with the given TLS/redirect
-// settings. If proxyURL is non-empty, all requests are routed through the
-// specified HTTP proxy. The actual *http.Client is constructed per Probe
-// invocation so the per-target DNS resolver can be injected without
-// sharing a Transport across concurrent probes.
-func NewHTTPProber(tlsSkipVerify bool, followRedirects bool, proxyURL string) *HTTPProber {
+// NewHTTPProber creates an HTTPProber with the given TLS/redirect settings.
+// If proxyCfg is non-nil, all requests are routed through that resolved proxy.
+// The actual *http.Client is constructed per Probe invocation so the per-target
+// DNS resolver can be injected without sharing a Transport across concurrent
+// probes.
+func NewHTTPProber(tlsSkipVerify bool, followRedirects bool, proxyCfg *config.ResolvedProxyConfig) *HTTPProber {
 	tlsCfg := &tls.Config{
 		InsecureSkipVerify: tlsSkipVerify,
 	}
 
 	var parsedProxy *url.URL
-	if proxyURL != "" {
-		parsedProxy = mustProxyURL("NewHTTPProber", proxyURL)
+	proxyTLSSkipVerify := false
+	proxyAuthHeader := ""
+	if proxyCfg != nil {
+		parsedProxy = mustProxyEndpoint("NewHTTPProber", proxyCfg.Endpoint)
+		proxyTLSSkipVerify = proxyCfg.TLSSkipVerify
+		if header, ok := proxyCfg.Credentials.BasicAuthHeader(); ok {
+			proxyAuthHeader = header
+		}
 	}
 
 	return &HTTPProber{
-		tlsConfig:       tlsCfg,
-		tlsSkipVerify:   tlsSkipVerify,
-		followRedirects: followRedirects,
-		proxyURL:        parsedProxy,
+		tlsConfig:          tlsCfg,
+		tlsSkipVerify:      tlsSkipVerify,
+		followRedirects:    followRedirects,
+		proxyURL:           parsedProxy,
+		proxyTLSSkipVerify: proxyTLSSkipVerify,
+		proxyAuthHeader:    proxyAuthHeader,
 	}
 }
 
@@ -98,6 +108,7 @@ func NewHTTPProber(tlsSkipVerify bool, followRedirects bool, proxyURL string) *H
 func (p *HTTPProber) newClient(resolver *net.Resolver) *http.Client {
 	transport := &http.Transport{
 		DisableKeepAlives: true,
+		Proxy:             nil,
 		TLSClientConfig:   p.tlsConfig.Clone(),
 		DialContext: (&net.Dialer{
 			Resolver: resolver,
@@ -292,7 +303,7 @@ func (p *HTTPProber) probeViaProxy(ctx context.Context, target config.TargetConf
 	resolver := resolverFor(target.DNSResolver)
 	hop := 0
 	for {
-		exchange = executeProxyHTTPExchange(ctx, p.proxyURL, currentURL, currentMethod, currentHeaders, currentBody, p.tlsSkipVerify, resolver)
+		exchange = executeProxyHTTPExchange(ctx, p.proxyURL, currentURL, currentMethod, currentHeaders, currentBody, p.proxyTLSSkipVerify, p.tlsSkipVerify, p.proxyAuthHeader, resolver)
 
 		if exchange.connectResp.Observed && !result.ProxyConnectResponseReceived {
 			// Preserve the first observed CONNECT status — subsequent

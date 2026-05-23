@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1084,7 +1085,7 @@ targets:
 	}
 }
 
-func TestLoadConfig_ProxyWithoutProxyURL(t *testing.T) {
+func TestLoadConfig_ProxyConnectRequiresProxyName(t *testing.T) {
 	yaml := `
 agent:
   default_interval: 30s
@@ -1097,29 +1098,32 @@ targets:
 `
 	_, err := LoadConfig(writeConfigFile(t, yaml))
 	if err == nil {
-		t.Fatal("expected error for proxy without proxy_url, got nil")
+		t.Fatal("expected error for proxy_connect without proxy_name, got nil")
 	}
-	if !strings.Contains(err.Error(), "proxy_url") {
-		t.Errorf("error = %q, want it to mention proxy_url", err.Error())
+	if !strings.Contains(err.Error(), "proxy_name") {
+		t.Errorf("error = %q, want it to mention proxy_name", err.Error())
 	}
 }
 
-func TestLoadConfig_ProxyWithProxyURL(t *testing.T) {
+func TestLoadConfig_ProxyConnectWithProxyName(t *testing.T) {
 	yaml := `
 agent:
   default_interval: 30s
+
+proxies:
+  infra-egress:
+    url: "http://proxy.internal:8888"
 
 targets:
   - name: "proxy-ok"
     address: "example.com:443"
     probe_type: proxy_connect
     timeout: 5s
-    probe_opts:
-      proxy_url: "http://proxy.internal:8888"
+    proxy_name: infra-egress
 `
 	_, err := LoadConfig(writeConfigFile(t, yaml))
 	if err != nil {
-		t.Fatalf("expected no error for proxy with proxy_url, got: %v", err)
+		t.Fatalf("expected no error for proxy_connect with proxy_name, got: %v", err)
 	}
 }
 
@@ -1128,13 +1132,16 @@ func TestLoadConfig_ProxyConnectRequiresHostPortAddress(t *testing.T) {
 agent:
   default_interval: 30s
 
+proxies:
+  infra-egress:
+    url: "http://proxy.internal:8888"
+
 targets:
   - name: "proxy-connect-url-address"
     address: "https://example.com"
     probe_type: proxy_connect
     timeout: 5s
-    probe_opts:
-      proxy_url: "http://proxy.internal:8888"
+    proxy_name: infra-egress
 `
 	_, err := LoadConfig(writeConfigFile(t, yaml))
 	if err == nil {
@@ -1188,19 +1195,19 @@ func httpBodyMatchOpt(probeType string) string {
 	return ""
 }
 
-func TestLoadConfig_ValidProxyURLs(t *testing.T) {
+func TestLoadConfig_ValidProxyRegistryReferences(t *testing.T) {
 	tests := []struct {
-		name      string
-		probeType string
-		proxyURL  string
+		name         string
+		probeType    string
+		proxyURL     string
+		wantEndpoint string
 	}{
-		{"http no port", "http", "http://proxy.internal"},
-		{"http root path", "http", "http://proxy.internal/"},
-		{"http with port", "http", "http://proxy.internal:8888"},
-		{"https with port", "http_body", "https://proxy.internal:443"},
-		{"userinfo", "http", "http://user:pass@proxy.internal:8080"},
-		{"tls cert", "tls_cert", "http://proxy.internal:8888"},
-		{"ipv6 bracketed", "proxy_connect", "http://[::1]:8080"},
+		{"http no port", "http", "http://proxy.internal", "http://proxy.internal"},
+		{"http with port", "http", "http://proxy.internal:8888", "http://proxy.internal:8888"},
+		{"https with port", "http_body", "https://proxy.internal:443", "https://proxy.internal:443"},
+		{"tls cert", "tls_cert", "http://proxy.internal:8888", "http://proxy.internal:8888"},
+		{"ipv6 bracketed", "proxy_connect", "http://[::1]:8080", "http://[::1]:8080"},
+		{"canonical casing", "http", "HTTP://Proxy.Internal:8888", "http://proxy.internal:8888"},
 	}
 
 	for _, tt := range tests {
@@ -1213,23 +1220,30 @@ func TestLoadConfig_ValidProxyURLs(t *testing.T) {
 agent:
   default_interval: 30s
 
+proxies:
+  infra-egress:
+    url: %q
+
 targets:
   - name: "proxy-url-ok"
     address: %q
     probe_type: %s
     timeout: 5s
+    proxy_name: infra-egress
     probe_opts:
-      proxy_url: %q
-%s`, address, tt.probeType, tt.proxyURL, httpBodyMatchOpt(tt.probeType))
-			_, err := LoadConfig(writeConfigFile(t, yaml))
+%s`, tt.proxyURL, address, tt.probeType, httpBodyMatchOpt(tt.probeType))
+			cfg, err := LoadConfig(writeConfigFile(t, yaml))
 			if err != nil {
-				t.Fatalf("expected no error for proxy_url %q, got: %v", tt.proxyURL, err)
+				t.Fatalf("expected no error for proxy url %q, got: %v", tt.proxyURL, err)
+			}
+			if got := cfg.Proxies["infra-egress"].Endpoint; got != tt.wantEndpoint {
+				t.Fatalf("endpoint = %q, want %q", got, tt.wantEndpoint)
 			}
 		})
 	}
 }
 
-func TestLoadConfig_InvalidProxyURLs(t *testing.T) {
+func TestLoadConfig_InvalidProxyRegistryURLs(t *testing.T) {
 	tests := []struct {
 		name      string
 		probeType string
@@ -1243,11 +1257,13 @@ func TestLoadConfig_InvalidProxyURLs(t *testing.T) {
 		{"invalid port", "http", "http://proxy.internal:abc", "not a valid absolute URL"},
 		{"port out of range", "http", "http://proxy.internal:99999", "port must be in range 1-65535"},
 		{"zero port", "http_body", "http://proxy.internal:0", "port must be in range 1-65535"},
+		{"root path", "http", "http://proxy.internal/", "path is not allowed"},
 		{"path", "http", "http://proxy.internal:8080/foo", "path is not allowed"},
 		{"query", "http", "http://proxy.internal:8080?x=y", "query is not allowed"},
 		{"fragment", "proxy_connect", "http://proxy.internal:8080#frag", "not a valid absolute URL"},
 		{"ipv6 without brackets", "http", "http://::1:8080", "not a valid absolute URL"},
 		{"tls cert unsupported scheme", "tls_cert", "socks5://proxy.internal:1080", "scheme must be http or https"},
+		{"userinfo", "http", "http://user:pass@proxy.internal:8080", "userinfo is not supported"},
 	}
 
 	for _, tt := range tests {
@@ -1260,17 +1276,21 @@ func TestLoadConfig_InvalidProxyURLs(t *testing.T) {
 agent:
   default_interval: 30s
 
+proxies:
+  infra-egress:
+    url: %q
+
 targets:
   - name: "proxy-url-bad"
     address: %q
     probe_type: %s
     timeout: 5s
+    proxy_name: infra-egress
     probe_opts:
-      proxy_url: %q
-%s`, address, tt.probeType, tt.proxyURL, httpBodyMatchOpt(tt.probeType))
+%s`, tt.proxyURL, address, tt.probeType, httpBodyMatchOpt(tt.probeType))
 			_, err := LoadConfig(writeConfigFile(t, yaml))
 			if err == nil {
-				t.Fatalf("expected error for proxy_url %q, got nil", tt.proxyURL)
+				t.Fatalf("expected error for proxy url %q, got nil", tt.proxyURL)
 			}
 			if !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("error = %q, want it to contain %q", err.Error(), tt.want)
@@ -1279,7 +1299,7 @@ targets:
 	}
 }
 
-func TestLoadConfig_ProxyURLEmptyAllowedForUnsupportedProbeTypes(t *testing.T) {
+func TestLoadConfig_ProxyNameOmittedAllowedForUnsupportedProbeTypes(t *testing.T) {
 	tests := []struct {
 		name      string
 		probeType string
@@ -1302,18 +1322,16 @@ targets:
     address: "%s"
     probe_type: %s
     timeout: 5s
-    probe_opts:
-      proxy_url: ""
 `, tt.probeType, tt.address, tt.probeType)
 			_, err := LoadConfig(writeConfigFile(t, yaml))
 			if err != nil {
-				t.Fatalf("expected no error for empty proxy_url on %s, got: %v", tt.probeType, err)
+				t.Fatalf("expected no error for omitted proxy_name on %s, got: %v", tt.probeType, err)
 			}
 		})
 	}
 }
 
-func TestLoadConfig_ProxyURLRejectedForUnsupportedProbeTypes(t *testing.T) {
+func TestLoadConfig_ProxyNameRejectedForUnsupportedProbeTypes(t *testing.T) {
 	tests := []struct {
 		name      string
 		probeType string
@@ -1330,26 +1348,29 @@ func TestLoadConfig_ProxyURLRejectedForUnsupportedProbeTypes(t *testing.T) {
 agent:
   default_interval: 30s
 
+proxies:
+  infra-egress:
+    url: "http://proxy.internal:8888"
+
 targets:
   - name: "%s-proxy-url"
     address: "example.com"
     probe_type: %s
     timeout: 5s
-    probe_opts:
-      proxy_url: "http://proxy.internal:8888"
+    proxy_name: infra-egress
 `, tt.probeType, tt.probeType)
 			_, err := LoadConfig(writeConfigFile(t, yaml))
 			if err == nil {
-				t.Fatalf("expected error for proxy_url on %s, got nil", tt.probeType)
+				t.Fatalf("expected error for proxy_name on %s, got nil", tt.probeType)
 			}
-			if !strings.Contains(err.Error(), "does not support 'proxy_url'") {
-				t.Fatalf("error = %q, want unsupported proxy_url error", err.Error())
+			if !strings.Contains(err.Error(), "does not support 'proxy_name'") {
+				t.Fatalf("error = %q, want unsupported proxy_name error", err.Error())
 			}
 		})
 	}
 }
 
-func TestLoadConfig_InvalidProxyURLDoesNotLeakCredentials(t *testing.T) {
+func TestLoadConfig_ProxyURLFieldRejected(t *testing.T) {
 	yaml := `
 agent:
   default_interval: 30s
@@ -1360,17 +1381,240 @@ targets:
     probe_type: http
     timeout: 5s
     probe_opts:
-      proxy_url: "ftp://user:secret-password@proxy.internal:21"
+      proxy_url: "http://proxy.internal:8888"
 `
 	_, err := LoadConfig(writeConfigFile(t, yaml))
 	if err == nil {
-		t.Fatal("expected error for invalid proxy_url scheme, got nil")
+		t.Fatal("expected error for removed proxy_url field, got nil")
 	}
-	if strings.Contains(err.Error(), "secret-password") {
-		t.Fatalf("error leaked proxy credentials: %q", err.Error())
+	if !strings.Contains(err.Error(), "field proxy_url not found") {
+		t.Fatalf("error = %q, want known-fields rejection", err.Error())
 	}
-	if !strings.Contains(err.Error(), "xxxxx") {
-		t.Fatalf("error = %q, want redacted credentials marker", err.Error())
+}
+
+func TestLoadConfig_ProxyRegistryValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{
+			name: "unknown proxy lists sorted known names",
+			yaml: `
+agent:
+  default_interval: 30s
+proxies:
+  z-egress:
+    url: "http://z-proxy.internal:8888"
+  a-egress:
+    url: "http://a-proxy.internal:8888"
+targets:
+  - name: "http-via-missing-proxy"
+    address: "https://example.com"
+    probe_type: http
+    timeout: 5s
+    proxy_name: missing-egress
+`,
+			want: `known proxies: a-egress, z-egress`,
+		},
+		{
+			name: "invalid proxy name syntax",
+			yaml: `
+agent:
+  default_interval: 30s
+proxies:
+  Infra_Egress:
+    url: "http://proxy.internal:8888"
+targets:
+  - name: "http-direct"
+    address: "https://example.com"
+    probe_type: http
+    timeout: 5s
+`,
+			want: "proxy_name must match",
+		},
+		{
+			name: "duplicate canonical endpoint",
+			yaml: `
+agent:
+  default_interval: 30s
+proxies:
+  a-egress:
+    url: "HTTP://Proxy.Internal:8888"
+  b-egress:
+    url: "http://proxy.internal:8888"
+targets:
+  - name: "http-direct"
+    address: "https://example.com"
+    probe_type: http
+    timeout: 5s
+`,
+			want: `registered by both proxy "a-egress" and proxy "b-egress"`,
+		},
+		{
+			name: "tls skip verify on http proxy",
+			yaml: `
+agent:
+  default_interval: 30s
+proxies:
+  infra-egress:
+    url: "http://proxy.internal:8888"
+    tls_skip_verify: true
+targets:
+  - name: "http-direct"
+    address: "https://example.com"
+    probe_type: http
+    timeout: 5s
+`,
+			want: "proxy TLS verification only applies to https:// proxies",
+		},
+		{
+			name: "inline password rejected",
+			yaml: `
+agent:
+  default_interval: 30s
+proxies:
+  infra-egress:
+    url: "http://proxy.internal:8888"
+    username: "user"
+    password: "secret"
+targets:
+  - name: "http-direct"
+    address: "https://example.com"
+    probe_type: http
+    timeout: 5s
+`,
+			want: "field password not found",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := LoadConfig(writeConfigFile(t, tt.yaml))
+			if err == nil {
+				t.Fatal("expected proxy registry validation error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %q, want substring %q", err.Error(), tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadConfig_ProxyAuthValidation(t *testing.T) {
+	missingPath := filepath.Join(t.TempDir(), "missing")
+	emptyPath := filepath.Join(t.TempDir(), "empty")
+	if err := os.WriteFile(emptyPath, []byte("\r\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name  string
+		extra string
+		env   map[string]string
+		want  string
+	}{
+		{
+			name:  "username and username_env",
+			extra: "    username: user\n    username_env: NETSONAR_PROXY_USER\n    password_env: NETSONAR_PROXY_PASS\n",
+			env:   map[string]string{"NETSONAR_PROXY_USER": "user", "NETSONAR_PROXY_PASS": "pass"},
+			want:  "cannot set both username and username_env",
+		},
+		{
+			name:  "username_env and username_file",
+			extra: fmt.Sprintf("    username_env: NETSONAR_PROXY_USER\n    username_file: %q\n    password_env: NETSONAR_PROXY_PASS\n", missingPath),
+			env:   map[string]string{"NETSONAR_PROXY_USER": "user", "NETSONAR_PROXY_PASS": "pass"},
+			want:  "cannot set both username_env and username_file",
+		},
+		{
+			name:  "password_env and password_file",
+			extra: fmt.Sprintf("    username: user\n    password_env: NETSONAR_PROXY_PASS\n    password_file: %q\n", missingPath),
+			env:   map[string]string{"NETSONAR_PROXY_PASS": "pass"},
+			want:  "cannot set both password_env and password_file",
+		},
+		{
+			name:  "username without password",
+			extra: "    username: user\n",
+			want:  "username is set but no password source",
+		},
+		{
+			name:  "password without username",
+			extra: "    password_env: NETSONAR_PROXY_PASS\n",
+			env:   map[string]string{"NETSONAR_PROXY_PASS": "pass"},
+			want:  "password_env is set but no username source",
+		},
+		{
+			name:  "missing password env",
+			extra: "    username: user\n    password_env: NETSONAR_PROXY_PASS_MISSING\n",
+			want:  `password_env "NETSONAR_PROXY_PASS_MISSING" is not set or empty`,
+		},
+		{
+			name:  "relative password file",
+			extra: "    username: user\n    password_file: relative/path\n",
+			want:  `password_file "relative/path" must be an absolute path`,
+		},
+		{
+			name:  "missing password file",
+			extra: fmt.Sprintf("    username: user\n    password_file: %q\n", missingPath),
+			want:  "does not exist",
+		},
+		{
+			name:  "empty password file",
+			extra: fmt.Sprintf("    username: user\n    password_file: %q\n", emptyPath),
+			want:  "is empty after trimming trailing newlines",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for k, v := range tt.env {
+				t.Setenv(k, v)
+			}
+			yaml := fmt.Sprintf(`
+agent:
+  default_interval: 30s
+proxies:
+  infra-egress:
+    url: "http://proxy.internal:8888"
+%s
+targets:
+  - name: "http-direct"
+    address: "https://example.com"
+    probe_type: http
+    timeout: 5s
+`, tt.extra)
+			_, err := LoadConfig(writeConfigFile(t, yaml))
+			if err == nil {
+				t.Fatal("expected proxy auth validation error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %q, want substring %q", err.Error(), tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadConfig_ProxyRegistryMaxEntries(t *testing.T) {
+	var proxies strings.Builder
+	for i := 0; i < MaxProxies+1; i++ {
+		fmt.Fprintf(&proxies, "  proxy-%02d:\n    url: \"http://proxy-%02d.internal:8888\"\n", i, i)
+	}
+	yaml := fmt.Sprintf(`
+agent:
+  default_interval: 30s
+proxies:
+%stargets:
+  - name: "http-direct"
+    address: "https://example.com"
+    probe_type: http
+    timeout: 5s
+`, proxies.String())
+	_, err := LoadConfig(writeConfigFile(t, yaml))
+	if err == nil {
+		t.Fatal("expected max proxies validation error, got nil")
+	}
+	if !strings.Contains(err.Error(), "guardrail catches configuration-generation mistakes") {
+		t.Fatalf("error = %q, want guardrail wording", err.Error())
 	}
 }
 
@@ -1501,7 +1745,7 @@ func TestLoadConfig_AllProbeTypes(t *testing.T) {
 		{"dns-t", "dns", "example.com:443", "\n    probe_opts:\n      dns_query_name: example.com\n      dns_query_type: A"},
 		{"tls-t", "tls_cert", "example.com:443", ""},
 		{"body-t", "http_body", "example.com:443", "\n    probe_opts:\n      body_match_string: \"ok\""},
-		{"proxy-t", "proxy_connect", "example.com:443", "\n    probe_opts:\n      proxy_url: http://proxy:8888"},
+		{"proxy-t", "proxy_connect", "example.com:443", "\n    proxy_name: infra-egress"},
 	}
 
 	var targets strings.Builder
@@ -1515,7 +1759,7 @@ func TestLoadConfig_AllProbeTypes(t *testing.T) {
 		}
 	}
 
-	yaml := "agent:\n  default_interval: 30s\n\ntargets:\n" + targets.String()
+	yaml := "agent:\n  default_interval: 30s\n\nproxies:\n  infra-egress:\n    url: http://proxy:8888\n\ntargets:\n" + targets.String()
 
 	cfg, err := LoadConfig(writeConfigFile(t, yaml))
 	if err != nil {
@@ -1727,7 +1971,7 @@ targets:
     probe_type: tcp
     timeout: 5s
     tags:
-      network_path: "proxy"
+      proxy_name: "infra-egress"
 `
 	_, err := LoadConfig(writeConfigFile(t, yaml))
 	if err == nil {
@@ -1947,13 +2191,17 @@ func TestLoadConfig_ExpectedStatusCodesRejectedForProxyConnect(t *testing.T) {
 agent:
   default_interval: 30s
 
+proxies:
+  infra-egress:
+    url: "http://proxy.internal:8888"
+
 targets:
   - name: "proxy-connect-bad-status-field"
     address: "example.com:443"
     probe_type: proxy_connect
     timeout: 5s
+    proxy_name: infra-egress
     probe_opts:
-      proxy_url: "http://proxy.internal:8888"
       expected_status_codes: [403]
 `
 	_, err := LoadConfig(writeConfigFile(t, yaml))
@@ -2101,13 +2349,17 @@ func TestLoadConfig_ExpectedProxyConnectStatusCodes(t *testing.T) {
 agent:
   default_interval: 30s
 
+proxies:
+  infra-egress:
+    url: "http://proxy.internal:8888"
+
 targets:
   - name: "proxy-connect-expected-deny"
     address: "example.com:443"
     probe_type: proxy_connect
     timeout: 5s
+    proxy_name: infra-egress
     probe_opts:
-      proxy_url: "http://proxy.internal:8888"
       expected_proxy_connect_status_codes: [403]
 `
 		_, err := LoadConfig(writeConfigFile(t, yaml))
@@ -2121,13 +2373,17 @@ targets:
 agent:
   default_interval: 30s
 
+proxies:
+  infra-egress:
+    url: "http://proxy.internal:8888"
+
 targets:
   - name: "proxy-connect-bad-code"
     address: "example.com:443"
     probe_type: proxy_connect
     timeout: 5s
+    proxy_name: infra-egress
     probe_opts:
-      proxy_url: "http://proxy.internal:8888"
       expected_proxy_connect_status_codes: [99]
 `
 		_, err := LoadConfig(writeConfigFile(t, yaml))
@@ -2160,6 +2416,153 @@ targets:
 			t.Fatalf("error = %q, want proxy_connect-only error", err.Error())
 		}
 	})
+}
+
+func TestProxyHashUsesCanonicalEndpointAndSourceReferences(t *testing.T) {
+	writeSecret := func(t *testing.T, value string) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "proxy-pass")
+		if err := os.WriteFile(path, []byte(value), 0o600); err != nil {
+			t.Fatalf("write secret: %v", err)
+		}
+		return path
+	}
+	passwordPath := writeSecret(t, "secret-one\n")
+
+	baseYAML := func(proxyURL, extra string) string {
+		return fmt.Sprintf(`
+agent:
+  default_interval: 30s
+
+proxies:
+  infra-egress:
+    url: %q
+%s
+
+targets:
+  - name: "http-via-proxy"
+    address: "https://example.com"
+    probe_type: http
+    timeout: 5s
+    proxy_name: infra-egress
+`, proxyURL, extra)
+	}
+
+	load := func(y string) *Config {
+		t.Helper()
+		cfg, err := LoadConfig(writeConfigFile(t, y))
+		if err != nil {
+			t.Fatalf("LoadConfig: %v\n%s", err, y)
+		}
+		return cfg
+	}
+	hash := func(cfg *Config) string {
+		t.Helper()
+		h, err := ComputeHash(cfg)
+		if err != nil {
+			t.Fatalf("ComputeHash: %v", err)
+		}
+		return h
+	}
+	targetHash := func(cfg *Config) string {
+		t.Helper()
+		h, err := HashTarget(&cfg.Targets[0])
+		if err != nil {
+			t.Fatalf("HashTarget: %v", err)
+		}
+		return h
+	}
+
+	t.Setenv("NETSONAR_PROXY_USER", "user-one")
+	t.Setenv("NETSONAR_PROXY_USER_2", "user-one")
+
+	base := load(baseYAML("HTTP://Proxy.Internal:8888", fmt.Sprintf("    username_env: NETSONAR_PROXY_USER\n    password_file: %q", passwordPath)))
+	sameCanonical := load(baseYAML("http://proxy.internal:8888", fmt.Sprintf("    username_env: NETSONAR_PROXY_USER\n    password_file: %q", passwordPath)))
+	if hash(base) != hash(sameCanonical) {
+		t.Fatal("config hash changed for endpoint casing-only change")
+	}
+	if targetHash(base) != targetHash(sameCanonical) {
+		t.Fatal("target hash changed for endpoint casing-only change")
+	}
+
+	withExplicitDefaultPort := load(baseYAML("http://proxy.internal:80", fmt.Sprintf("    username_env: NETSONAR_PROXY_USER\n    password_file: %q", passwordPath)))
+	if hash(base) == hash(withExplicitDefaultPort) {
+		t.Fatal("config hash did not change when canonical proxy endpoint changed")
+	}
+	if targetHash(base) == targetHash(withExplicitDefaultPort) {
+		t.Fatal("target hash did not change when resolved proxy endpoint changed")
+	}
+
+	tlsChanged := load(baseYAML("https://proxy.internal:8888", fmt.Sprintf("    tls_skip_verify: true\n    username_env: NETSONAR_PROXY_USER\n    password_file: %q", passwordPath)))
+	if hash(base) == hash(tlsChanged) {
+		t.Fatal("config hash did not change when proxy tls_skip_verify changed")
+	}
+	if targetHash(base) == targetHash(tlsChanged) {
+		t.Fatal("target hash did not change when resolved proxy tls_skip_verify changed")
+	}
+
+	sourceChanged := load(baseYAML("http://proxy.internal:8888", fmt.Sprintf("    username_env: NETSONAR_PROXY_USER_2\n    password_file: %q", passwordPath)))
+	if hash(base) == hash(sourceChanged) {
+		t.Fatal("config hash did not change when proxy auth source reference changed")
+	}
+	if targetHash(base) == targetHash(sourceChanged) {
+		t.Fatal("target hash did not change when resolved proxy auth source reference changed")
+	}
+
+	beforeConfigHash := hash(base)
+	beforeTargetHash := targetHash(base)
+	t.Setenv("NETSONAR_PROXY_USER", "user-two")
+	if err := os.WriteFile(passwordPath, []byte("secret-two\n"), 0o600); err != nil {
+		t.Fatalf("rewrite secret: %v", err)
+	}
+	secretChanged := load(baseYAML("http://proxy.internal:8888", fmt.Sprintf("    username_env: NETSONAR_PROXY_USER\n    password_file: %q", passwordPath)))
+	if beforeConfigHash != hash(secretChanged) {
+		t.Fatal("config hash changed when only resolved env/file credential values changed")
+	}
+	if beforeTargetHash != targetHash(secretChanged) {
+		t.Fatal("target hash changed when only resolved env/file credential values changed")
+	}
+}
+
+func TestLoadConfig_ProxyCredentialsTrimTrailingNewlinesOnly(t *testing.T) {
+	dir := t.TempDir()
+	usernameFile := filepath.Join(dir, "user")
+	passwordFile := filepath.Join(dir, "pass")
+	if err := os.WriteFile(usernameFile, []byte(" user\tname \r\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(passwordFile, []byte("\tpass word \n\r"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(writeConfigFile(t, fmt.Sprintf(`
+agent:
+  default_interval: 30s
+
+proxies:
+  infra-egress:
+    url: "http://proxy.internal:8888"
+    username_file: %q
+    password_file: %q
+
+targets:
+  - name: "http-via-proxy"
+    address: "https://example.com"
+    probe_type: http
+    timeout: 5s
+    proxy_name: infra-egress
+`, usernameFile, passwordFile)))
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	header, ok := cfg.Targets[0].ResolvedProxy.Credentials.BasicAuthHeader()
+	if !ok {
+		t.Fatal("expected resolved proxy auth header")
+	}
+	want := "Basic " + base64.StdEncoding.EncodeToString([]byte(" user\tname :\tpass word "))
+	if header != want {
+		t.Fatalf("auth header = %q, want %q", header, want)
+	}
 }
 
 func TestLoadConfig_HTTPResponseBodyLimitBytes(t *testing.T) {

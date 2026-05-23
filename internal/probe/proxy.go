@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"netsonar/internal/config"
-	"netsonar/internal/proxyurl"
 )
 
 // ProxyProber probes connectivity through an HTTP CONNECT proxy by
@@ -19,11 +18,11 @@ import (
 type ProxyProber struct{}
 
 // Probe establishes an HTTP CONNECT tunnel through the configured proxy
-// (target.ProbeOpts.ProxyURL) to target.Address and measures the total
+// (target.ProxyName / target.ResolvedProxy) to target.Address and measures the total
 // tunnel establishment duration.
 //
 // Preconditions:
-//   - target.ProbeOpts.ProxyURL is a valid HTTP proxy URL
+//   - target.ResolvedProxy is populated by config loading
 //   - target.Address is a valid host:port tunnel destination
 //   - ctx carries the probe timeout (set by the scheduler)
 //
@@ -36,11 +35,12 @@ type ProxyProber struct{}
 //   - All connections are closed before returning
 //   - result.Error is non-empty when Success is false
 func (p *ProxyProber) Probe(ctx context.Context, target config.TargetConfig) (result ProbeResult) {
-	proxyURL, err := proxyurl.Parse(target.ProbeOpts.ProxyURL)
-	if err != nil {
-		result.Error = fmt.Sprintf("invalid proxy_url: %s", err.Error())
+	if target.ResolvedProxy == nil {
+		result.Error = "missing resolved proxy"
 		return result
 	}
+	proxyURL := mustProxyEndpoint("ProxyProber", target.ResolvedProxy.Endpoint)
+	proxyAuthHeader, _ := target.ResolvedProxy.Credentials.BasicAuthHeader()
 
 	// Determine the tunnel destination from target.Address.
 	tunnelDest, err := parseTunnelDestination(target.Address)
@@ -50,7 +50,7 @@ func (p *ProxyProber) Probe(ctx context.Context, target config.TargetConfig) (re
 	}
 
 	start := time.Now()
-	tunnel, err := dialProxyTunnel(ctx, proxyURL, tunnelDest, false, resolverFor(target.DNSResolver))
+	tunnel, err := dialProxyTunnel(ctx, proxyURL, tunnelDest, target.ResolvedProxy.TLSSkipVerify, proxyAuthHeader, resolverFor(target.DNSResolver))
 	result.Duration = time.Since(start)
 	if len(tunnel.phases) > 0 {
 		result.Phases = tunnel.phases

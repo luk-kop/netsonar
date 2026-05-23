@@ -5,7 +5,6 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
-	"encoding/base64"
 	"fmt"
 	"net"
 	"net/http"
@@ -38,16 +37,13 @@ type proxyTunnelResult struct {
 // owns the returned connection on success and must close it.
 //
 // proxyTLSSkipVerify controls whether the proxy TLS hop (only for https://
-// proxy URLs) skips certificate verification. Callers routing through an
-// HTTPS proxy with a self-signed or untrusted certificate set this to true
-// to match the `tls_skip_verify` probe option; proxy_connect and tls_cert
-// preserve the original behavior (false) because they never exposed a
-// proxy-TLS skip knob.
+// proxy endpoints) skips certificate verification. It comes from the selected
+// proxy registry entry, not from target probe_opts.tls_skip_verify.
 //
 // resolver overrides the DNS path used to resolve the proxy hostname.
 // Callers pass net.DefaultResolver (or BuildResolver("")) for the system
 // path, or BuildResolver("ip:port") to pin lookups to a specific server.
-func dialProxyTunnel(ctx context.Context, proxyURL *url.URL, tunnelDest string, proxyTLSSkipVerify bool, resolver *net.Resolver) (proxyTunnelResult, error) {
+func dialProxyTunnel(ctx context.Context, proxyURL *url.URL, tunnelDest string, proxyTLSSkipVerify bool, proxyAuthHeader string, resolver *net.Resolver) (proxyTunnelResult, error) {
 	if resolver == nil {
 		resolver = net.DefaultResolver
 	}
@@ -107,7 +103,7 @@ func dialProxyTunnel(ctx context.Context, proxyURL *url.URL, tunnelDest string, 
 		Header: make(http.Header),
 	}
 	connectReq = connectReq.WithContext(ctx)
-	setProxyAuthorization(connectReq, proxyURL)
+	setProxyAuthorization(connectReq, proxyAuthHeader)
 
 	connectStart := time.Now()
 	if err := connectReq.Write(proxyConn); err != nil {
@@ -151,15 +147,10 @@ func hostPortForURL(u *url.URL) string {
 	return net.JoinHostPort(u.Hostname(), port)
 }
 
-// setProxyAuthorization applies Basic proxy authentication from proxy URL
-// userinfo. A username without a password is encoded as "user:".
-func setProxyAuthorization(req *http.Request, proxyURL *url.URL) {
-	if proxyURL.User == nil {
+// setProxyAuthorization applies a pre-resolved Proxy-Authorization header.
+func setProxyAuthorization(req *http.Request, proxyAuthHeader string) {
+	if proxyAuthHeader == "" {
 		return
 	}
-
-	username := proxyURL.User.Username()
-	password, _ := proxyURL.User.Password()
-	auth := username + ":" + password
-	req.Header.Set("Proxy-Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(auth)))
+	req.Header.Set("Proxy-Authorization", proxyAuthHeader)
 }

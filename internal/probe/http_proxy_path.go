@@ -57,14 +57,16 @@ type proxyPhaseTrace struct {
 func setupProxyHTTPConn(
 	ctx context.Context,
 	proxyURL, targetURL *url.URL,
-	tlsSkipVerify bool,
+	proxyTLSSkipVerify bool,
+	targetTLSSkipVerify bool,
+	proxyAuthHeader string,
 	resolver *net.Resolver,
 ) (net.Conn, proxyPhaseTrace, error) {
 	switch targetURL.Scheme {
 	case "https":
-		return setupProxyTLSConn(ctx, proxyURL, targetURL, tlsSkipVerify, resolver)
+		return setupProxyTLSConn(ctx, proxyURL, targetURL, proxyTLSSkipVerify, targetTLSSkipVerify, proxyAuthHeader, resolver)
 	case "http":
-		return setupProxyPlainConn(ctx, proxyURL, tlsSkipVerify, resolver)
+		return setupProxyPlainConn(ctx, proxyURL, proxyTLSSkipVerify, resolver)
 	default:
 		return nil, proxyPhaseTrace{}, fmt.Errorf("unsupported target URL scheme %q for proxy path", targetURL.Scheme)
 	}
@@ -73,11 +75,13 @@ func setupProxyHTTPConn(
 func setupProxyTLSConn(
 	ctx context.Context,
 	proxyURL, targetURL *url.URL,
-	tlsSkipVerify bool,
+	proxyTLSSkipVerify bool,
+	targetTLSSkipVerify bool,
+	proxyAuthHeader string,
 	resolver *net.Resolver,
 ) (net.Conn, proxyPhaseTrace, error) {
 	tunnelDest := hostPortForTargetURL(targetURL)
-	tunnel, err := dialProxyTunnel(ctx, proxyURL, tunnelDest, tlsSkipVerify, resolver)
+	tunnel, err := dialProxyTunnel(ctx, proxyURL, tunnelDest, proxyTLSSkipVerify, proxyAuthHeader, resolver)
 	trace := proxyPhaseTrace{phases: tunnel.phases, connectResp: tunnel.connectResp}
 	if err != nil {
 		return nil, trace, err
@@ -95,7 +99,7 @@ func setupProxyTLSConn(
 	}
 	tlsCfg := &tls.Config{
 		ServerName:         host,
-		InsecureSkipVerify: tlsSkipVerify,
+		InsecureSkipVerify: targetTLSSkipVerify,
 	}
 	tlsConn := tls.Client(tunnel.conn, tlsCfg)
 	tlsStart := time.Now()
@@ -249,12 +253,14 @@ func executeProxyHTTPExchange(
 	method string,
 	headers map[string]string,
 	requestBody io.Reader,
-	tlsSkipVerify bool,
+	proxyTLSSkipVerify bool,
+	targetTLSSkipVerify bool,
+	proxyAuthHeader string,
 	resolver *net.Resolver,
 ) proxyHTTPExchangeResult {
 	var result proxyHTTPExchangeResult
 
-	conn, trace, err := setupProxyHTTPConn(ctx, proxyURL, targetURL, tlsSkipVerify, resolver)
+	conn, trace, err := setupProxyHTTPConn(ctx, proxyURL, targetURL, proxyTLSSkipVerify, targetTLSSkipVerify, proxyAuthHeader, resolver)
 	result.phases = trace.phases
 	result.setupEnd = trace.setupEnd
 	result.connectResp = trace.connectResp
@@ -297,7 +303,7 @@ func executeProxyHTTPExchange(
 	// no CONNECT step that would carry it.
 	var writeFn func(io.Writer) error
 	if targetURL.Scheme == "http" {
-		setProxyAuthorization(req, proxyURL)
+		setProxyAuthorization(req, proxyAuthHeader)
 		writeFn = req.WriteProxy
 	} else {
 		writeFn = req.Write

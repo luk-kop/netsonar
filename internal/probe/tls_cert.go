@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"netsonar/internal/config"
-	"netsonar/internal/proxyurl"
 )
 
 // TLSCertProber probes TLS certificate expiry by performing a TLS handshake
@@ -40,8 +39,8 @@ func (p *TLSCertProber) Probe(ctx context.Context, target config.TargetConfig) P
 	}
 
 	resolver := resolverFor(target.DNSResolver)
-	if target.ProbeOpts.ProxyURL != "" {
-		return p.probeViaProxy(ctx, target.ProbeOpts.ProxyURL, addr, tlsCfg, resolver)
+	if target.ResolvedProxy != nil {
+		return p.probeViaProxy(ctx, target.ResolvedProxy, addr, tlsCfg, resolver)
 	}
 
 	return p.probeDirect(ctx, addr, tlsCfg, resolver)
@@ -108,17 +107,14 @@ func (p *TLSCertProber) probeDirect(ctx context.Context, addr string, tlsCfg *tl
 	return result
 }
 
-func (p *TLSCertProber) probeViaProxy(ctx context.Context, rawProxyURL, addr string, tlsCfg *tls.Config, resolver *net.Resolver) ProbeResult {
+func (p *TLSCertProber) probeViaProxy(ctx context.Context, proxyCfg *config.ResolvedProxyConfig, addr string, tlsCfg *tls.Config, resolver *net.Resolver) ProbeResult {
 	var result ProbeResult
 
-	proxyURL, err := proxyurl.Parse(rawProxyURL)
-	if err != nil {
-		result.Error = fmt.Sprintf("invalid proxy_url: %s", err.Error())
-		return result
-	}
+	proxyURL := mustProxyEndpoint("TLSCertProber", proxyCfg.Endpoint)
+	proxyAuthHeader, _ := proxyCfg.Credentials.BasicAuthHeader()
 
 	start := time.Now()
-	tunnel, err := dialProxyTunnel(ctx, proxyURL, addr, false, resolver)
+	tunnel, err := dialProxyTunnel(ctx, proxyURL, addr, proxyCfg.TLSSkipVerify, proxyAuthHeader, resolver)
 	if len(tunnel.phases) > 0 {
 		result.Phases = tunnel.phases
 	}
