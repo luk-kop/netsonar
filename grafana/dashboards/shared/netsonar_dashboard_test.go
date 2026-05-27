@@ -112,15 +112,15 @@ func TestNetsonarDashboardDurationPanelsUseMedianSeries(t *testing.T) {
 	}{
 		24: {
 			title:  "HTTP Duration median (5m) (Direct)",
-			median: `quantile_over_time(0.5, probe_duration_seconds{job=~"$job", probe_type="http", proxy_name=""}[5m]) unless (probe_timed_out{job=~"$job", probe_type="http", proxy_name=""} == 1)`,
+			median: `quantile_over_time(0.5, (probe_duration_seconds{job=~"$job", probe_type="http", proxy_name=""} and on(job, target_name, proxy_name) (probe_success{job=~"$job", probe_type="http", proxy_name=""} == 1) unless on(job, target_name, proxy_name) (probe_timed_out{job=~"$job", probe_type="http", proxy_name=""} == 1))[5m:])`,
 		},
 		78: {
 			title:  "HTTP Response Body Duration median (5m)",
-			median: `quantile_over_time(0.5, probe_duration_seconds{job=~"$job", probe_type="http_body"}[5m]) unless (probe_timed_out{job=~"$job", probe_type="http_body"} == 1)`,
+			median: `quantile_over_time(0.5, (probe_duration_seconds{job=~"$job", probe_type="http_body"} and on(job, target_name, proxy_name) (probe_success{job=~"$job", probe_type="http_body"} == 1) unless on(job, target_name, proxy_name) (probe_timed_out{job=~"$job", probe_type="http_body"} == 1))[5m:])`,
 		},
 		83: {
 			title:  "HTTP Duration median (5m) (Proxy)",
-			median: `quantile_over_time(0.5, probe_duration_seconds{job=~"$job", probe_type="http", proxy_name!=""}[5m]) unless (probe_timed_out{job=~"$job", probe_type="http", proxy_name!=""} == 1)`,
+			median: `quantile_over_time(0.5, (probe_duration_seconds{job=~"$job", probe_type="http", proxy_name!=""} and on(job, target_name, proxy_name) (probe_success{job=~"$job", probe_type="http", proxy_name!=""} == 1) unless on(job, target_name, proxy_name) (probe_timed_out{job=~"$job", probe_type="http", proxy_name!=""} == 1))[5m:])`,
 		},
 	}
 
@@ -152,30 +152,28 @@ func TestNetsonarDashboardCriticalAndTimedOutStatsAreSeparatePanels(t *testing.T
 	dash := loadDashboard(t)
 
 	critical := findPanel(t, dash, 5)
-	if critical.Title != "Critical Failures" || len(critical.Targets) != 1 {
-		t.Fatalf("panel 5 = %q with %d targets, want Critical Failures with one target", critical.Title, len(critical.Targets))
+	if critical.Title != "" || len(critical.Targets) != 1 {
+		t.Fatalf("panel 5 = %q with %d targets, want compact Critical stat with one target", critical.Title, len(critical.Targets))
 	}
-	assertTarget(t, critical.Targets[0], "A", `count(probe_success{job=~"$job", impact="critical"} == 0) OR on() vector(0)`, "Critical Failures")
+	assertTarget(t, critical.Targets[0], "A", `count(probe_success{job=~"$job", impact="critical"} == 0) OR on() vector(0)`, "Critical")
 
 	timedOut := findPanel(t, dash, 218)
-	if timedOut.Title != "Timed Out" || len(timedOut.Targets) != 1 {
-		t.Fatalf("panel 218 = %q with %d targets, want Timed Out with one target", timedOut.Title, len(timedOut.Targets))
+	if timedOut.Title != "" || len(timedOut.Targets) != 1 {
+		t.Fatalf("panel 218 = %q with %d targets, want compact Timed Out stat with one target", timedOut.Title, len(timedOut.Targets))
 	}
 	assertTarget(t, timedOut.Targets[0], "B", `count(probe_timed_out{job=~"$job"} == 1) OR on() vector(0)`, "Timed Out")
 
 	expectedGrid := map[int]gridPos{
-		1:   {H: 4, W: 6, X: 0, Y: 1},
-		2:   {H: 4, W: 6, X: 6, Y: 1},
-		3:   {H: 4, W: 6, X: 12, Y: 1},
-		4:   {H: 4, W: 6, X: 18, Y: 1},
-		5:   {H: 4, W: 5, X: 0, Y: 5},
-		218: {H: 4, W: 5, X: 5, Y: 5},
-		8:   {H: 4, W: 5, X: 10, Y: 5},
-		9:   {H: 4, W: 4, X: 15, Y: 5},
-		6:   {H: 4, W: 5, X: 19, Y: 5},
-		7:   {H: 14, W: 24, X: 0, Y: 9},
-		219: {H: 8, W: 8, X: 0, Y: 23},
-		45:  {H: 8, W: 16, X: 8, Y: 23},
+		1:   {H: 4, W: 3, X: 0, Y: 1},
+		3:   {H: 4, W: 3, X: 3, Y: 1},
+		5:   {H: 4, W: 3, X: 6, Y: 1},
+		218: {H: 4, W: 3, X: 9, Y: 1},
+		8:   {H: 4, W: 5, X: 12, Y: 1},
+		9:   {H: 4, W: 3, X: 17, Y: 1},
+		6:   {H: 4, W: 4, X: 20, Y: 1},
+		7:   {H: 14, W: 24, X: 0, Y: 5},
+		219: {H: 8, W: 8, X: 0, Y: 19},
+		45:  {H: 8, W: 16, X: 8, Y: 19},
 	}
 	for id, want := range expectedGrid {
 		panel := findPanel(t, dash, id)
@@ -184,10 +182,13 @@ func TestNetsonarDashboardCriticalAndTimedOutStatsAreSeparatePanels(t *testing.T
 		}
 	}
 
-	for id, title := range map[int]string{8: "Config", 9: "Config Age"} {
+	for id, legend := range map[int]string{8: "Config", 9: "Config Age"} {
 		panel := findPanel(t, dash, id)
-		if panel.Title != title || panel.Options.TextMode != "value" {
-			t.Fatalf("panel %d title/textMode = %q/%q, want %q/value", id, panel.Title, panel.Options.TextMode, title)
+		if panel.Title != "" || panel.Options.TextMode != "value_and_name" {
+			t.Fatalf("panel %d title/textMode = %q/%q, want compact %q stat", id, panel.Title, panel.Options.TextMode, legend)
+		}
+		if len(panel.Targets) != 1 || panel.Targets[0].LegendFormat != legend {
+			t.Fatalf("panel %d legend = %q, want %q", id, panel.Targets[0].LegendFormat, legend)
 		}
 	}
 }
@@ -282,14 +283,11 @@ func TestNetsonarStatusTableHidesDuplicateJoinedTagColumns(t *testing.T) {
 	if !excluded["Value #G"] {
 		t.Fatal("status table exposes raw proxy info value column Value #G")
 	}
-	if got := organize.Options.IndexByName["proxy_endpoint"]; got != 17 {
-		t.Fatalf("proxy_endpoint index = %d, want 17", got)
+	if !excluded["proxy_endpoint"] {
+		t.Fatal("status table exposes base proxy_endpoint column, want proxy registry panel to own endpoint detail")
 	}
-	if got := organize.Options.RenameByName["proxy_endpoint"]; got != "Proxy Endpoint" {
-		t.Fatalf("proxy_endpoint rename = %q, want Proxy Endpoint", got)
-	}
-	if got := organize.Options.IndexByName["target_type"]; got != 18 {
-		t.Fatalf("target_type index = %d, want 18", got)
+	if got := organize.Options.IndexByName["target_type"]; got != 17 {
+		t.Fatalf("target_type index = %d, want 17", got)
 	}
 	if got := organize.Options.RenameByName["target_type"]; got != "Target Type" {
 		t.Fatalf("target_type rename = %q, want Target Type", got)
@@ -390,12 +388,12 @@ func TestNetsonarDashboardHTTPBodySectionLayout(t *testing.T) {
 	dash := loadDashboard(t)
 
 	expected := map[int]gridPos{
-		217: {H: 8, W: 12, X: 0, Y: 114},
-		70:  {H: 8, W: 12, X: 12, Y: 114},
-		71:  {H: 8, W: 12, X: 0, Y: 122},
-		78:  {H: 8, W: 12, X: 12, Y: 122},
-		209: {H: 10, W: 24, X: 0, Y: 130},
-		210: {H: 8, W: 24, X: 0, Y: 140},
+		217: {H: 8, W: 12, X: 0, Y: 130},
+		70:  {H: 8, W: 12, X: 12, Y: 130},
+		71:  {H: 8, W: 12, X: 0, Y: 138},
+		78:  {H: 8, W: 12, X: 12, Y: 138},
+		209: {H: 10, W: 24, X: 0, Y: 146},
+		210: {H: 12, W: 24, X: 0, Y: 156},
 	}
 	for id, want := range expected {
 		panel := findPanel(t, dash, id)
@@ -476,8 +474,8 @@ func TestNetsonarHTTPDetailsProbeInfoAndFixedDurationBackgrounds(t *testing.T) {
 	if summary.Title != "Phase Summary - $target_name" || summary.Type != "table" {
 		t.Fatalf("panel 9 = %q/%q, want Phase Summary - $target_name/table", summary.Title, summary.Type)
 	}
-	if summary.GridPos != (gridPos{H: 8, W: 24, X: 0, Y: 28}) {
-		t.Fatalf("Phase Summary grid = %+v, want full-width bottom panel at y=28", summary.GridPos)
+	if summary.GridPos != (gridPos{H: 8, W: 24, X: 0, Y: 36}) {
+		t.Fatalf("Phase Summary grid = %+v, want full-width bottom panel at y=36", summary.GridPos)
 	}
 	organize := lastOrganize(t, summary)
 	for field, want := range map[string]int{"phase": 0, "Value #A": 1, "Value #B": 2, "Value #C": 3} {
@@ -493,9 +491,9 @@ func TestNetsonarHTTPDetailsProbeInfoAndFixedDurationBackgrounds(t *testing.T) {
 	if len(summary.Targets) != 3 {
 		t.Fatalf("Phase Summary targets = %d, want 3", len(summary.Targets))
 	}
-	assertTarget(t, summary.Targets[0], "A", `sum by (phase) (probe_phase_duration_seconds{job=~"$job", probe_type=~"http|http_body", target_name="$target_name"}) or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~"$job", probe_type=~"http|http_body", target_name="$target_name"}), "phase", "zz_TOTAL", "target_name", ".*")`, "")
-	assertTarget(t, summary.Targets[1], "B", `sum by (phase) (avg_over_time(probe_phase_duration_seconds{job=~"$job", probe_type=~"http|http_body", target_name="$target_name"}[$__range])) or label_replace(sum by (target_name) (avg_over_time(probe_phase_duration_seconds{job=~"$job", probe_type=~"http|http_body", target_name="$target_name"}[$__range])), "phase", "zz_TOTAL", "target_name", ".*")`, "")
-	assertTarget(t, summary.Targets[2], "C", `sum by (phase) (max_over_time(probe_phase_duration_seconds{job=~"$job", probe_type=~"http|http_body", target_name="$target_name"}[$__range])) or label_replace(sum by (target_name) (max_over_time(probe_phase_duration_seconds{job=~"$job", probe_type=~"http|http_body", target_name="$target_name"}[$__range])), "phase", "zz_TOTAL", "target_name", ".*")`, "")
+	assertTarget(t, summary.Targets[0], "A", `sum by (phase) (probe_phase_duration_seconds{job=~"$job", probe_type=~"http|http_body", target_name="$target_name"} unless on(job, target_name, proxy_name) (probe_timed_out{job=~"$job", probe_type=~"http|http_body", target_name="$target_name"} == 1)) or label_replace(sum by (target_name) (probe_phase_duration_seconds{job=~"$job", probe_type=~"http|http_body", target_name="$target_name"} unless on(job, target_name, proxy_name) (probe_timed_out{job=~"$job", probe_type=~"http|http_body", target_name="$target_name"} == 1)), "phase", "zz_TOTAL", "target_name", ".*")`, "")
+	assertTarget(t, summary.Targets[1], "B", `sum by (phase) (avg_over_time((probe_phase_duration_seconds{job=~"$job", probe_type=~"http|http_body", target_name="$target_name"} unless on(job, target_name, proxy_name) (probe_timed_out{job=~"$job", probe_type=~"http|http_body", target_name="$target_name"} == 1))[$__range:])) or label_replace(sum by (target_name) (avg_over_time((probe_phase_duration_seconds{job=~"$job", probe_type=~"http|http_body", target_name="$target_name"} unless on(job, target_name, proxy_name) (probe_timed_out{job=~"$job", probe_type=~"http|http_body", target_name="$target_name"} == 1))[$__range:])), "phase", "zz_TOTAL", "target_name", ".*")`, "")
+	assertTarget(t, summary.Targets[2], "C", `sum by (phase) (max_over_time((probe_phase_duration_seconds{job=~"$job", probe_type=~"http|http_body", target_name="$target_name"} unless on(job, target_name, proxy_name) (probe_timed_out{job=~"$job", probe_type=~"http|http_body", target_name="$target_name"} == 1))[$__range:])) or label_replace(sum by (target_name) (max_over_time((probe_phase_duration_seconds{job=~"$job", probe_type=~"http|http_body", target_name="$target_name"} unless on(job, target_name, proxy_name) (probe_timed_out{job=~"$job", probe_type=~"http|http_body", target_name="$target_name"} == 1))[$__range:])), "phase", "zz_TOTAL", "target_name", ".*")`, "")
 }
 
 func TestNetsonarDashboardTLSCertificatePhasePanels(t *testing.T) {
@@ -511,7 +509,7 @@ func TestNetsonarDashboardTLSCertificatePhasePanels(t *testing.T) {
 	if timing.Title != "TLS Phase Timing" || timing.Type != "timeseries" {
 		t.Fatalf("panel 208 = %q/%q, want TLS Phase Timing/timeseries", timing.Title, timing.Type)
 	}
-	assertTarget(t, timing.Targets[0], "A", `probe_phase_duration_seconds{job=~"$job", probe_type="tls_cert"}`, "{{target_name}} - {{proxy_name}} - {{phase}}")
+	assertTarget(t, timing.Targets[0], "A", `probe_phase_duration_seconds{job=~"$job", probe_type="tls_cert"} unless on(job, target_name, proxy_name) (probe_timed_out{job=~"$job", probe_type="tls_cert"} == 1)`, "{{target_name}} - {{proxy_name}} - {{phase}}")
 }
 
 func TestNetsonarDashboardProbeSectionsHavePhasePanels(t *testing.T) {
@@ -531,7 +529,7 @@ func TestNetsonarDashboardProbeSectionsHavePhasePanels(t *testing.T) {
 		206: {
 			title:  "HTTP Phase Timing (Direct)",
 			kind:   "timeseries",
-			expr:   `probe_phase_duration_seconds{job=~"$job", probe_type="http", proxy_name=""}`,
+			expr:   `probe_phase_duration_seconds{job=~"$job", probe_type="http", proxy_name=""} unless on(job, target_name, proxy_name) (probe_timed_out{job=~"$job", probe_type="http", proxy_name=""} == 1)`,
 			legend: "{{target_name}} - {{phase}}",
 		},
 		204: {
@@ -542,7 +540,7 @@ func TestNetsonarDashboardProbeSectionsHavePhasePanels(t *testing.T) {
 		205: {
 			title:  "HTTP Phase Timing (Proxy)",
 			kind:   "timeseries",
-			expr:   `probe_phase_duration_seconds{job=~"$job", probe_type="http", proxy_name!=""}`,
+			expr:   `probe_phase_duration_seconds{job=~"$job", probe_type="http", proxy_name!=""} unless on(job, target_name, proxy_name) (probe_timed_out{job=~"$job", probe_type="http", proxy_name!=""} == 1)`,
 			legend: "{{target_name}} - {{phase}}",
 		},
 		209: {
@@ -553,7 +551,7 @@ func TestNetsonarDashboardProbeSectionsHavePhasePanels(t *testing.T) {
 		210: {
 			title:  "HTTP Response Body Phase Timing",
 			kind:   "timeseries",
-			expr:   `probe_phase_duration_seconds{job=~"$job", probe_type="http_body"}`,
+			expr:   `probe_phase_duration_seconds{job=~"$job", probe_type="http_body"} unless on(job, target_name, proxy_name) (probe_timed_out{job=~"$job", probe_type="http_body"} == 1)`,
 			legend: "{{target_name}} - {{proxy_name}} - {{phase}}",
 		},
 		211: {
@@ -564,7 +562,7 @@ func TestNetsonarDashboardProbeSectionsHavePhasePanels(t *testing.T) {
 		77: {
 			title:  "Proxy CONNECT Phase Timing",
 			kind:   "timeseries",
-			expr:   `probe_phase_duration_seconds{job=~"$job", probe_type="proxy_connect"}`,
+			expr:   `probe_phase_duration_seconds{job=~"$job", probe_type="proxy_connect"} unless on(job, target_name) (probe_timed_out{job=~"$job", probe_type="proxy_connect"} == 1)`,
 			legend: "{{target_name}} — {{phase}}",
 		},
 		212: {
@@ -575,7 +573,7 @@ func TestNetsonarDashboardProbeSectionsHavePhasePanels(t *testing.T) {
 		213: {
 			title:  "TCP Phase Timing",
 			kind:   "timeseries",
-			expr:   `probe_phase_duration_seconds{job=~"$job", probe_type="tcp"}`,
+			expr:   `probe_phase_duration_seconds{job=~"$job", probe_type="tcp"} unless on(job, target_name) (probe_timed_out{job=~"$job", probe_type="tcp"} == 1)`,
 			legend: "{{target_name}} - {{phase}}",
 		},
 		207: {
@@ -586,7 +584,7 @@ func TestNetsonarDashboardProbeSectionsHavePhasePanels(t *testing.T) {
 		208: {
 			title:  "TLS Phase Timing",
 			kind:   "timeseries",
-			expr:   `probe_phase_duration_seconds{job=~"$job", probe_type="tls_cert"}`,
+			expr:   `probe_phase_duration_seconds{job=~"$job", probe_type="tls_cert"} unless on(job, target_name, proxy_name) (probe_timed_out{job=~"$job", probe_type="tls_cert"} == 1)`,
 			legend: "{{target_name}} - {{proxy_name}} - {{phase}}",
 		},
 	}
@@ -781,15 +779,15 @@ func TestNetsonarDashboardTCPPanelsUseCurrentScopeValues(t *testing.T) {
 	}{
 		10: {
 			title: "TCP Duration — Local",
-			expr:  `probe_duration_seconds{job=~"$job", probe_type="tcp", scope="local"} unless (probe_timed_out{job=~"$job", probe_type="tcp", scope="local"} == 1)`,
+			expr:  `probe_duration_seconds{job=~"$job", probe_type="tcp", scope="local"} unless on(job, target_name, scope) (probe_timed_out{job=~"$job", probe_type="tcp", scope="local"} == 1)`,
 		},
 		11: {
 			title: "TCP Duration — External",
-			expr:  `probe_duration_seconds{job=~"$job", probe_type="tcp", scope="external"} unless (probe_timed_out{job=~"$job", probe_type="tcp", scope="external"} == 1)`,
+			expr:  `probe_duration_seconds{job=~"$job", probe_type="tcp", scope="external"} unless on(job, target_name, scope) (probe_timed_out{job=~"$job", probe_type="tcp", scope="external"} == 1)`,
 		},
 		12: {
 			title: "TCP Duration — All Targets",
-			expr:  `probe_duration_seconds{job=~"$job", probe_type="tcp"} unless (probe_timed_out{job=~"$job", probe_type="tcp"} == 1)`,
+			expr:  `probe_duration_seconds{job=~"$job", probe_type="tcp"} unless on(job, target_name, scope) (probe_timed_out{job=~"$job", probe_type="tcp"} == 1)`,
 		},
 	}
 
@@ -955,22 +953,13 @@ func assertLatencyPanelStyle(t *testing.T, panel dashboardPanel) {
 	t.Helper()
 
 	custom := panel.FieldConfig.Defaults.Custom
-	if got := number(t, custom["axisSoftMax"]); got != 1.0 {
-		t.Fatalf("panel %d axisSoftMax = %v, want 1.0", panel.ID, got)
-	}
 	if got := nestedString(t, custom["scaleDistribution"], "type"); got != "linear" {
 		t.Fatalf("panel %d scaleDistribution.type = %q, want linear", panel.ID, got)
 	}
-	if got := nestedString(t, custom["thresholdsStyle"], "mode"); got != "off" {
-		t.Fatalf("panel %d thresholdsStyle.mode = %q, want off", panel.ID, got)
-	}
 
 	thresholds := panel.FieldConfig.Defaults.Thresholds
-	if thresholds.Mode != "absolute" || len(thresholds.Steps) != 2 {
-		t.Fatalf("panel %d thresholds = %+v, want two absolute steps", panel.ID, thresholds)
-	}
-	if thresholds.Steps[1].Color != "red" || thresholds.Steps[1].Value == nil || *thresholds.Steps[1].Value != 1.0 {
-		t.Fatalf("panel %d threshold step = %+v, want red at 1.0", panel.ID, thresholds.Steps[1])
+	if thresholds.Mode != "" || len(thresholds.Steps) != 0 {
+		t.Fatalf("panel %d thresholds = %+v, want no explicit threshold styling", panel.ID, thresholds)
 	}
 
 	if len(panel.FieldConfig.Overrides) != 0 {
@@ -988,16 +977,6 @@ func nestedString(t *testing.T, value any, key string) string {
 	got, ok := m[key].(string)
 	if !ok {
 		t.Fatalf("value[%q] = %v, want string", key, m[key])
-	}
-	return got
-}
-
-func number(t *testing.T, value any) float64 {
-	t.Helper()
-
-	got, ok := value.(float64)
-	if !ok {
-		t.Fatalf("value %v is %T, want number", value, value)
 	}
 	return got
 }
