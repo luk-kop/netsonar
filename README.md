@@ -58,8 +58,14 @@ The binary is written to `bin/netsonar`.
 
 | Target                          | Description                                                |
 |---------------------------------|------------------------------------------------------------|
+| `help`                          | Print available Make targets                               |
+| `all`                           | `fmt` + `vet` + `lint` + `test` + `build`                  |
+| `tidy`                          | Sync Go module dependencies                                |
+| `update-patch`                  | Update dependencies to latest patch versions               |
+| `update-minor`                  | Update dependencies to latest minor and patch versions     |
 | `build`                         | Static binary with `CGO_ENABLED=0` and version injection   |
 | `build-release`                 | Cross-compile and package release archives for Linux       |
+| `run`                           | Run CLI help with `go run`                                 |
 | `test`                          | Run all tests (`go test ./...`)                            |
 | `test-short`                    | Run tests in short mode (`go test -short ./...`)           |
 | `test-race`                     | Run tests with race detector                               |
@@ -68,7 +74,6 @@ The binary is written to `bin/netsonar`.
 | `fmt`                           | Format code with `gofmt -s -w`                             |
 | `vet`                           | Run `go vet`                                               |
 | `clean`                         | Remove `bin/` and `.cache/` directories                    |
-| `all`                           | `fmt` + `vet` + `lint` + `test` + `build`                  |
 | `lab-e2e`                       | Run end-to-end tests in Docker                             |
 | `lab-dev`                       | Start local observability stack (Prometheus + Grafana)     |
 | `lab-dev-internet`              | Start dev-stack with public Internet smoke targets         |
