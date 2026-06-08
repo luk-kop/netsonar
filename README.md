@@ -40,7 +40,7 @@ Supported probe types: `tcp`, `http`, `icmp`, `mtu`, `dns`, `tls_cert`,
 
 ## Build
 
-Requires Go 1.26.3+. For linting: [golangci-lint](https://golangci-lint.run/welcome/install/).
+Requires Go 1.26.4+. For linting: [golangci-lint](https://golangci-lint.run/welcome/install/).
 
 ```bash
 cd netsonar
