@@ -11,7 +11,7 @@ require (
 
 require (
 	github.com/leanovate/gopter v0.2.11
-	github.com/prometheus/client_model v0.6.2
+	github.com/prometheus/client_model v0.6.3
 	github.com/prometheus/common v0.70.1
 )
 
