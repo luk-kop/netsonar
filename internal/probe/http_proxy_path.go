@@ -322,7 +322,10 @@ func executeProxyHTTPExchange(
 
 	fbReader := &firstByteReader{r: conn}
 	reader := bufio.NewReader(fbReader)
-	resp, err := http.ReadResponse(reader, req)
+	// Ownership of resp.Body transfers to the caller via result.resp; the
+	// redirect loop and the final caller in http.go close it. bodyclose
+	// cannot follow that handoff through the struct field.
+	resp, err := http.ReadResponse(reader, req) //nolint:bodyclose
 	gotFirstByte := fbReader.firstByteTime
 	result.gotFirstByte = gotFirstByte
 	if err != nil {

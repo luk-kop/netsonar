@@ -6,6 +6,8 @@ PKG      := ./cmd/agent
 MODULE   := netsonar
 RELEASE_TMP := $(BINDIR)/release
 GO       := GOCACHE=$(CURDIR)/.cache/go-build go
+GOLANGCI_LINT := GOCACHE=$(CURDIR)/.cache/go-build GOLANGCI_LINT_CACHE=$(CURDIR)/.cache/golangci-lint golangci-lint
+GOVULNCHECK_VERSION ?= v1.7.0
 
 VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 VERSION_NO_V := $(VERSION:v%=%)
@@ -17,7 +19,7 @@ LDFLAGS  := -s -w \
 	-X 'main.revision=$(REVISION)' \
 	-X 'main.buildDate=$(BUILD_DATE)'
 
-.PHONY: help all tidy update-patch update-minor build build-release run test test-short test-race test-pbt lab-e2e lab-dev lab-dev-internet lab-dev-reload lab-dev-down lab-mv lab-mv-down lab-metrics-validation lab-metrics-validation-down lint fmt vet clean
+.PHONY: help all tidy update-patch update-minor build build-release run test test-short test-race test-pbt vulncheck lab-e2e lab-dev lab-dev-internet lab-dev-reload lab-dev-down lab-mv lab-mv-down lab-metrics-validation lab-metrics-validation-down lint fmt vet clean
 
 help:
 	@printf '%s\n' 'Available targets:'
@@ -32,6 +34,7 @@ help:
 	@printf '  %-29s %s\n' 'test-short' 'run tests in short mode'
 	@printf '  %-29s %s\n' 'test-race' 'run tests with the race detector'
 	@printf '  %-29s %s\n' 'test-pbt' 'run property-based tests only'
+	@printf '  %-29s %s\n' 'vulncheck' 'scan for reachable vulnerabilities'
 	@printf '  %-29s %s\n' 'lint' 'run golangci-lint'
 	@printf '  %-29s %s\n' 'fmt' 'format Go sources'
 	@printf '  %-29s %s\n' 'vet' 'run go vet'
@@ -125,8 +128,12 @@ lab-metrics-validation: lab-mv
 
 lab-metrics-validation-down: lab-mv-down
 
+# Reachability-aware vulnerability scan.
+vulncheck:
+	$(GO) run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
+
 lint:
-	golangci-lint run
+	$(GOLANGCI_LINT) run ./...
 
 fmt:
 	gofmt -s -w .
