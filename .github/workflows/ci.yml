@@ -2,14 +2,26 @@ name: CI
 
 on:
   push:
-    branches-ignore:
+    branches:
       - main
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - LICENSE
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - LICENSE
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   lint:

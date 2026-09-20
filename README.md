@@ -8,7 +8,6 @@
 
 [![CI](https://github.com/luk-kop/netsonar/actions/workflows/ci.yml/badge.svg)](https://github.com/luk-kop/netsonar/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/luk-kop/netsonar)](https://go.dev/)
-[![Go Report Card](https://goreportcard.com/badge/github.com/luk-kop/netsonar)](https://goreportcard.com/report/github.com/luk-kop/netsonar)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A purpose-built **Go** binary that probes a YAML-configured list of **network
