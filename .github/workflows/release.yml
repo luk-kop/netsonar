@@ -6,11 +6,7 @@ on:
       - "v*"
 
 permissions:
-  contents: write
-
-env:
-  GO_VERSION: "1.26.5"
-  GOLANGCI_LINT_VERSION: "v2.12.2"
+  contents: read
 
 jobs:
   lint:
@@ -20,7 +16,7 @@ jobs:
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
 
       - name: Format Check
         run: |
@@ -36,7 +32,7 @@ jobs:
       - name: Lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
-          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          version-file: .golangci-lint-version
 
       - name: Vet
         run: go vet ./...
@@ -48,7 +44,7 @@ jobs:
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
 
       - name: Test
         run: go test -v -short ./...
@@ -60,7 +56,7 @@ jobs:
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
 
       - name: Race Test
         run: go test -race -short ./...
@@ -73,7 +69,7 @@ jobs:
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
 
       - name: Integration Test
         run: go test -v -tags integration ./...
@@ -87,9 +83,23 @@ jobs:
       - name: Lab E2E
         run: make lab-e2e
 
+  vulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Scan for reachable vulnerabilities
+        run: make vulncheck
+
   release:
     runs-on: ubuntu-latest
-    needs: [lint, test, race-test, integration-test, lab-e2e]
+    needs: [lint, test, race-test, integration-test, lab-e2e, vulncheck]
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -97,7 +107,7 @@ jobs:
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
 
       - name: Build release binaries
         env:

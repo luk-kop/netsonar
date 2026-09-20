@@ -1,0 +1,61 @@
+version: "2"
+
+linters:
+  # Standard set: errcheck, govet, ineffassign, staticcheck, unused.
+  default: standard
+  enable:
+    # Security checks (weak crypto, file permissions, TLS settings, ...).
+    - gosec
+    # Correct error wrapping and errors.Is/As usage.
+    - errorlint
+    # Unclosed HTTP response bodies.
+    - bodyclose
+    # HTTP requests and listeners created without context.
+    - noctx
+  settings:
+    gosec:
+      excludes:
+        # G104 (unhandled errors) duplicates errcheck from the standard set.
+        - G104
+  exclusions:
+    rules:
+      # G402 (InsecureSkipVerify) flags the TLS probes. Skipping verification
+      # is a documented per-target probe option (tls_skip_verify); the value
+      # only ever comes from operator config, never from a hardcoded true.
+      - path: ^internal/probe/
+        text: G402
+        linters:
+          - gosec
+      # G404 (weak random) flags scheduler jitter. The jitter spreads probe
+      # start times to avoid thundering herds; it is not a security primitive.
+      - path: ^internal/scheduler/
+        text: G404
+        linters:
+          - gosec
+      # G304 (file inclusion via variable) flags the config loader reading
+      # the path the operator passed on the command line. Reading an
+      # operator-supplied config file is the function's entire purpose.
+      - path: ^internal/config/
+        text: G304
+        linters:
+          - gosec
+      # G115 (integer overflow on conversion) flags int -> int32 on a socket
+      # descriptor. unix.PollFd.Fd is int32 by definition and the value comes
+      # straight back from the kernel, so the conversion is bounded.
+      - path: ^internal/probe/mtu_backend_linux\.go$
+        text: G115
+        linters:
+          - gosec
+      # G306 (file permissions) flags the 0644 merged lab config written by
+      # configmerge. The file is mounted into docker-compose and must stay
+      # readable by the container user.
+      - path: ^tools/configmerge/
+        text: G306
+        linters:
+          - gosec
+      # Tests intentionally use fixed inputs, permissive file modes, and
+      # context-free helpers.
+      - path: _test\.go
+        linters:
+          - gosec
+          - noctx
