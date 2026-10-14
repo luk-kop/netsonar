@@ -12,6 +12,26 @@ import (
 	"netsonar/internal/config"
 )
 
+const (
+	MTUStateOK          = "ok"
+	MTUStateDegraded    = "degraded"
+	MTUStateUnreachable = "unreachable"
+	MTUStateError       = "error"
+
+	MTUDetailLargestSizeConfirmed = "largest_size_confirmed"
+	MTUDetailFragmentationNeeded  = "fragmentation_needed"
+	MTUDetailLargerSizesTimedOut  = "larger_sizes_timed_out"
+	MTUDetailBelowMinTested       = "below_min_tested"
+	MTUDetailAllSizesTimedOut     = "all_sizes_timed_out"
+	MTUDetailSanityCheckFailed    = "sanity_check_failed"
+	MTUDetailDestinationUnreach   = "destination_unreachable"
+	MTUDetailLocalMessageTooLarge = "local_message_too_large"
+	MTUDetailPermissionDenied     = "permission_denied"
+	MTUDetailResolveError         = "resolve_error"
+	MTUDetailInternalError        = "internal_error"
+	MTUDetailInconclusive         = "inconclusive"
+)
+
 // MTUProber detects the path MTU to a target by sending ICMP echo requests
 // with the Don't Fragment (DF) bit set, stepping down through configured
 // payload sizes until one succeeds.
