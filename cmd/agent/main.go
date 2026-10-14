@@ -112,6 +112,14 @@ func run() int {
 		close(srvErr)
 	}()
 
+	startup := startupSettings{
+		tagKeys:              tagKeys,
+		logFormat:            cfg.Agent.LogFormat,
+		listenAddr:           cfg.Agent.ListenAddr,
+		metricsPath:          cfg.Agent.MetricsPath,
+		enableRuntimeMetrics: cfg.Agent.EnableRuntimeMetrics,
+	}
+
 	// Signal handling: SIGHUP → reload, SIGTERM/SIGINT → graceful shutdown.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
@@ -122,7 +130,7 @@ func run() int {
 			switch sig {
 			case syscall.SIGHUP:
 				slog.Info("received SIGHUP, reloading configuration")
-				handleReload(ctx, *configPath, sched, exporter, tagKeys, cfg.Agent.LogFormat, cfg.Agent.ListenAddr, cfg.Agent.MetricsPath, cfg.Agent.EnableRuntimeMetrics)
+				handleReload(ctx, *configPath, sched, exporter, startup)
 
 			case syscall.SIGTERM, syscall.SIGINT:
 				slog.Info("received shutdown signal, initiating graceful shutdown", "signal", sig)
@@ -144,12 +152,21 @@ func run() int {
 	}
 }
 
+// startupSettings holds the effective settings that require a restart to change.
+type startupSettings struct {
+	tagKeys              []string
+	logFormat            string
+	listenAddr           string
+	metricsPath          string
+	enableRuntimeMetrics bool
+}
+
 // handleReload re-reads the configuration file and applies changes via
 // the scheduler's diff-based reload. If the new config is invalid or a
 // startup-only field changed (tag key set, log_format, listen_addr,
 // metrics_path, enable_runtime_metrics), the agent continues with the previous
 // configuration.
-func handleReload(ctx context.Context, configPath string, sched *scheduler.Scheduler, exporter *metrics.MetricsExporter, startupTagKeys []string, startupLogFormat, startupListenAddr, startupMetricsPath string, startupEnableRuntimeMetrics bool) {
+func handleReload(ctx context.Context, configPath string, sched *scheduler.Scheduler, exporter *metrics.MetricsExporter, startup startupSettings) {
 	newCfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		slog.Error("config reload failed, keeping previous configuration", "error", err)
@@ -158,37 +175,37 @@ func handleReload(ctx context.Context, configPath string, sched *scheduler.Sched
 
 	// Reject changes to startup-only fields that require a restart.
 	newTagKeys := config.CollectTagKeys(newCfg)
-	if !slices.Equal(startupTagKeys, newTagKeys) {
+	if !slices.Equal(startup.tagKeys, newTagKeys) {
 		slog.Error("config reload rejected: tag key set changed; restart required",
-			"old_tag_keys", startupTagKeys,
+			"old_tag_keys", startup.tagKeys,
 			"new_tag_keys", newTagKeys,
 		)
 		return
 	}
-	if newCfg.Agent.LogFormat != startupLogFormat {
+	if newCfg.Agent.LogFormat != startup.logFormat {
 		slog.Error("config reload rejected: log_format changed; restart required",
-			"old_log_format", startupLogFormat,
+			"old_log_format", startup.logFormat,
 			"new_log_format", newCfg.Agent.LogFormat,
 		)
 		return
 	}
-	if newCfg.Agent.ListenAddr != startupListenAddr {
+	if newCfg.Agent.ListenAddr != startup.listenAddr {
 		slog.Error("config reload rejected: listen_addr changed; restart required",
-			"old", startupListenAddr,
+			"old", startup.listenAddr,
 			"new", newCfg.Agent.ListenAddr,
 		)
 		return
 	}
-	if newCfg.Agent.MetricsPath != startupMetricsPath {
+	if newCfg.Agent.MetricsPath != startup.metricsPath {
 		slog.Error("config reload rejected: metrics_path changed; restart required",
-			"old", startupMetricsPath,
+			"old", startup.metricsPath,
 			"new", newCfg.Agent.MetricsPath,
 		)
 		return
 	}
-	if newCfg.Agent.EnableRuntimeMetrics != startupEnableRuntimeMetrics {
+	if newCfg.Agent.EnableRuntimeMetrics != startup.enableRuntimeMetrics {
 		slog.Error("config reload rejected: enable_runtime_metrics changed; restart required",
-			"old", startupEnableRuntimeMetrics,
+			"old", startup.enableRuntimeMetrics,
 			"new", newCfg.Agent.EnableRuntimeMetrics,
 		)
 		return

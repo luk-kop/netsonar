@@ -13,27 +13,7 @@ import (
 	"netsonar/internal/config"
 )
 
-const (
-	MTUStateOK          = "ok"
-	MTUStateDegraded    = "degraded"
-	MTUStateUnreachable = "unreachable"
-	MTUStateError       = "error"
-
-	MTUDetailLargestSizeConfirmed = "largest_size_confirmed"
-	MTUDetailFragmentationNeeded  = "fragmentation_needed"
-	MTUDetailLargerSizesTimedOut  = "larger_sizes_timed_out"
-	MTUDetailBelowMinTested       = "below_min_tested"
-	MTUDetailAllSizesTimedOut     = "all_sizes_timed_out"
-	MTUDetailSanityCheckFailed    = "sanity_check_failed"
-	MTUDetailDestinationUnreach   = "destination_unreachable"
-	MTUDetailLocalMessageTooLarge = "local_message_too_large"
-	MTUDetailPermissionDenied     = "permission_denied"
-	MTUDetailResolveError         = "resolve_error"
-	MTUDetailInternalError        = "internal_error"
-	MTUDetailInconclusive         = "inconclusive"
-
-	happyEyeballsFallbackDelay = 300 * time.Millisecond
-)
+const happyEyeballsFallbackDelay = 300 * time.Millisecond
 
 // Phase label values set in ProbeResult.Phases. Constants here are the
 // single source of truth: probers use them when recording timings and the
