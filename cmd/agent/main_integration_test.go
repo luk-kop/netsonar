@@ -534,7 +534,12 @@ func TestIntegration_ConfigReloadSIGHUP(t *testing.T) {
 	writeConfig([]map[string]interface{}{targetB})
 
 	// Simulate SIGHUP by calling handleReload (same code path as the signal handler).
-	handleReload(ctx, configPath, sched, exporter, tagKeys, "text", ":0", "/metrics", false)
+	handleReload(ctx, configPath, sched, exporter, startupSettings{
+		tagKeys:     tagKeys,
+		logFormat:   "text",
+		listenAddr:  ":0",
+		metricsPath: "/metrics",
+	})
 
 	// --- 7. Wait for the new probe to execute, then scrape again ---
 	time.Sleep(500 * time.Millisecond)
@@ -565,7 +570,12 @@ func TestIntegration_ConfigReloadSIGHUP(t *testing.T) {
 
 	// --- 9. Test reload with both targets (additive reload) ---
 	writeConfig([]map[string]interface{}{targetA, targetB})
-	handleReload(ctx, configPath, sched, exporter, tagKeys, "text", ":0", "/metrics", false)
+	handleReload(ctx, configPath, sched, exporter, startupSettings{
+		tagKeys:     tagKeys,
+		logFormat:   "text",
+		listenAddr:  ":0",
+		metricsPath: "/metrics",
+	})
 
 	time.Sleep(500 * time.Millisecond)
 
@@ -587,7 +597,12 @@ func TestIntegration_ConfigReloadSIGHUP(t *testing.T) {
 		t.Fatalf("failed to write invalid config: %v", err)
 	}
 
-	handleReload(ctx, configPath, sched, exporter, tagKeys, "text", ":0", "/metrics", false)
+	handleReload(ctx, configPath, sched, exporter, startupSettings{
+		tagKeys:     tagKeys,
+		logFormat:   "text",
+		listenAddr:  ":0",
+		metricsPath: "/metrics",
+	})
 
 	// Agent should still be running with the previous 2-target config.
 	time.Sleep(200 * time.Millisecond)
@@ -973,7 +988,12 @@ func TestIntegration_ConfigReloadLogLevel(t *testing.T) {
 
 	// --- 4. Rewrite config with log_level: debug and reload ---
 	writeConfig("debug")
-	handleReload(schedCtx, configPath, sched, exporter, tagKeys, "text", ":0", "/metrics", false)
+	handleReload(schedCtx, configPath, sched, exporter, startupSettings{
+		tagKeys:     tagKeys,
+		logFormat:   "text",
+		listenAddr:  ":0",
+		metricsPath: "/metrics",
+	})
 
 	if got := agentLogLevel.Level(); got != slog.LevelDebug {
 		t.Errorf("after reload to debug: level = %v, want debug", got)
@@ -984,7 +1004,12 @@ func TestIntegration_ConfigReloadLogLevel(t *testing.T) {
 
 	// --- 5. Reload to error and verify down-level transition ---
 	writeConfig("error")
-	handleReload(schedCtx, configPath, sched, exporter, tagKeys, "text", ":0", "/metrics", false)
+	handleReload(schedCtx, configPath, sched, exporter, startupSettings{
+		tagKeys:     tagKeys,
+		logFormat:   "text",
+		listenAddr:  ":0",
+		metricsPath: "/metrics",
+	})
 
 	if got := agentLogLevel.Level(); got != slog.LevelError {
 		t.Errorf("after reload to error: level = %v, want error", got)
@@ -1014,7 +1039,12 @@ targets:
 `), 0644); err != nil {
 		t.Fatalf("failed to write invalid config: %v", err)
 	}
-	handleReload(schedCtx, configPath, sched, exporter, tagKeys, "text", ":0", "/metrics", false)
+	handleReload(schedCtx, configPath, sched, exporter, startupSettings{
+		tagKeys:     tagKeys,
+		logFormat:   "text",
+		listenAddr:  ":0",
+		metricsPath: "/metrics",
+	})
 
 	// Rejected reload keeps previous level (error from step 5).
 	if got := agentLogLevel.Level(); got != slog.LevelError {
@@ -1040,7 +1070,12 @@ targets:
 `), 0644); err != nil {
 		t.Fatalf("failed to write log_format change config: %v", err)
 	}
-	handleReload(schedCtx, configPath, sched, exporter, tagKeys, "text", ":0", "/metrics", false)
+	handleReload(schedCtx, configPath, sched, exporter, startupSettings{
+		tagKeys:     tagKeys,
+		logFormat:   "text",
+		listenAddr:  ":0",
+		metricsPath: "/metrics",
+	})
 
 	if got := agentLogLevel.Level(); got != slog.LevelError {
 		t.Errorf("after rejected log_format reload: level = %v, want error (previous)", got)
@@ -1065,7 +1100,12 @@ targets:
 `), 0644); err != nil {
 		t.Fatalf("failed to write enable_runtime_metrics change config: %v", err)
 	}
-	handleReload(schedCtx, configPath, sched, exporter, tagKeys, "text", ":0", "/metrics", false)
+	handleReload(schedCtx, configPath, sched, exporter, startupSettings{
+		tagKeys:     tagKeys,
+		logFormat:   "text",
+		listenAddr:  ":0",
+		metricsPath: "/metrics",
+	})
 
 	if got := agentLogLevel.Level(); got != slog.LevelError {
 		t.Errorf("after rejected enable_runtime_metrics reload: level = %v, want error (previous)", got)
